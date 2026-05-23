@@ -1,0 +1,26 @@
+package io.github.dlachouette.teamcity.github.api
+
+data class PrInfo(
+    val number: Int,
+    val title: String,
+    val author: String,
+    val headRef: String,
+    val baseRef: String,
+    val headSha: String,
+    val draft: Boolean,
+    val state: String,
+)
+
+data class RepoCoords(val owner: String, val name: String) {
+    val slug: String get() = "$owner/$name"
+
+    companion object {
+        fun parse(slug: String): RepoCoords {
+            val parts = slug.split('/', limit = 2)
+            require(parts.size == 2 && parts[0].isNotEmpty() && parts[1].isNotEmpty()) {
+                "Invalid repository slug: '$slug', expected 'owner/name'"
+            }
+            return RepoCoords(parts[0], parts[1])
+        }
+    }
+}

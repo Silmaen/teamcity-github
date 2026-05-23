@@ -1,0 +1,13 @@
+services:
+  mvn:
+    image: maven:3.9.9-eclipse-temurin-17
+    user: "${USER_UID:-1000}:${USER_GID:-1000}"
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      HOME: /workspace/.cache/home
+      MAVEN_OPTS: "-Dmaven.repo.local=/workspace/.cache/m2 -Duser.home=/workspace/.cache/home"
+    init: true
+    tty: true
+    stdin_open: true

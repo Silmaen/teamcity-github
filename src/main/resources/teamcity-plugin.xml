@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<teamcity-plugin xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:noNamespaceSchemaLocation="urn:schemas-jetbrains-com:teamcity-plugin-v1-xml">
+    <info>
+        <name>teamcity-github-bridge</name>
+        <display-name>TeamCity GitHub Bridge</display-name>
+        <description>
+            Improves the TeamCity to GitHub integration:
+            detects PR draft state, retriggers builds on draft-to-ready
+            transitions, and exposes richer commit statuses.
+        </description>
+        <version>0.1.0-SNAPSHOT</version>
+        <vendor>
+            <name>dlachouette</name>
+            <url>https://github.com/dlachouette/teamcity-github</url>
+        </vendor>
+        <email>damien.lachouette@hexagon.com</email>
+        <min-build>222521</min-build>
+    </info>
+
+    <deployment use-separate-classloader="true"/>
+
+    <parameters>
+        <parameter name="tcgh.github.api.base">https://api.github.com</parameter>
+        <parameter name="tcgh.github.api.version">2022-11-28</parameter>
+        <parameter name="tcgh.prinfo.cache.ttl.seconds">60</parameter>
+        <parameter name="tcgh.webhook.path">/app/teamcity-github-bridge/webhook</parameter>
+    </parameters>
+</teamcity-plugin>

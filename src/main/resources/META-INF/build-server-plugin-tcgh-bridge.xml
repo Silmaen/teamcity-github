@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                           http://www.springframework.org/schema/beans/spring-beans.xsd"
+       default-autowire="constructor">
+
+    <bean class="io.github.dlachouette.teamcity.github.TeamCityGitHubBridgePlugin"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.config.WebhookConfig"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.api.GitHubClient"/>
+    <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener"/>
+    <bean class="io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.web.PluginWebhookController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.WebhookInfoController"/>
+
+</beans>

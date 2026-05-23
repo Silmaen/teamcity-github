@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# Wrapper to run all dev/build/packaging steps inside Docker.
+# Nothing is installed on the host: Maven and the JDK live in the
+# upstream image; the local Maven repository is kept under .cache/m2
+# so it is project-scoped.
+#
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "$0")")"
+
+mkdir -p .cache/m2 .cache/home
+
+export USER_UID="$(id -u)"
+export USER_GID="$(id -g)"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "error: docker is required on the host." >&2
+    exit 1
+fi
+
+DC=(docker compose)
+
+usage() {
+    cat <<EOF
+Usage: ./dev <command> [args]
+
+Build commands:
+  package          Run 'mvn clean package' (produces target/*.zip).
+  compile          Run 'mvn compile'.
+  test             Run 'mvn test'.
+  clean            Run 'mvn clean'.
+  mvn <args>       Pass-through to Maven (e.g. ./dev mvn dependency:tree).
+
+Dev shell:
+  shell            Open an interactive bash shell inside the container.
+
+Maintenance:
+  pull             Pull the latest Maven image.
+  reset-cache      Remove .cache/m2 to force a clean dependency download.
+  help             Show this help.
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    package)     "${DC[@]}" run --rm mvn mvn clean package "$@" ;;
+    compile)     "${DC[@]}" run --rm mvn mvn compile "$@" ;;
+    test)        "${DC[@]}" run --rm mvn mvn test "$@" ;;
+    clean)       "${DC[@]}" run --rm mvn mvn clean "$@" ;;
+    mvn)         "${DC[@]}" run --rm mvn mvn "$@" ;;
+    shell)       "${DC[@]}" run --rm --entrypoint bash mvn ;;
+    pull)        "${DC[@]}" pull ;;
+    reset-cache) rm -rf .cache/m2 && mkdir -p .cache/m2 ;;
+    help|-h|--help) usage ;;
+    *)
+        echo "error: unknown command '$cmd'" >&2
+        echo
+        usage
+        exit 2
+        ;;
+esac
