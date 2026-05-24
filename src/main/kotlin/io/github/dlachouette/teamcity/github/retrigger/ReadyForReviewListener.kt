@@ -3,6 +3,7 @@ package io.github.dlachouette.teamcity.github.retrigger
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
 import jetbrains.buildServer.serverSide.BuildPromotionEx
 import jetbrains.buildServer.serverSide.BuildTypeEx
 import jetbrains.buildServer.serverSide.ProjectManager
@@ -19,21 +20,29 @@ class ReadyForReviewListener(
         val branchName = "pull/${payload.prNumber}"
         val targets = findBuildTypesToRetrigger(payload.repo)
         if (targets.isEmpty()) {
-            LOG.info("No build types resolved for ${payload.repo.slug}")
+            LOG.info("No build types found for ${payload.repo.slug} - nothing to retrigger")
             return
         }
 
+        LOG.info("Retriggering ${targets.size} build type(s) for ${payload.repo.slug}#${payload.prNumber}")
         targets.forEach { bt ->
-            enqueue(
-                buildType = bt,
-                branchName = branchName,
-                comment = "Retriggered by teamcity-github-bridge after PR #${payload.prNumber} became ready for review",
-            )
+            try {
+                enqueue(
+                    buildType = bt,
+                    branchName = branchName,
+                    comment = "Retriggered by teamcity-github-bridge after PR #${payload.prNumber} became ready for review",
+                )
+            } catch (e: Exception) {
+                LOG.warn("Failed to enqueue ${bt.externalId} for PR #${payload.prNumber}: ${e.message}")
+            }
         }
     }
 
-    private fun findBuildTypesToRetrigger(repo: RepoCoords): List<BuildTypeEx> {
-        return emptyList()
+    internal fun findBuildTypesToRetrigger(repo: RepoCoords): List<BuildTypeEx> {
+        return projectManager.activeBuildTypes
+            .filter { it.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] == repo.slug }
+            .filter { it.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] == "true" }
+            .filterIsInstance<BuildTypeEx>()
     }
 
     private fun enqueue(buildType: BuildTypeEx, branchName: String, comment: String) {

@@ -5,21 +5,30 @@ integration (TeamCity 2026.1+):
 
 - detects PR draft state via the GitHub REST API
 - retriggers eligible builds when a PR transitions from draft to ready for review
-- ships a `BuildStartingFilter` that honors a per-buildType "ignore drafts" opt-in
-- exposes a webhook endpoint for `pull_request` events
+- ships a `StartBuildPrecondition` that honors a per-buildType "ignore drafts" opt-in
+- exposes a single App-level webhook endpoint with HMAC-SHA256 verification
+- surfaces the live webhook config at `/info` for copy-paste into GitHub
 
-See `doc/teamcity-plugin-knowledge-base.md` for the design rationale.
+**See [doc/usage.md](doc/usage.md) for the full operator guide
+(install, GitHub App setup, webhook config, troubleshooting, with
+mermaid diagrams).**
+
+The design rationale and the TeamCity 2026.1 internals behind it live
+in `doc/teamcity-plugin-knowledge-base.md` (French, transfer
+document).
 
 ## Build
 
-The whole toolchain (JDK 17 + Maven 3.9) runs in Docker. The only
+The whole toolchain (JDK 21 + Maven 3.9) runs in Docker. The only
 requirement on the host is a working `docker` (with the Compose plugin).
+TeamCity 2026.1 ships its API compiled for Java 21, so the matching
+JDK is required at compile and test time.
 
 ```bash
 ./dev package
 ```
 
-This invokes `mvn clean package` inside the `maven:3.9.9-eclipse-temurin-17`
+This invokes `mvn clean package` inside the `maven:3.9.9-eclipse-temurin-21`
 image and produces `target/teamcity-github-bridge-<version>.zip`.
 
 Other commands:

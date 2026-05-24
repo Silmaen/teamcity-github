@@ -10,6 +10,7 @@
     <bean class="io.github.dlachouette.teamcity.github.config.WebhookConfig"/>
 
     <bean class="io.github.dlachouette.teamcity.github.api.GitHubClient"/>
+    <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
     <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
 
     <bean class="io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener"/>

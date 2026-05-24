@@ -12,21 +12,29 @@ class PrInfoCache(
     private data class Entry(val info: PrInfo, val fetchedAtMs: Long)
 
     private val store = ConcurrentHashMap<Key, Entry>()
-    private val ttlMs: Long = 60_000L
 
-    fun get(repo: RepoCoords, number: Int, connectionId: String): PrInfo? {
+    var ttlMs: Long = DEFAULT_TTL_MS
+    var clock: () -> Long = { System.currentTimeMillis() }
+
+    fun get(repo: RepoCoords, number: Int, accessToken: String): PrInfo? {
         val key = Key(repo, number)
-        val now = System.currentTimeMillis()
+        val now = clock()
         val cached = store[key]
         if (cached != null && now - cached.fetchedAtMs < ttlMs) {
             return cached.info
         }
-        val fresh = gitHubClient.getPr(repo, number, connectionId) ?: return cached?.info
+        val fresh = gitHubClient.getPr(accessToken, repo, number) ?: return cached?.info
         store[key] = Entry(fresh, now)
         return fresh
     }
 
     fun invalidate(repo: RepoCoords, number: Int) {
         store.remove(Key(repo, number))
+    }
+
+    fun size(): Int = store.size
+
+    companion object {
+        const val DEFAULT_TTL_MS: Long = 60_000L
     }
 }
