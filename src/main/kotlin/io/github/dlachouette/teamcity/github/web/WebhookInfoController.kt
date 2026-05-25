@@ -1,6 +1,7 @@
 package io.github.dlachouette.teamcity.github.web
 
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
+import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -10,6 +11,7 @@ import javax.servlet.http.HttpServletResponse
 
 class WebhookInfoController(
     webManager: WebControllerManager,
+    authInterceptor: AuthorizationInterceptor,
     private val buildServer: SBuildServer,
     private val webhookConfig: WebhookConfig,
 ) : BaseController() {
@@ -17,13 +19,16 @@ class WebhookInfoController(
     init {
         webManager.registerController(INFO_PATH, this)
         webManager.registerController(INFO_PATH_MARKDOWN, this)
+        authInterceptor.addPathNotRequiringAuth(INFO_PATH)
+        authInterceptor.addPathNotRequiringAuth(INFO_PATH_MARKDOWN)
     }
 
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView? {
+        val scheme = resolvedScheme(request)
         val info = WebhookInfo(
-            payloadUrl = absoluteWebhookUrl(request),
+            payloadUrl = absoluteWebhookUrl(request, scheme),
             contentType = "application/json",
-            sslVerification = request.scheme == "https",
+            sslVerification = scheme == "https",
             recommendedEvents = WebhookEvents.RECOMMENDED,
             secretConfigured = webhookConfig.isSecretConfigured(),
             pluginVersion = buildServer.fullServerVersion,
@@ -47,17 +52,27 @@ class WebhookInfoController(
         }
     }
 
-    private fun absoluteWebhookUrl(request: HttpServletRequest): String {
-        val scheme = request.scheme
-        val host = request.serverName
-        val port = request.serverPort
-        val portPart = when {
-            scheme == "http" && port == 80 -> ""
-            scheme == "https" && port == 443 -> ""
-            else -> ":$port"
-        }
+    private fun resolvedScheme(request: HttpServletRequest): String {
+        val forwarded = request.getHeader("X-Forwarded-Proto")?.substringBefore(',')?.trim()
+        return forwarded?.lowercase()?.takeIf { it.isNotBlank() } ?: request.scheme
+    }
+
+    private fun absoluteWebhookUrl(request: HttpServletRequest, scheme: String): String {
         val ctx = request.contextPath.trimEnd('/')
-        return "$scheme://$host$portPart$ctx${PluginWebhookController.WEBHOOK_PATH}"
+        val hostHeader = request.getHeader("X-Forwarded-Host")?.substringBefore(',')?.trim()
+        val authority = if (!hostHeader.isNullOrBlank()) {
+            hostHeader
+        } else {
+            val name = request.serverName
+            val port = request.getHeader("X-Forwarded-Port")?.toIntOrNull() ?: request.serverPort
+            val portPart = when {
+                scheme == "http" && port == 80 -> ""
+                scheme == "https" && port == 443 -> ""
+                else -> ":$port"
+            }
+            "$name$portPart"
+        }
+        return "$scheme://$authority$ctx${PluginWebhookController.WEBHOOK_PATH}"
     }
 
     companion object {

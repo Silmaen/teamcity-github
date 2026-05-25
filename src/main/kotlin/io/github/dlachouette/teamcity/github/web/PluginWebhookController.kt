@@ -3,6 +3,7 @@ package io.github.dlachouette.teamcity.github.web
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
 import io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener
+import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.springframework.web.servlet.ModelAndView
@@ -11,13 +12,15 @@ import javax.servlet.http.HttpServletResponse
 
 class PluginWebhookController(
     webManager: WebControllerManager,
+    authInterceptor: AuthorizationInterceptor,
     private val webhookConfig: WebhookConfig,
     private val readyForReviewListener: ReadyForReviewListener,
 ) : BaseController() {
 
     init {
         webManager.registerController(WEBHOOK_PATH, this)
-        LOG.info("Registered webhook controller at $WEBHOOK_PATH")
+        authInterceptor.addPathNotRequiringAuth(WEBHOOK_PATH)
+        LOG.info("Registered webhook controller at $WEBHOOK_PATH (anonymous, HMAC verified)")
     }
 
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView? {

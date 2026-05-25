@@ -2,6 +2,7 @@ package io.github.dlachouette.teamcity.github.api
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.intellij.openapi.diagnostic.Logger
 import java.net.HttpURLConnection
 import java.net.URL
@@ -31,6 +32,42 @@ open class GitHubClient {
         } catch (e: Exception) {
             LOG.warn("Failed querying ${repo.slug}#$number: ${e.message}")
             null
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    open fun postCheckRun(
+        accessToken: String,
+        repo: RepoCoords,
+        request: CheckRunRequest,
+    ): Boolean {
+        val url = URL("$apiBase/repos/${repo.slug}/check-runs")
+        val body = encodeCheckRunPayload(request)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("X-GitHub-Api-Version", apiVersion)
+            setRequestProperty("Content-Type", "application/json")
+            connectTimeout = 5000
+            readTimeout = 10000
+            doOutput = true
+        }
+        return try {
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            // 201 Created on success per GitHub Check Runs API.
+            if (code in 200..299) {
+                true
+            } else {
+                val err = runCatching { conn.errorStream?.bufferedReader()?.readText() }.getOrNull().orEmpty()
+                LOG.warn("GitHub Check Run POST returned $code for ${repo.slug}@${request.headSha}: $err")
+                false
+            }
+        } catch (e: Exception) {
+            LOG.warn("Failed POST check-run for ${repo.slug}@${request.headSha}: ${e.message}")
+            false
         } finally {
             conn.disconnect()
         }
@@ -68,5 +105,36 @@ open class GitHubClient {
                 state = node.path("state").asText("open"),
             )
         }
+
+        // Public for testing — verifies we build the exact JSON shape GitHub expects.
+        fun encodeCheckRunPayload(request: CheckRunRequest): String {
+            val root: ObjectNode = MAPPER.createObjectNode()
+            root.put("name", request.name)
+            root.put("head_sha", request.headSha)
+            root.put("status", "completed")
+            root.put("conclusion", request.conclusion.apiValue)
+            val output: ObjectNode = root.putObject("output")
+            output.put("title", request.outputTitle)
+            output.put("summary", request.outputSummary)
+            return MAPPER.writeValueAsString(root)
+        }
     }
+}
+
+data class CheckRunRequest(
+    val name: String,
+    val headSha: String,
+    val conclusion: CheckRunConclusion,
+    val outputTitle: String,
+    val outputSummary: String,
+)
+
+enum class CheckRunConclusion(val apiValue: String) {
+    SUCCESS("success"),
+    FAILURE("failure"),
+    NEUTRAL("neutral"),
+    SKIPPED("skipped"),
+    CANCELLED("cancelled"),
+    TIMED_OUT("timed_out"),
+    ACTION_REQUIRED("action_required"),
 }
