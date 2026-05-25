@@ -5,803 +5,266 @@
 > history. File paths, SDK signatures, and design constraints are
 > spelled out below.
 >
-> **Scope**: three concrete gaps identified during the integration of
-> this plugin into the Owl project (`/data/sources/personnel/stack_owl/Owl`)
-> on 2026-05-25. The summary roadmap in
+> The summary roadmap in
 > [development.md#roadmap](development.md#roadmap) lists every planned
-> item; this file expands the three that came out of that integration
-> audit.
->
-> All three are **independently shippable** — pick any of the three and
-> ship it on its own branch.
+> item with one-line status; this file expands the items that need a
+> deeper design discussion.
 
-## Snapshot of the plugin (2026-05-25)
+## Status of the integration audit (2026-05-25 → 2026-05-25)
 
-What is already wired up — read this before opening a feature.
+A three-gap audit was performed when this plugin was first wired into
+the Owl project (`/data/sources/personnel/stack_owl/Owl`). The first
+two gaps shipped within the audit window; the third shipped partially.
+A new fourth gap was discovered in the process and is the **primary
+open item** below.
+
+| Audit gap | Shipped? | Component |
+|---|---|---|
+| #A1 — Tag held-in-queue draft builds | ✅ shipped | `enrich/PrPromotionTagger` |
+| #A2 — Branch display customisation | ✅ shipped | `web/BranchEnrichmentPageExtension` + `display/tcghBranchEnrichment.jsp` |
+| #A3 — Enriched commit status publisher | ⚠️ partial | `report/BuildStatusCheckRunPublisher` — covers opted-in PR builds only |
+| #A4 — Extend status publisher to cover main + opt-out PR builds | ❌ open | (this doc, section [Gap A4](#gap-a4)) |
+
+## Snapshot of the plugin (read this before opening a feature)
 
 | Component | Hook | Purpose |
 |---|---|---|
 | `DraftAwareBuildFilter` (`filter/`) | `StartBuildPrecondition.canStart` | Holds queued builds for draft PRs when `tcgh.ignoreDrafts=true`. |
 | `ReadyForReviewListener` (`retrigger/`) | called from `PluginWebhookController` | On `pull_request.ready_for_review` webhook, re-enqueues every opted-in build type. |
-| `PrBuildEnricher` (`enrich/`) | `BuildServerAdapter.buildStarted` | Once a build *starts*, sets `buildNumber = "<n> <headRef>"` and adds tag `draft`/`ready`. **Does not fire for held builds.** |
+| `PrPromotionTagger` (`enrich/`) | `BuildServerAdapter.buildTypeAddedToQueue` | Tags the `BuildPromotion` with `draft` or `ready` at enqueue time, so held builds also carry the marker. |
+| `PrBuildEnricher` (`enrich/`) | `BuildServerAdapter.buildStarted` | Once a build *starts*, sets `buildNumber = "<n> <headRef>"`. Tagging was moved out to `PrPromotionTagger`. |
 | `DraftCheckRunReporter` (`report/`) | `BuildServerAdapter.buildTypeAddedToQueue(SQueuedBuild)` | When a held draft build hits the queue, publishes a GitHub Check Run with `conclusion=skipped`. Dedup keyed on `(headSha, buildTypeExternalId)`. |
-| `GitHubClient` (`api/`) | — | REST client: `getPr()`, `postCheckRun()`. Tokens are opaque strings; no length checks. |
+| `BuildStatusCheckRunPublisher` (`report/`) | `buildStarted` + `buildFinished` | Publishes Check Runs for the normal lifecycle of an **opted-in PR build** (`tcgh.ignoreDrafts=="true"` and ref starts with `pull/`). Carries the agent's `buildStatus text=...` into the `output.summary`. |
+| `BranchEnrichmentPageExtension` (`web/`) | `PlaceId` injection of `tcghBranchEnrichment.jsp` | Renders a `[draft]`/`[ready]` pill next to PR branches in TC build lists. |
+| `GitHubClient` (`api/`) | — | REST client: `getPr()`, `postCheckRun()` (handles `status` + nullable `conclusion`). Tokens are opaque strings. |
 | `PrInfoCache` (`cache/`) | — | 60s TTL in-memory cache keyed on `(repo, prNumber)`. Falls back to last known value on fetch failure. |
 | `TokenResolver` (`api/`) | — | Resolves a GitHub App installation token via `OAuthConnectionsManager` + `OAuthTokensStorage`. Connection ID format is `CID_<hash>`. |
+| `RecentEventsLog` + `AdminConsolePage` (`web/`) | — | In-memory ring buffer of recent plugin events, exposed via the admin console JSP. |
 
 Three buildType parameters drive opt-in (see `DraftAwareBuildFilter.PARAM_*`):
 
-- `tcgh.ignoreDrafts` (`"true"` to enable suppression)
+- `tcgh.ignoreDrafts` (`"true"` to enable suppression + Check Run publishing)
 - `tcgh.github.repo` (e.g. `Silmaen/Owl`)
 - `tcgh.github.connectionId` (e.g. `CID_392f0141078df64b20e1bb01ada5697f`)
 
-What's **not** done (intentionally, until one of the items below ships):
+What is **not yet** done — and why this document still exists:
 
-- Bundled `commitStatusPublisher` is left untouched — it still posts the hardcoded `"TeamCity build finished"` description on commit statuses.
-- Branch display in TC build lists is still `pull/N` — no custom `BuildBranchInfoProvider`.
-- Held draft builds appear in the queue without any visual marker.
+- The bundled `commitStatusPublisher` is left in place by every
+  consuming project (Owl included). It still posts the hardcoded
+  `"TeamCity build finished"` description for **every** build, which
+  causes **duplicate rows** on the GitHub PR UI for opted-in PR builds
+  (both the bundled Commit Status and the plugin's Check Run appear).
+- Removing the bundled publisher consumer-side is a footgun: see the
+  detailed analysis below.
 
 ---
 
-## Gap 1 — Tag held-in-queue draft builds (small, ship first)
+## Gap A4 — Extend BuildStatusCheckRunPublisher to cover main + opt-out PR builds  {#gap-a4}
 
 ### Problem statement
 
-When a draft PR triggers a build on an opted-in buildType (e.g.
-`tcgh.ignoreDrafts=true`), `DraftAwareBuildFilter` holds the build in
-queue indefinitely (until `pull_request.ready_for_review` fires). In
-the TeamCity queue UI, that build appears identical to a build that's
-merely waiting for an agent — no `draft` tag, no enriched build
-number. The plugin user cannot tell at a glance which queued builds
-are "deliberately held drafts" vs "agent-starved".
+`BuildStatusCheckRunPublisher` short-circuits when the build's
+parameter `tcgh.ignoreDrafts` is not `"true"` and when the branch ref
+does not start with `pull/`:
 
-### Current behavior — exactly what fires
+```kotlin
+// BuildStatusCheckRunPublisher.kt:96–102
+private fun resolveContext(build: SBuild): PrBuildContext? {
+    val branchName = build.branch?.name ?: return null
+    if (!branchName.startsWith("pull/")) return null              // (1) skips main
+    val buildType = build.buildType ?: return null
+    if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return null  // (2) skips opt-out
+    ...
+}
+```
 
-1. PR opened as draft → TC enqueues a build per opted-in buildType.
-2. `DraftCheckRunReporter.buildTypeAddedToQueue(SQueuedBuild)` fires once → posts Check Run `skipped` to GitHub. ✅ User-facing on GitHub side.
-3. `DraftAwareBuildFilter.canStart()` is polled repeatedly → returns `SimpleWaitReason("PR #N is draft …")`. Build never starts.
-4. `PrBuildEnricher.buildStarted(SRunningBuild)` is **never called** because the build never transitions to running.
-5. **Consequence**: queue UI shows `pull/N` with no tag. The TC user sees only the wait-reason tooltip on hover, which is easy to miss.
+Concrete consequences for a consumer project (Owl is the worked
+example below):
+
+| Build context | Plugin Check Run | Bundled Commit Status | GitHub PR view |
+|---|---|---|---|
+| Build on `main` (post-merge) | ❌ doesn't fire (filter (1)) | ✅ fires | only the bundled commit status — fine in isolation |
+| PR build, `tcgh.ignoreDrafts=true` (default opt-in) | ✅ fires | ✅ fires | **duplicate row** per buildType — the user-facing problem |
+| PR build, `tcgh.ignoreDrafts=false` (draft-friendly subset: e.g. Linux x64 Clang, Sanitizer Address) | ❌ doesn't fire (filter (2)) | ✅ fires | only the bundled commit status |
+| BuildType with no `tcgh.*` params at all (e.g. CodeStyle in Owl) | ❌ doesn't fire | ✅ fires | only the bundled commit status |
+
+The duplicate row in the second case is the immediate UX issue, but
+the deeper problem is that **a consumer cannot retire the bundled
+publisher** without losing coverage on the other three rows. The
+plugin doc currently lists this as an explicit choice:
+
+```
+| Keep both publishers (informational fallback) | Update branch protection ... |
+| Single source of truth | Disable the bundled publisher per buildType ... |
+```
+
+Neither is satisfying:
+
+- "Keep both" leaves the duplicate row visible. Branch protection
+  configuration is a manual GitHub-side fix that does nothing for the
+  visual noise.
+- "Disable bundled per buildType" cannot be done from Kotlin DSL — the
+  bundled `commitStatusPublisher` is template-level and `disableSettings`
+  by id only works if the consumer knows the id (`BUILD_EXT_7` in
+  Owl's case). Even then, you'd be disabling it on every PR opt-in
+  buildType *and* losing main coverage, since the plugin doesn't
+  publish for main today.
 
 ### Root cause
 
-`PrBuildEnricher` is hooked on `buildStarted`, which is the wrong event
-for held builds. The enrichment data (PR number, draft state, source
-branch) is already known at enqueue time and can be applied to the
-`BuildPromotion` instead of waiting for a `SRunningBuild`.
-
-### SDK signatures (verified via `javap` on `server-openapi-2026.1.jar`)
-
-```
-public interface jetbrains.buildServer.serverSide.BuildPromotion {
-  public abstract java.util.List<java.lang.String> getTags();
-  public abstract void setTags(java.util.List<java.lang.String>);
-  public abstract jetbrains.buildServer.serverSide.SBuildType getBuildType();
-  public abstract jetbrains.buildServer.serverSide.Branch getBranch();
-  public abstract java.util.List<jetbrains.buildServer.serverSide.BuildRevision> getRevisions();
-}
-
-public interface jetbrains.buildServer.serverSide.SQueuedBuild
-    extends jetbrains.buildServer.serverSide.BuildPromotionOwner, ... {
-  // BuildPromotionOwner.getBuildPromotion() returns BuildPromotion (already used by DraftCheckRunReporter).
-}
-```
-
-`BuildPromotion.setTags(List<String>)` **replaces** the tag list, like
-`SBuild.setTags`. Read existing tags first and merge.
-
-There is also `BuildPromotion.setTagDatas(Collection<TagData>)` if you
-need user-attributed tags, but for this gap the plain `setTags` is
-enough.
+`BuildStatusCheckRunPublisher` was scoped to "the same population
+DraftAwareBuildFilter manages" because the opt-in token was reused.
+That decision is the bottleneck. A wider publisher could replace the
+bundled one entirely.
 
 ### Proposed design
 
-Move the **tagging** out of `PrBuildEnricher` and into a new
-`PrPromotionTagger` (or extend `DraftCheckRunReporter`) that fires on
-`buildTypeAddedToQueue`. Keep `PrBuildEnricher` as-is for the
-**buildNumber** enrichment (which depends on the build actually
-starting — and is already correct for the cases where the build runs).
+Decouple the **draft-suppression opt-in** (`tcgh.ignoreDrafts`) from
+the **publisher opt-in**. Two options:
 
-Pseudo-code for the extension (drop it into `report/` or a new
-`enrich/PrPromotionTagger.kt`):
+**Option 1 — Implicit: just remove the two guards.**
+
+Make `BuildStatusCheckRunPublisher` fire whenever the buildType
+carries `tcgh.github.repo` + `tcgh.github.connectionId` (regardless of
+`ignoreDrafts` value, and regardless of ref). Effects:
+
+- All builds with the repo+connection params get a Check Run.
+  Draft-friendly buildTypes (e.g. Owl's Linux x64 Clang on PR) now
+  also get one.
+- Main branch builds get a Check Run. But Check Runs are scoped to a
+  commit, so this means every main commit gets a per-buildType row in
+  the **GitHub commit's checks** view (visible from the commit page,
+  not the PR page). That's actually what users expect from CI on main.
+
+Pros: simplest implementation, zero new parameters.
+Cons: changes existing semantics of `tcgh.ignoreDrafts` slightly —
+some consumers may rely on it to gate publishing too. Should be
+documented as a breaking change in CHANGELOG.
+
+**Option 2 — Explicit: add a fourth parameter.**
+
+Introduce `tcgh.checkRuns.publish` (default `"true"` when the other
+two repo+connection params are set). Treat it as a kill switch.
+`BuildStatusCheckRunPublisher` checks repo + connection + this new
+param; `DraftAwareBuildFilter` keeps using `ignoreDrafts`. The two
+opt-ins become orthogonal.
+
+Pros: backward compatible, lets consumers opt out cleanly.
+Cons: more parameters to set; one more thing to document.
+
+**Recommendation**: ship Option 1 first (simpler, the breaking change
+is contained — the only behavioural difference is "more Check Runs are
+published than before, which is what most consumers want"). Document
+prominently in CHANGELOG that consumers depending on the old gating
+should pre-emptively unset `tcgh.github.repo` on buildTypes that
+should not publish.
+
+### Code changes (Option 1 sketch)
 
 ```kotlin
-class PrPromotionTagger(
-    buildServer: SBuildServer,
-    private val tokenResolver: TokenResolver,
-    private val prInfoCache: PrInfoCache,
-) : BuildServerAdapter() {
-    init { buildServer.addListener(this) }
+// BuildStatusCheckRunPublisher.kt
+private fun resolveContext(build: SBuild): PrBuildContext? {
+    val buildType = build.buildType ?: return null
+    val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return null
+    val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return null
 
-    override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
-        val promotion = queuedBuild.buildPromotion
-        val branchName = promotion.branch?.name ?: return
-        if (!branchName.startsWith("pull/")) return
-        val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
-        val buildType = promotion.buildType ?: return
+    val headSha = build.revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
+    val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return null
 
-        val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
-        val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
-        val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, token) ?: return
-
-        val tag = if (pr.draft) "draft" else "ready"
-        val current = promotion.tags
-        if (current.contains(tag)) return
-        promotion.setTags(current + tag)
-    }
+    return PrBuildContext(
+        repo = RepoCoords.parse(repoSlug),
+        buildType = buildType,
+        headSha = headSha,
+        accessToken = token,
+    )
 }
 ```
 
-Once this is in:
+That's literally it — drop lines 96 (`pull/` filter) and 99
+(`ignoreDrafts` filter).
 
-- `PrBuildEnricher.buildStarted` no longer needs to tag (the tag is
-  already on the promotion when the build starts → propagates to
-  `SBuild.getTags()` for free). Reduce `PrBuildEnricher` to just
-  `setBuildNumber`. **Verify the inheritance**: an `SBuild`'s `getTags`
-  may or may not surface promotion tags automatically — confirm before
-  deleting code from the enricher. If it does not, leave the enricher
-  tagging path as a fallback.
+`DraftCheckRunReporter` keeps its `ignoreDrafts == "true"` guard (it
+makes sense there — that reporter is *about* held drafts). Only the
+status publisher widens.
 
-### Alternatives considered
+### Tests to add / update
 
-- **Tag from `DraftAwareBuildFilter.canStart`**: rejected — the
-  precondition is polled repeatedly and the call is performance-
-  sensitive (runs inside the queue scheduler loop).
-- **Tag from `buildPromotionSettingsFinalized`**: would work but fires
-  before the build is in the queue UI, so the user might not yet have
-  a chance to see the tag matter. `buildTypeAddedToQueue` is more
-  natural.
+- New test case in `BuildStatusCheckRunPublisherTest`: pure-helper
+  variant of `resolveContext` should return a non-null context for
+  `branch=main` and for `ignoreDrafts=false`, given the two other
+  params are set.
+- Document the new semantics in `configuration.md` (the
+  "Check Run publisher coexistence" table needs an extra row).
+- Verify on a real TC instance: a build on main produces a Check Run;
+  Owl's `Linux x64 Clang` (opt-out) on PR also produces a Check Run.
 
-### Test plan
+### Then: retire the bundled publisher consumer-side
 
-Reuse the stub pattern from `PrInfoCacheTest`:
+Once Option 1 lands, consumers (Owl, others) can safely remove the
+bundled `commitStatusPublisher` from their template's `features { … }`
+block. Trade-off they should know:
 
-- Pure helper `computeTag(branchName, isDraft): String?` — unit-test 4
-  cases (pull/, main, draft true, draft false).
-- Integration verification on a real TC instance: queue a draft PR
-  build, check the queue UI shows the tag; mark the PR ready, check
-  the new build comes up with `ready` instead.
+- ✅ One Check Run per buildType per build → clean GitHub UI.
+- ⚠️ Required Checks on GitHub branch protection must be reconfigured
+  to use the Check Run names (`TeamCity / <buildType.fullName>`)
+  rather than the legacy commit status contexts.
+
+Owl's wiring lives in:
+
+```
+/data/sources/personnel/stack_owl/Owl/.teamcity/_Self/buildTypes/GlobalBuild.kt
+/data/sources/personnel/stack_owl/Owl/.teamcity/_Self/buildTypes/CodeStylingCheck.kt
+```
+
+Look for `commitStatusPublisher { id = "BUILD_EXT_7" }` and
+`id = "BUILD_EXT_3"`. After this gap closes, those blocks become
+candidates for deletion (or `disableSettings(...)` on inheritors).
 
 ### Risks / edge cases
 
-- A build re-enqueued by `ReadyForReviewListener` will have the same
-  promotion id? No — `BuildCustomizer.createPromotion()` makes a new
-  promotion. So new event → new tag computed from current draft state.
-  ✅ correct by construction.
-- Concurrent enqueues of the same PR: the tag list `setTags` call is
-  not atomic with the read; but tags are eventually-consistent and a
-  duplicate-add is a no-op thanks to `current.contains(tag)`.
+- **`SBuild.revisions` empty for personal builds**: already handled
+  via `return null` on blank SHA. Personal builds simply skip
+  publishing — fine.
+- **Check Run rate limits**: GitHub's REST limit is 5000 req/hour for
+  Apps. The cache + dedup already in place handle the common case.
+  Worth verifying with a real run on a busy TC.
+- **GitHub Enterprise**: `tcgh.github.api.base` already overridable
+  via internal property. Check Runs API path is identical (`/repos/.../check-runs`).
+- **`details_url`**: the request already supports a `detailsUrl` field
+  (added in the v0.5.0 plugin upgrade). Pointing it at TC's build page
+  would let GitHub deep-link back. Out of scope for this gap but
+  trivial to layer on top — pass `${build.buildType.url}` / similar.
 
 ### Effort
 
-Small. Approximately 80 lines including a unit test.
-Files touched:
+Small. The actual code change is ~10 lines. Most of the work is
+testing + documentation + verifying that nothing in consumer projects
+breaks.
+
+Files touched (expected):
 
 ```
-src/main/kotlin/.../enrich/PrPromotionTagger.kt        (new)
-src/test/kotlin/.../enrich/PrPromotionTaggerTest.kt    (new)
-src/main/kotlin/.../enrich/PrBuildEnricher.kt          (optionally trim tagging logic)
-src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml  (+1 bean)
+src/main/kotlin/.../report/BuildStatusCheckRunPublisher.kt   (drop two guards)
+src/test/kotlin/.../report/BuildStatusCheckRunPublisherTest.kt (add cases)
+doc/configuration.md                                          (update coexistence table)
+CHANGELOG.md                                                  (note the widening of the publisher)
 ```
 
 ---
 
-## Gap 2 — Branch display customization in TeamCity build lists
-
-> **SDK spike result (2026-05-25):** ❌ no public extension point in
-> TC 2026.1.
->
-> Checked classes that would have done it server-side:
-> `BuildBranchInfoProvider`, `BranchDisplayNameProvider`,
-> `BuildBranchUiInfoProvider`, `PrBranchInfoProvider`. None of them
-> exist in the 2026.1 jars. `Branch.getDisplayName()` is read-only on
-> `jetbrains.buildServer.serverSide.Branch` and `BranchEx` adds no
-> mutator. `BuildPromotion.setDesiredBranchName` exists but rewrites
-> the actual ref, not the display string.
->
-> **Partial mitigation shipped in v0.5.0:**
-> `BranchEnrichmentPageExtension` injects a CSS+JS fragment in
-> `ALL_PAGES_FOOTER_PLUGIN_CONTAINER` that re-styles the
-> `draft`/`ready` tags placed by `PrPromotionTagger` (Gap 1) into
-> coloured pills. Source branch is **not** rendered into the column;
-> users see it through `PrBuildEnricher` which sets
-> `buildNumber = "<n> <headRef>"` (visible in the Build column,
-> adjacent to the Branch column).
->
-> **Full Gap 2 stays open** until JetBrains ships a public
-> `BranchDisplayNameProvider` SPI (track the
-> [TC issue tracker](https://youtrack.jetbrains.com/issues/TW)) or a
-> stable JSON endpoint listing buildPromotion -> branch metadata that
-> a client-side enrichment can consume without per-row API calls.
-
-
-### Problem statement
-
-In every TC build-list view (project home, build configuration page,
-queue, agent page), the **Branch** column for a PR build shows the
-literal git ref captured by the VCS root branchSpec — typically
-`pull/190` or `pull/190/head`. This number is the PR number, which is
-fine, but it loses two pieces of information that are immediately
-relevant to a reviewer:
-
-1. The **source branch name** (e.g. `feature/raycasting-walls`).
-2. The **draft / ready** state of the PR.
-
-In a feature branch column, a row reading
-
-```
-#42  pull/190
-```
-
-would ideally read
-
-```
-#42  pull/190  feature/raycasting-walls  [draft]
-```
-
-### Current TC limitations (verified against the SDK)
-
-TeamCity 2026.1's VCS root branchSpec syntax allows a single capture
-group:
-
-```
-+:refs/heads/(%owl_git_branch%)     → captures "main"
-+:refs/(pull/*)/head                → captures "pull/190"
-```
-
-The captured string is what the Branch column shows. There is **no**
-way to compute it from PR metadata via DSL — the branchSpec sees only
-the ref string.
-
-The mechanism the bundled bundled-but-now-orphaned `Nicologies/PrExtras`
-plugin used was a `BuildBranchInfoProvider` extension. Its repo went
-read-only ~7 years ago and the source no longer compiles against
-modern TC. This plugin is the place to implement an equivalent.
-
-### SDK signatures to verify
-
-Probable extension point — **needs `javap` confirmation before
-implementing**:
-
-```
-jetbrains.buildServer.serverSide.BuildBranchInfoProvider
-  (find via:  jar tf server-openapi-2026.1.jar | grep -i BranchInfo)
-```
-
-Adjacent classes worth probing:
-
-```
-jetbrains.buildServer.serverSide.Branch
-jetbrains.buildServer.serverSide.BuildPromotion.getBranch()
-jetbrains.buildServer.web.openapi.BuildBranchUiInfoProvider   (UI side)
-jetbrains.buildServer.serverSide.BranchEx
-```
-
-Run from `./dev shell`:
-
-```bash
-jar tf '/workspace/.cache/m2/org/jetbrains/teamcity/server-openapi/2026.1/server-openapi-2026.1.jar' | grep -iE 'Branch(Info|Display|UiInfo)'
-javap -cp '/workspace/.cache/m2/org/jetbrains/teamcity/server-openapi/2026.1/server-openapi-2026.1.jar' -p jetbrains.buildServer.serverSide.BuildBranchInfoProvider
-```
-
-If `BuildBranchInfoProvider` is no longer on the classpath in 2026.1,
-look for `BranchDisplayNameProvider`, or surface the source branch via
-a custom `PageExtension` that renders into the branch column from
-client-side JS — uglier but doable.
-
-### Proposed design
-
-1. Implement a server-side extension that, given a `BuildPromotion` or
-   `Branch`, looks up the PR (already cached via `PrInfoCache`) and
-   returns an enriched display name.
-2. Fallback to the raw branchSpec capture when:
-   - the branch is not `pull/N`,
-   - the PR is not findable in cache or via API,
-   - the `tcgh.*` parameters are not present on the buildType.
-
-The cache is already populated by `DraftAwareBuildFilter` /
-`DraftCheckRunReporter` for opted-in buildTypes, so the display
-provider would just read from it (no extra API calls in the common
-case).
-
-Display format suggestion (configurable later if needed):
-
-```
-pull/190  feature/raycasting-walls
-```
-
-with the literal string `[draft]` appended for draft PRs. Avoid using
-icons in this column — TC's UI does not render markdown / HTML here.
-
-### Alternatives considered
-
-- **Custom DSL parameter set per build** that prefixes the build name
-  with the source branch: rejected, mixes build number and branch into
-  the same UI cell.
-- **Set the build comment via `setBuildComment(User, String)`**:
-  doesn't help — comments are in a different UI surface.
-- **Override `BuildPromotion.getBranchName()`**: not API.
-
-### Test plan
-
-- Unit-test the **display string formatter** (pure function).
-- End-to-end on a real TC instance: open a draft PR, confirm the
-  Branch column reads `pull/N  <source-branch>  [draft]`; flip to
-  ready, confirm `[draft]` disappears.
-
-### Risks
-
-- The TC UI caches branch display strings per build promotion. If the
-  PR state changes (draft → ready) without a new commit, the cached
-  display may be stale until the next reload. Acceptable for v1, but
-  document the limitation.
-- The `BuildBranchInfoProvider` SPI is **not** part of the public
-  `server-openapi`; it likely lives in `server-api` (internal). If it
-  has moved or been renamed in 2026.1, you may need to fall back to a
-  Page Extension that injects JS to mutate the column client-side.
-  Confirm via the bytecode dump first.
-
-### Effort
-
-Medium. The unknown is whether the SPI is still public. Plan a
-spike of ~1 day to confirm before committing to the design.
-
-Files (expected):
-
-```
-src/main/kotlin/.../display/PrBranchDisplayProvider.kt    (new)
-src/test/kotlin/.../display/PrBranchDisplayFormatterTest.kt (new)
-src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml  (+1 bean)
-```
-
----
-
-## Gap 3 — Enriched commit status publisher
-
-### Problem statement
-
-TeamCity 2026.1's bundled `commitStatusPublisher` posts a commit status
-to GitHub when a build finishes, with a **hardcoded** description
-string (`DefaultStatusMessages.BUILD_FINISHED` = `"TeamCity build
-finished"`). The build's actual status text — set on the agent side via
-
-```
-##teamcity[buildStatus status='SUCCESS' text='3 warnings; 0 errors']
-```
-
-is shown in the TC build summary but **never propagated to the GitHub
-commit status description**. Reviewers on GitHub see only "TeamCity
-build finished" regardless of how the build actually performed.
-
-This affects every opted-in buildType on every PR — it's the single
-biggest UX gap of the integration today.
-
-### Why TC behaves this way
-
-The bundled `commitStatusPublisher` is a generic implementation
-serving GitHub, GitLab, Bitbucket, Azure DevOps, … Adding a
-provider-specific feature (free-form description from a build
-parameter or service message) was deemed too narrow for the bundled
-plugin. The roadmap entry has existed in the TC issue tracker for
-years and is unlikely to land in 2026.x.
-
-This plugin is the place to fix it for GitHub specifically.
-
-### Two implementation paths
-
-**Path A — Replace the publisher for opted-in build types.**
-
-Disable the bundled publisher for buildTypes where the three `tcgh.*`
-parameters are set, and have this plugin own commit status publishing
-end-to-end.
-
-- Hook on `BuildServerAdapter.buildFinished(SRunningBuild)` (and
-  `buildStarted` for in-progress states).
-- Read `build.statusDescriptor.text` — this carries the agent's
-  `buildStatus text=...` value (verified in TC SDK).
-- POST to `/repos/{owner}/{repo}/statuses/{sha}` with the captured text.
-
-Pros: clean, single source of truth.
-Cons: disabling the bundled publisher per-buildType is itself a
-research item — there's no DSL setting for "skip bundled publisher for
-this build". You may need to provide a Build Feature that suppresses it,
-or use a `BuildPromotionEx` hook to remove the publisher feature
-descriptor at runtime (fragile).
-
-**Path B — Publish Check Runs alongside, deprecate commit statuses for opted-in builds.**
-
-Already started in `DraftCheckRunReporter`. Extend it to publish Check
-Runs at every state transition (queued, started, finished). Tell users
-to set up GitHub branch protection to require the **Check Runs**
-(plugin-published) and **not** the Commit Statuses (TC-published), so
-the bundled publisher's hardcoded text becomes ignorable noise.
-
-Pros: doesn't fight the bundled publisher; uses the richer Check Runs
-API (multi-line output, links, summary).
-Cons: GitHub PR UI shows both Check Runs and Commit Statuses by
-default, so users will see redundant entries. Tooling like Mergify or
-required-checks lists need to be reconfigured to point at the new
-names.
-
-### Recommended approach
-
-**Path B first** (additive, low risk), then revisit Path A once Path B
-proves out the Check Runs flow. Path B reuses the `GitHubClient`
-already extended for the draft-skipped Check Run; the new code is
-"publish more Check Runs at other build lifecycle events" — small.
-
-### Sketch (Path B)
-
-```kotlin
-class BuildStatusCheckRunPublisher(
-    buildServer: SBuildServer,
-    private val tokenResolver: TokenResolver,
-    private val gitHubClient: GitHubClient,
-) : BuildServerAdapter() {
-    init { buildServer.addListener(this) }
-
-    override fun buildStarted(build: SRunningBuild) {
-        publish(build, CheckRunConclusion.NEUTRAL, status = "in_progress",
-                title = "Building", summary = build.statusDescriptor.text ?: "")
-    }
-
-    override fun buildFinished(build: SRunningBuild) {
-        val (conclusion, title) = when {
-            build.buildStatus.isSuccessful -> CheckRunConclusion.SUCCESS to "Build passed"
-            build.isInterrupted            -> CheckRunConclusion.CANCELLED to "Build cancelled"
-            else                           -> CheckRunConclusion.FAILURE to "Build failed"
-        }
-        publish(build, conclusion, status = "completed",
-                title = title, summary = build.statusDescriptor.text ?: "")
-    }
-    // … shared `publish(...)` that resolves SHA + token, posts to GitHub
-}
-```
-
-Note the **new `status` field** sent to GitHub — Check Runs accept
-`queued`, `in_progress`, or `completed`. The current `GitHubClient.encodeCheckRunPayload`
-hardcodes `"completed"` (it was sized for skipped drafts only). Lift
-that into the request.
-
-### Test plan
-
-- Unit-test the **status mapping** (TC `Status` → Check Run
-  `conclusion` + `status` + `title`).
-- Verify the JSON payload encodes correctly with the new `status`
-  field.
-- E2E: trigger a build that fails on purpose (e.g. `exit 1` in a
-  script step), confirm GitHub shows a Check Run with the actual error
-  text from the build log summary.
-
-### SDK signatures to verify
-
-```
-jetbrains.buildServer.serverSide.SRunningBuild.getStatusDescriptor() → BuildStatusDescriptor
-BuildStatusDescriptor.getText(): String
-BuildStatusDescriptor.getStatus(): Status
-Status.isSuccessful: Boolean
-Status.isFailed: Boolean
-```
-
-### Risks
-
-- The bundled publisher will keep publishing commit statuses unless
-  disabled. Reviewers will see two rows per buildType in the PR UI
-  until Path A lands. Document this in `usage-scenarios.md`.
-- Build description from `buildStatus text='…'` is set on the agent
-  before the build finishes; the server-side `buildFinished` hook fires
-  after, so the text is always available when we read it. **But** test
-  this assumption against a real TC — the order can be subtle.
-- GitHub's Check Run `output.summary` has a 65535-char limit. If the
-  TC status text ever approaches this (unlikely for our use case),
-  truncate. Add a guard.
-
-### Effort
-
-Medium. ~250 lines including tests, assuming `BuildStatusDescriptor`
-is on the public SDK (verify first).
-
-Files (expected):
-
-```
-src/main/kotlin/.../report/BuildStatusCheckRunPublisher.kt   (new)
-src/test/kotlin/.../report/BuildStatusCheckRunPublisherTest.kt (new)
-src/main/kotlin/.../api/GitHubClient.kt                       (lift "status" out of hardcoded)
-src/test/kotlin/.../api/CheckRunPayloadTest.kt               (extend existing test)
-src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml  (+1 bean)
-```
-
----
-
-## Gap 4 — Dedicated log file for the plugin
-
-### Problem statement
-
-The plugin currently writes through `Logger.getInstance(class.java.name)`,
-which feeds the **server-wide** `teamcity-server.log`. On a busy TC
-server that log is dominated by core noise (VCS polling, agent
-heartbeats, build queue scheduler), drowning the plugin's lines. An
-operator chasing a webhook delivery has to grep through MBs of
-unrelated log to find `PluginWebhookController` entries.
-
-A dedicated log file makes plugin operation observable at a glance:
-who delivered a webhook, when, whether it was accepted, what the
-filter decided, what was retriggered.
-
-### Current behaviour
-
-All loggers under `io.github.dlachouette.teamcity.github.*` are
-attached only to TC's root log4j appender (`ROLL` -> `teamcity-server.log`).
-No dedicated appender, no rolling policy specific to the plugin.
-
-### Proposed design
-
-Ship a recommended log4j fragment that the operator adds (or merges)
-to `<TC_DATA_DIR>/config/teamcity-server-log4j.xml`. The fragment
-defines a `tcgh-bridge` appender writing to
-`<TC_DATA_DIR>/logs/teamcity-github-bridge.log` with daily rolling
-and 14-day retention, and routes our package's loggers to it
-(`additivity="false"` so they do not duplicate to the server log).
-
-The plugin itself does **not** modify log4j configuration at runtime
-(TC discourages plugins doing that — it's a global resource). It
-just provides the snippet and surfaces the recommended path via the
-`/info` endpoint so the admin page (Gap 5) can show it.
-
-### Sketch
-
-`src/main/resources/teamcity-github-bridge-log4j-snippet.xml`:
-
-```xml
-<!--
-  TeamCity GitHub Bridge - dedicated log file.
-  Merge into <TC_DATA_DIR>/config/teamcity-server-log4j.xml.
--->
-<appender name="TCGH_BRIDGE" class="org.apache.log4j.rolling.RollingFileAppender">
-    <rollingPolicy class="jetbrains.buildServer.util.TCRollingPolicy">
-        <param name="FileNamePattern"
-               value="${teamcity_logs}/teamcity-github-bridge.log.%d{yyyy-MM-dd}.gz"/>
-        <param name="ActiveFileName" value="${teamcity_logs}/teamcity-github-bridge.log"/>
-        <param name="MaxHistory" value="14"/>
-    </rollingPolicy>
-    <layout class="org.apache.log4j.PatternLayout">
-        <param name="ConversionPattern" value="[%d{HH:mm:ss.SSS}] %-5p %c{1} - %m%n"/>
-    </layout>
-</appender>
-
-<logger name="io.github.dlachouette.teamcity.github" additivity="false">
-    <level value="INFO"/>
-    <appender-ref ref="TCGH_BRIDGE"/>
-</logger>
-```
-
-Expose the resolved path on `/info`:
-
-```json
-{
-  "payloadUrl": "...",
-  "logFile": "<TC_DATA_DIR>/logs/teamcity-github-bridge.log",
-  "logConfigured": true | false,
-  ...
-}
-```
-
-`logConfigured` is `true` when our logger has the dedicated
-`additivity="false"` appender attached — detected at runtime via
-`Logger.getInstance("io.github.dlachouette.teamcity.github").appenders`
-introspection (or, more robustly, by checking whether
-`tcgh-bridge.log` exists in the TC logs dir).
-
-### Alternatives considered
-
-- **Programmatic log4j configuration on plugin load**: rejected — it
-  changes global state and conflicts with operators who maintain
-  their own log routing.
-- **java.util.logging instead of IntelliJ Logger**: would side-step
-  log4j entirely but break the convention TC plugins follow and
-  lose the rolling/retention features.
-- **Console-only via System.out**: not a real solution; operators
-  expect a file.
-
-### Test plan
-
-Pure unit-testable parts are limited (the routing happens in the
-host log4j config). What we can test:
-
-- The `/info` response shape includes `logFile` and `logConfigured`.
-- The recommended snippet file is present in the jar resources and
-  is valid XML.
-
-End-to-end:
-
-- Install the plugin on TC with the snippet merged into the log
-  config; verify `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`
-  appears and accumulates our entries only.
-- Verify `teamcity-server.log` no longer contains
-  `io.github.dlachouette.*` entries (additivity off).
-
-### Risks
-
-- Snippet must merge cleanly into TC's stock `teamcity-server-log4j.xml`
-  layout. Test against a fresh 2026.1 install before documenting.
-- `${teamcity_logs}` is the TC log dir variable; confirm the exact
-  variable name in 2026.1 (was `${TC_LOGS_DIR}` in older versions).
-
-### Effort
-
-Small. ~50 lines plus doc.
-
-Files touched:
-
-```
-src/main/resources/teamcity-github-bridge-log4j-snippet.xml   (new)
-src/main/kotlin/.../web/WebhookInfo.kt                         (+ logFile, logConfigured)
-src/main/kotlin/.../web/WebhookInfoController.kt               (resolve log path)
-src/main/kotlin/.../config/LogPathResolver.kt                  (new, small helper)
-doc/configuration.md                                            (instructions to merge snippet)
-doc/troubleshooting.md                                          (logFile pointer)
-```
-
----
-
-## Gap 5 — Admin / help page in TeamCity UI
-
-### Problem statement
-
-The plugin has zero presence in the TeamCity admin UI today.
-Operators discover it via:
-- `Administration -> Plugins List` (just shows the version chip).
-- the `/info` JSON endpoint (curl only, not browsable).
-- `doc/*.md` files in this repository.
-
-A dedicated admin page closes the gap: a single in-product view
-that shows the plugin is alive, what it is configured to do, what
-it has done recently, and how to reach the full documentation.
-
-### Proposed design
-
-A new `AdminPage` extension under
-`Administration -> Server Administration -> Diagnostics ->
-GitHub Bridge` (left sidebar tab), plus a `Help` accordion at the
-bottom of the same page.
-
-Page sections, top to bottom:
-
-```
-+--------------------------------------------------------------+
-| Plugin status                                                |
-|   Version: 0.2.0                                             |
-|   Webhook URL: https://.../app/teamcity-github-bridge/webhook|
-|   Secret configured: yes / NO (link to internal-properties)  |
-|   Dedicated log: <path>      (or "not configured" + snippet) |
-+--------------------------------------------------------------+
-| Live config snapshot   (mirror of /info)                     |
-|   pretty-printed JSON, copy-paste button                     |
-+--------------------------------------------------------------+
-| Recent events                                                |
-|   last 20 webhook deliveries seen by the plugin              |
-|   timestamp | event | repo | action | http status            |
-|   (tailed from the dedicated log if available)               |
-+--------------------------------------------------------------+
-| GitHub App quick-config                                      |
-|   one-click copy of:                                         |
-|     - payload URL                                            |
-|     - recommended events list                                |
-|     - secret status                                          |
-+--------------------------------------------------------------+
-| Help                                                         |
-|   - one-paragraph "what this plugin does"                    |
-|   - link to README on GitHub                                 |
-|   - link to each doc/*.md page on GitHub                     |
-|   - troubleshooting collapsible (common 401/404 fixes)       |
-+--------------------------------------------------------------+
-```
-
-### SDK signatures to verify
-
-```
-jetbrains.buildServer.web.openapi.SimplePageExtension          (base, prefer)
-jetbrains.buildServer.web.openapi.WebControllerManager          (registration)
-jetbrains.buildServer.controllers.admin.AdminPage               (admin-specific)
-jetbrains.buildServer.web.openapi.PagePlace                     (placement)
-jetbrains.buildServer.web.openapi.PlaceId                       (where to slot)
-```
-
-Probable path: subclass `AdminPage` (or `SimplePageExtension` if
-`AdminPage` is non-public in 2026.1), point at a JSP template
-located at `buildServerResources/admin/tcghAdmin.jsp` inside the
-plugin jar.
-
-### Sketch
-
-```kotlin
-class AdminConsolePage(
-    pagePlaces: PagePlaces,
-    pluginDescriptor: PluginDescriptor,
-    private val webhookConfig: WebhookConfig,
-    private val buildServer: SBuildServer,
-    private val eventLog: RecentEventsLog,    // new; in-memory ring buffer
-) : AdminPage(pagePlaces, "tcghAdmin", pluginDescriptor.pluginResourcesPath("admin/tcghAdmin.jsp"),
-              "GitHub Bridge") {
-
-    init {
-        addCssFile("/css/admin/diagnostics.css")
-    }
-
-    override fun getGroup(): String = "SERVER_RELATED_GROUP"
-
-    override fun fillModel(model: MutableMap<String, Any>, request: HttpServletRequest) {
-        model["pluginVersion"] = "0.2.0"
-        model["webhookUrl"] = absoluteWebhookUrl(request)
-        model["secretConfigured"] = webhookConfig.isSecretConfigured()
-        model["logFile"] = LogPathResolver(buildServer).resolveOrNull()
-        model["recentEvents"] = eventLog.snapshot()
-    }
-}
-```
-
-### Recent events tracking
-
-To populate the "Recent events" section, add a small `RecentEventsLog`
-bean (in-memory ring buffer, ~100 entries) that the controllers
-update on every accepted webhook:
-
-```kotlin
-class RecentEventsLog(private val capacity: Int = 100) {
-    private data class Entry(
-        val timestampMs: Long,
-        val event: String,
-        val repo: String?,
-        val action: String?,
-        val httpStatus: Int,
-        val outcome: String,   // "accepted" | "skipped" | "rejected"
-    )
-    private val ring = ArrayDeque<Entry>(capacity)
-    @Synchronized fun record(...) { ... }
-    @Synchronized fun snapshot(): List<Entry> = ring.toList()
-}
-```
-
-This avoids parsing the dedicated log file at admin-page render
-time (which would be fragile and slow) and works even when the
-dedicated log is not configured.
-
-### Test plan
-
-- Unit-test `RecentEventsLog` (capacity, FIFO eviction, thread
-  safety basic check).
-- Unit-test the JSP model population by calling `fillModel` with a
-  stubbed request.
-- E2E: navigate to the admin page on a running TC, verify each
-  section renders, deliver a webhook, confirm it shows up in
-  "Recent events" within seconds.
-
-### Effort
-
-Medium-large. JSP templating in the TC plugin SDK is a learning
-curve if you have not done it before. ~400 lines including JSP +
-small CSS.
-
-Files touched:
-
-```
-src/main/kotlin/.../web/AdminConsolePage.kt           (new)
-src/main/kotlin/.../web/RecentEventsLog.kt            (new)
-src/main/kotlin/.../web/PluginWebhookController.kt    (call eventLog.record)
-src/main/resources/buildServerResources/admin/tcghAdmin.jsp  (new)
-src/main/resources/buildServerResources/admin/tcgh.css       (new, small)
-src/test/kotlin/.../web/RecentEventsLogTest.kt        (new)
-src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml   (+2 beans)
-```
-
-### Risks
-
-- `AdminPage` may have moved between TC versions; verify the
-  placement constant (`SERVER_RELATED_GROUP` etc.) against 2026.1.
-- Resource paths in the plugin jar (`buildServerResources/...`) are
-  served under `/plugins/<pluginName>/...`. The assembly descriptor
-  may need a tweak to include them.
+## Other backlog items
+
+These have not had a deep audit yet but are still tracked in
+[development.md#roadmap](development.md#roadmap). Listed here only for
+context; pick one of them up only after #A4 ships, since #A4 affects
+how the others should be designed.
+
+| # in development.md | Item | Why it can wait |
+|---|---|---|
+| #2 | Custom `BuildFeature` to surface the parameters in the UI | Cosmetic; doesn't fix any current functional gap. |
+| #5 | Webhook delivery replay protection via `X-GitHub-Delivery` | Real concern only at higher webhook traffic. |
+| #6 | Wire `pull_request_review` events | Useful for surfacing review state but not blocking any current consumer. |
+| #8 | CI workflow building + releasing on tag | Pure dev-experience win. |
 
 ---
 
@@ -809,35 +272,35 @@ src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml   (+2 beans)
 
 ### Validation against a real TeamCity instance
 
-None of these gaps can be fully validated by unit tests. After each
-gap is closed, install the rebuilt zip on a staging TC instance with
-the Owl project's parameters wired up and run the **manual smoke
-sequence** below. Document the result in the PR description.
+`#A4` cannot be fully validated by unit tests. After it's coded,
+install the rebuilt zip on a staging TC instance with the Owl
+project's parameters wired up and run the manual smoke sequence:
 
-Smoke sequence (15 minutes per gap):
-
-1. Open a draft PR in the Owl repo with a one-line change.
-2. Verify TC queue UI: held builds carry the appropriate marker
-   (`draft` tag for gap #1, source branch in column for gap #2,
-   richer check run summary for gap #3).
-3. Mark the PR ready for review.
-4. Verify the ready-for-review retrigger fires; rebuild appears with
-   `ready` tag.
-5. Verify GitHub PR view matches expectation.
-6. Push a new commit; verify enrichment re-applies to the new
-   revision.
+1. Open a draft PR with a one-line change.
+   - Verify TC queue UI: held builds carry `draft` tag (already
+     shipped via `PrPromotionTagger`).
+   - Verify GitHub PR view: held builds appear as ⏭️ skipped Check Runs.
+2. Mark the PR ready for review.
+   - Verify ready-for-review retrigger fires.
+   - Verify both opt-in and opt-out buildTypes publish Check Runs.
+   - Verify NO duplicate row from the bundled publisher (assuming the
+     consumer has removed it after #A4).
+3. Push to `main` directly.
+   - Verify Check Run rows appear on the commit's checks panel.
+4. Push a new commit to the still-open PR.
+   - Verify enrichment re-applies to the new revision.
 
 ### Local development workflow recap
 
 ```bash
 cd /data/sources/Sources/IT/teamcity-github
-./dev test            # JUnit5 tests (currently 39, will grow)
+./dev test            # JUnit5 tests (currently 63, will grow)
 ./dev package         # produces target/teamcity-github-bridge-*.zip
 ./dev shell           # interactive bash in the maven container
 ```
 
-SDK introspection from the dev shell (used heavily for the audits
-above):
+SDK introspection from the dev shell (used for any new SDK-touching
+gap):
 
 ```bash
 jar tf '/workspace/.cache/m2/org/jetbrains/teamcity/server-openapi/2026.1/server-openapi-2026.1.jar' \
@@ -854,13 +317,13 @@ javap -cp '/workspace/.cache/m2/org/jetbrains/teamcity/server-openapi/2026.1/ser
 - Logger: `Logger.getInstance(MyClass::class.java.name)` in a
   companion object; tests call `LoggerBootstrap.install()` in `init`.
 - No mocking framework; stub interfaces or extract pure helpers (see
-  `PrBuildEnricher.computePlan` / `DraftCheckRunReporter.buildRequest`
-  for the pattern).
+  `PrPromotionTagger.computePlan` / `DraftCheckRunReporter.buildRequest`
+  / `BuildStatusCheckRunPublisher.mapBuildOutcome` for the pattern).
 - Comments only when the *why* is non-obvious; don't restate the code.
 - One feature per PR; update the relevant `doc/*.md` page in the same
   PR.
 
-### Where the Owl side touches the plugin
+### Where Owl touches the plugin
 
 The Owl repo references the three `tcgh.*` parameters in:
 
@@ -869,27 +332,6 @@ The Owl repo references the three `tcgh.*` parameters in:
 /data/sources/personnel/stack_owl/Owl/.teamcity/Build/Build.kt
 ```
 
-If you change a parameter name in the plugin, search-and-replace both
-files and bump the Owl team. The connection ID currently hardcoded in
-Owl's DSL is `CID_392f0141078df64b20e1bb01ada5697f`.
-
----
-
-## Sequencing
-
-Recommended order, updated for the five gaps:
-
-1. **Gap 1** — small, immediate UX win in the TC queue. Ships with
-   Gap 4 as v0.2.0.
-2. **Gap 4** — dedicated log file. Independent of the others;
-   pairs naturally with Gap 1 because they share a release.
-3. **Gap 5** — admin/help page. Needs Gap 4 (log path surfaced) but
-   degrades gracefully when log is not configured. Ships as v0.3.0.
-4. **Gap 3 Path B** — additive Check Runs publisher, reuses the
-   infrastructure already in `DraftCheckRunReporter`. v0.4.0.
-5. **Gap 2** — branch display; has an SDK-availability unknown that
-   warrants a short spike before committing. v0.5.0.
-
-After all five: revisit roadmap items in
-[development.md#roadmap](development.md#roadmap) — they may be merged
-or rewritten given what has been learned.
+If you rename or remove a parameter in the plugin, search-and-replace
+both files and bump the Owl team. The connection ID currently
+hardcoded in Owl's DSL is `CID_392f0141078df64b20e1bb01ada5697f`.

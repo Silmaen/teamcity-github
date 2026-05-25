@@ -17,7 +17,8 @@ second, fix third.
 +---------------------------------------------------------------+
 |  3. Server log fallback (if dedicated log not configured)     |
 |     <TC_DATA_DIR>/logs/teamcity-server.log                    |
-|     Grep for `dlachouette` or `teamcity-github-bridge`        |
+|     Grep for `io.github.dlachouette` (package) or            |
+|     `teamcity-github-bridge` (plugin name).                   |
 +---------------------------------------------------------------+
 |  4. GitHub App webhook "Recent Deliveries" panel              |
 |     https://github.com/settings/apps/<your-app>/advanced      |
@@ -406,7 +407,8 @@ Open an issue with:
 - TeamCity version (`Administration -> Diagnostics`).
 - Plugin version (in the plugin's archive name).
 - A redacted excerpt of the relevant log lines (search for
-  `dlachouette` and copy 20 lines of context).
+  the package prefix `io.github.dlachouette` and copy 20 lines of
+  context).
 - The output of `curl /info` (it does not contain the secret, only
   whether one is configured).
 - If applicable, a redacted recent webhook delivery body from

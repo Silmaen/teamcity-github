@@ -41,11 +41,23 @@ class AdminConsolePage(
         model["infoUrl"] = absoluteUrl(request, scheme, WebhookInfoController.INFO_PATH)
         model["infoMarkdownUrl"] = absoluteUrl(request, scheme, WebhookInfoController.INFO_PATH_MARKDOWN)
         model["secretConfigured"] = webhookConfig.isSecretConfigured()
+        model["secretSource"] = webhookConfig.source().name
         model["logFile"] = logPathResolver.expectedFile().absolutePath
         model["logConfigured"] = logPathResolver.isConfigured()
+        model["logStateLabel"] = logPathResolver.stateLabel()
         model["recentEvents"] = recentEventsLog.snapshot().map { it.toView() }
         model["recommendedEvents"] = WebhookEvents.RECOMMENDED
         model["snippetResourceName"] = "teamcity-github-bridge-log4j-snippet.xml"
+        model["saveSecretUrl"] = request.contextPath.trimEnd('/') + AdminSettingsController.PATH
+        resultBannerFor(request.getParameter("tcghResult"))?.let { model["resultBanner"] = it }
+    }
+
+    private fun resultBannerFor(code: String?): Map<String, String>? = when (code) {
+        "saved" -> mapOf("level" to "ok", "text" to "Webhook secret saved.")
+        "cleared" -> mapOf("level" to "ok", "text" to "Webhook secret cleared. Until a new secret is set, every webhook delivery will be rejected with 401.")
+        "blank" -> mapOf("level" to "warn", "text" to "Submitted secret was blank; nothing changed.")
+        "error" -> mapOf("level" to "bad", "text" to "Could not save the secret. Check the dedicated log for details.")
+        else -> null
     }
 
     private fun resolvedScheme(request: HttpServletRequest): String {

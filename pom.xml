@@ -7,7 +7,7 @@
 
     <groupId>io.github.dlachouette</groupId>
     <artifactId>teamcity-github-bridge</artifactId>
-    <version>0.5.0</version>
+    <version>0.6.0</version>
     <packaging>jar</packaging>
 
     <name>TeamCity GitHub Bridge</name>
@@ -16,7 +16,7 @@
         integration: draft PR detection, retrigger on draft to ready transitions,
         richer commit statuses and webhook bridging.
     </description>
-    <url>https://github.com/dlachouette/teamcity-github</url>
+    <url>https://github.com/silmaen/teamcity-github</url>
 
     <licenses>
         <license>

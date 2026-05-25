@@ -39,9 +39,21 @@ Set in `<TC_DATA_DIR>/config/internal.properties`. Hot-reloaded.
 
 | Property | Default | Required | Purpose |
 |---|---|---|---|
-| `tcgh.webhook.secret` | _unset_ | **yes** | HMAC secret used to verify webhook signatures. Without this, every request is rejected with 401. |
+| `tcgh.webhook.secret` | _unset_ | **yes** (or set via the admin page) | HMAC secret used to verify webhook signatures. Without this, every request is rejected with 401. Since v0.6.0 you can also set this from the admin page; the plugin's own file (`teamcity-github-bridge.properties`) takes precedence over this key. |
 | `tcgh.github.api.base` | (plugin default) | no | Override for GitHub Enterprise; e.g. `https://github.acme.com/api/v3`. |
 | `tcgh.prinfo.cache.ttl.seconds` | `60` | no | Increase if you hit GitHub rate limits; decrease for tighter loops. |
+
+### Plugin-owned settings file (v0.6.0+)
+
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties` holds
+values that the admin page writes. Currently a single key:
+
+| Key | Purpose |
+|---|---|
+| `webhook.secret` | Same role as `tcgh.webhook.secret` above, but stored separately so the plugin never has to mutate `internal.properties`. Wins over `tcgh.webhook.secret` if both are set. |
+
+You can edit this file by hand if you prefer, but the admin page is
+the supported path.
 
 Example `internal.properties` entry:
 
@@ -142,14 +154,40 @@ Notes:
 The plugin uses IntelliJ openapi `Logger` which delegates to log4j
 when running inside TeamCity.
 
-### Dedicated log file (recommended)
+### Dedicated log file
 
-By default, plugin entries are mixed into the server-wide
-`teamcity-server.log`. To route them to their own file, merge the
-shipped snippet
+As of v0.6.0 the plugin **attaches its own log appender at startup**.
+No manual setup needed:
+
+- File: `<TC_DATA_DIR>/logs/teamcity-github-bridge.log` (same dir
+  as `teamcity-server.log`).
+- Rotation: size-based, 10 MB per file, 10 historical files (~100 MB
+  retention).
+- Pattern: `[<ISO-8601 timestamp>] <LEVEL> <ClassName> - <message>`.
+- Routing: all `io.github.dlachouette.teamcity.github.*` log entries
+  go to this file with `additivity="false"`, i.e. they no longer
+  duplicate to `teamcity-server.log`.
+
+The admin page reports the state under `Dedicated log`:
+- **auto-configured** - the plugin attached the appender at startup
+  (the common case).
+- **operator-configured** - an existing appender on the package
+  logger was detected; the plugin left it alone.
+- **not configured** - rare, only when the appender attachment threw.
+  See troubleshooting.
+
+### Manual override (advanced)
+
+If you prefer to take control of the routing - different rotation,
+remote syslog, etc. - configure your own appender for the
+`io.github.dlachouette.teamcity.github` logger in
+`<TC_DATA_DIR>/config/teamcity-server-log4j.xml`. The plugin
+detects an existing appender and skips its own attachment.
+
+The shipped reference snippet
 (`/teamcity-github-bridge-log4j-snippet.xml` inside the plugin jar -
 also available at `src/main/resources/teamcity-github-bridge-log4j-snippet.xml`
-in the repository) into `<TC_DATA_DIR>/config/teamcity-server-log4j.xml`,
+in the repository) can be merged into `<TC_DATA_DIR>/config/teamcity-server-log4j.xml`,
 inside the root `<log4j:configuration>` element:
 
 ```xml

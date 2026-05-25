@@ -7,6 +7,8 @@
 
     <bean class="io.github.dlachouette.teamcity.github.TeamCityGitHubBridgePlugin"/>
 
+    <bean class="io.github.dlachouette.teamcity.github.config.PluginSettingsStorage"/>
+    <bean class="io.github.dlachouette.teamcity.github.config.PluginLogConfigurator"/>
     <bean class="io.github.dlachouette.teamcity.github.config.WebhookConfig"/>
     <bean class="io.github.dlachouette.teamcity.github.config.LogPathResolver"/>
 
@@ -26,6 +28,7 @@
     <bean class="io.github.dlachouette.teamcity.github.web.PluginWebhookController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.WebhookInfoController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminConsolePage"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.AdminSettingsController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BranchEnrichmentPageExtension"/>
 
 </beans>

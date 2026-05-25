@@ -59,34 +59,57 @@ openssl rand -hex 48
 # 0a4f0c9b5e8e3c1d2a4b...
 ```
 
-Then set the property `tcgh.webhook.secret` to that value. Two ways:
+Three ways to install it, in order of preference:
 
-**Via the UI (recommended, no shell access needed)**
+**Via the plugin's admin page (recommended since v0.6.0)**
+
+Open `Administration -> Server Administration -> GitHub Bridge`.
+Under `HMAC secret` paste the random string into the form and
+click **Save**. The plugin writes the value to
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties` and the
+next webhook delivery uses the new secret immediately.
+
+You can also **Clear secret** from the same form, which removes the
+key and re-enables fail-closed mode (every delivery rejected with
+401 until a new secret is set).
+
+**Via the TC internal-properties UI (legacy, still supported)**
 
 Go to `Administration -> Server Administration -> Diagnostics ->
 Internal Properties` (direct URL:
-`https://<TC>/admin/admin.html?item=diagnostics&tab=internalProperties`).
-
-Add the line:
+`https://<TC>/admin/admin.html?item=diagnostics&tab=internalProperties`)
+and add:
 
 ```properties
 tcgh.webhook.secret=<paste the string here>
 ```
 
-Click `Save`. TeamCity hot-reloads instantly; no restart needed.
+If both sources are populated, the plugin's own file takes
+precedence (visible in the admin page as "via this page" vs "via
+internal.properties - legacy").
 
 **Via the filesystem**
 
-Edit `<TC_DATA_DIR>/config/internal.properties` directly and add
-the same line. The file is hot-reloaded.
+Either edit `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`
+directly:
 
-> **Important**: do **not** confuse `tcgh.webhook.secret` with the
-> "Webhook secret" field inside the GitHub App connection form
-> (`Project -> Connections -> Edit GitHub App -> Webhook secret`).
-> That field is stored on the connection descriptor and is consumed
-> by TeamCity's **bundled** integrations only; this plugin does
-> not read it. The two values can be identical or different - they
-> are separate slots.
+```properties
+webhook.secret=<paste the string here>
+```
+
+or `<TC_DATA_DIR>/config/internal.properties`:
+
+```properties
+tcgh.webhook.secret=<paste the string here>
+```
+
+Both are hot-reloaded; no restart needed.
+
+> **Important**: do **not** confuse this secret with the "Webhook
+> secret" field inside the GitHub App connection form (`Project ->
+> Connections -> Edit GitHub App -> Webhook secret`). That field is
+> stored on the connection descriptor and is consumed by TeamCity's
+> **bundled** integrations only; this plugin does not read it.
 
 > The plugin **rejects any request without a valid signature** with
 > HTTP 401. Until this secret is set, GitHub will see 401 on every

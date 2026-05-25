@@ -252,19 +252,20 @@ A CI workflow that does this on tag push is planned (see roadmap).
 
 What's planned, roughly in priority order.
 
-| # | Item | Status |
-|---|---|---|
-| 1 | End-to-end validation on a real TeamCity 2026.1 staging instance | not started |
-| 2 | A custom `BuildFeature` to expose the parameters in the UI rather than as raw config params | not started |
-| 3 | Replace the bundled `commitStatusPublisher` for opted-in build types to propagate the `buildStatus text='...'` service message to the GitHub commit status description | not started |
-| 4 | Use the GitHub Check Runs API instead of Commit Statuses to support `skipped`/`neutral`/`cancelled` conclusions | **partial** — `skipped` for held drafts shipped 2026-05-25 via `DraftCheckRunReporter` |
-| 5 | Reject duplicate webhook deliveries (replay protection) via `X-GitHub-Delivery` deduplication | not started |
-| 6 | Wire `pull_request_review` events to surface review state on the TC build | not started |
-| 7 | Branch display customisation via `BuildBranchInfoProvider` (replaces the dead `Nicologies/PrExtras` plugin) | not started |
-| 8 | CI workflow building + releasing on tag | not started |
-| 9 | Tag held-in-queue draft builds (currently `PrBuildEnricher` only tags on `buildStarted`, which never fires for held builds) | not started |
+| #  | Item | Status |
+|----|------|--------|
+| 1  | End-to-end validation on a real TeamCity 2026.1 staging instance | not started |
+| 2  | A custom `BuildFeature` to expose the parameters in the UI rather than as raw config params | not started |
+| 3  | Replace the bundled `commitStatusPublisher` for opted-in build types to propagate the `buildStatus text='...'` service message to the GitHub commit status description | **partial** — `BuildStatusCheckRunPublisher` covers opted-in PR builds; main + opt-out PR coverage tracked as #10 |
+| 4  | Use the GitHub Check Runs API instead of Commit Statuses to support `skipped`/`neutral`/`cancelled` conclusions | **done** — `DraftCheckRunReporter` + `BuildStatusCheckRunPublisher` cover the relevant conclusions |
+| 5  | Reject duplicate webhook deliveries (replay protection) via `X-GitHub-Delivery` deduplication | not started |
+| 6  | Wire `pull_request_review` events to surface review state on the TC build | not started |
+| 7  | Branch display customisation (replaces the dead `Nicologies/PrExtras` plugin) | **done** — `BranchEnrichmentPageExtension` + `tcghBranchEnrichment.jsp` ship a draft/ready pill |
+| 8  | CI workflow building + releasing on tag | not started |
+| 9  | Tag held-in-queue draft builds (was: `PrBuildEnricher` only tags on `buildStarted`) | **done** — `PrPromotionTagger` tags at `buildTypeAddedToQueue` |
+| 10 | Extend `BuildStatusCheckRunPublisher` to also cover main branch and opt-out (`ignoreDrafts=false`) PR builds, so the bundled publisher can be retired by consumers without losing coverage | not started |
 
-Detailed designs for items #3, #7, and #9 — including SDK pointers,
+Detailed designs for the open items that touch the SDK — including
 code sketches, alternatives, and test plans — live in
 [roadmap.md](roadmap.md). Pick that up first if you're starting work on
 any of them.

@@ -9,7 +9,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 
 ---
@@ -189,7 +189,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-Beta. Current version is **0.5.0**. 63 unit tests pass. The plugin
+Beta. Current version is **0.6.0**. 69 unit tests pass. The plugin
 has been installed end-to-end on a real TeamCity 2026.1 server
 (`builder.argawaen.net`) and a signed GitHub App webhook delivery
 has been validated through to `200 pong`. Iterations 1 through 4 of
@@ -205,6 +205,9 @@ the roadmap have shipped:
   override) concluded - the SDK does not expose the needed
   extension point in 2026.1; the cosmetic mitigation ships, the
   full server-side fix is parked until JetBrains lands the SPI.
+- v0.6.0: self-managed dedicated log file (no log4j snippet to
+  merge) + webhook secret editable directly from the admin page
+  (no more shell access to `internal.properties` required).
 
 Open items are tracked in
 [doc/roadmap.md](doc/roadmap.md#sequencing).
