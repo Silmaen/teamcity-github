@@ -3,6 +3,7 @@ package io.github.dlachouette.teamcity.github.report
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.CheckRunConclusion
 import io.github.dlachouette.teamcity.github.api.CheckRunRequest
+import io.github.dlachouette.teamcity.github.api.CheckRunStatus
 import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
@@ -123,6 +124,7 @@ class DraftCheckRunReporter(
             return CheckRunRequest(
                 name = "TeamCity / $buildTypeFullName",
                 headSha = headSha,
+                status = CheckRunStatus.COMPLETED,
                 conclusion = CheckRunConclusion.SKIPPED,
                 outputTitle = "Skipped: draft PR",
                 outputSummary = "PR #$prNumber is in draft state; this build will run automatically when the PR is marked ready for review.",

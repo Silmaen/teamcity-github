@@ -140,7 +140,55 @@ Notes:
 ## Logging tuning
 
 The plugin uses IntelliJ openapi `Logger` which delegates to log4j
-when running inside TeamCity. To turn on debug logging:
+when running inside TeamCity.
+
+### Dedicated log file (recommended)
+
+By default, plugin entries are mixed into the server-wide
+`teamcity-server.log`. To route them to their own file, merge the
+shipped snippet
+(`/teamcity-github-bridge-log4j-snippet.xml` inside the plugin jar -
+also available at `src/main/resources/teamcity-github-bridge-log4j-snippet.xml`
+in the repository) into `<TC_DATA_DIR>/config/teamcity-server-log4j.xml`,
+inside the root `<log4j:configuration>` element:
+
+```xml
+<appender name="TCGH_BRIDGE" class="org.apache.log4j.rolling.RollingFileAppender">
+    <rollingPolicy class="jetbrains.buildServer.util.TCRollingPolicy">
+        <param name="FileNamePattern"
+               value="${teamcity_logs}/teamcity-github-bridge.log.%d{yyyy-MM-dd}.gz"/>
+        <param name="ActiveFileName" value="${teamcity_logs}/teamcity-github-bridge.log"/>
+        <param name="MaxHistory" value="14"/>
+    </rollingPolicy>
+    <layout class="org.apache.log4j.PatternLayout">
+        <param name="ConversionPattern" value="[%d{HH:mm:ss.SSS}] %-5p %c{1} - %m%n"/>
+    </layout>
+</appender>
+
+<logger name="io.github.dlachouette.teamcity.github" additivity="false">
+    <level value="INFO"/>
+    <appender-ref ref="TCGH_BRIDGE"/>
+</logger>
+```
+
+TeamCity hot-reloads log4j on file change; no restart needed.
+
+Result: plugin entries land in `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`,
+rolled daily, gzipped, 14 days retention. The server-wide
+`teamcity-server.log` no longer contains
+`io.github.dlachouette.*` entries.
+
+Verify by curling `/info`:
+
+```bash
+curl -s https://<TC_HOST>/app/teamcity-github-bridge/info | jq '.logConfigured, .logFile'
+# true
+# "/data/teamcity_server/datadir/logs/teamcity-github-bridge.log"
+```
+
+### Quick debug logging without a dedicated file
+
+If you only want debug temporarily and do not care about routing:
 
 ```xml
 <!-- <TC_DATA_DIR>/config/teamcity-server-log4j.xml -->
@@ -151,6 +199,40 @@ when running inside TeamCity. To turn on debug logging:
 ```
 
 Reload via `Administration -> Diagnostics -> Logging` or restart.
+
+## Check Run publisher coexistence with the bundled `commitStatusPublisher`
+
+As of v0.4.0, the plugin's `BuildStatusCheckRunPublisher` posts
+GitHub Check Runs on every lifecycle event for an opted-in build
+type. The bundled `commitStatusPublisher` keeps posting Commit
+Statuses (with the hard-coded `"TeamCity build finished"`
+description) unless you disable it.
+
+### What the plugin emits
+
+| Event | Check Run `status` | Check Run `conclusion` | `output.title` |
+|---|---|---|---|
+| Held in draft queue | `completed` | `skipped` | `Skipped: draft PR` |
+| Build starts | `in_progress` | (none) | `Building` |
+| Build finishes (success / warning) | `completed` | `success` | `Build passed` |
+| Build finishes (failure / error) | `completed` | `failure` | `Build failed` |
+| Build cancelled | `completed` | `cancelled` | `Build cancelled` |
+| Build status `UNKNOWN` | `completed` | `neutral` | `Build status: ...` |
+
+`output.summary` carries the build's `statusDescriptor.text` (i.e.
+whatever the agent set via
+`##teamcity[buildStatus text='...']`). Truncated at 60 000
+characters with a `(truncated)` marker if longer.
+
+### Choosing the right setup
+
+| Goal | Action |
+|---|---|
+| Keep both publishers (informational fallback) | Do nothing. Update branch protection to require **only** Check Run names like `TeamCity / <buildType full name>`. Commit Statuses appear but are not blocking. |
+| Single source of truth | Disable the bundled `commitStatusPublisher` on the opted-in build types via the existing UI (Build Features tab). The plugin's Check Runs become the only TC signal. |
+
+The "disable per-buildType" path is currently manual; a future
+release will provide a Build Feature for one-click opt-out.
 
 ## Validation
 

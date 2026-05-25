@@ -73,19 +73,26 @@ Properties:
 ### Anonymous registration (deliberate)
 
 TeamCity protects every path under `/app/*` with built-in
-authentication by default. Both controllers exposed by this plugin
-explicitly register their paths with
+authentication by default. The plugin's HTTP controllers explicitly
+register their paths with
 `AuthorizationInterceptor.addPathNotRequiringAuth(path)` to opt out
 of that protection:
 
 | Path | Anonymous because |
 |---|---|
 | `/app/teamcity-github-bridge/webhook` | GitHub does not send TeamCity credentials. HMAC-SHA256 over the body is the real auth. |
-| `/app/teamcity-github-bridge/info` and `/info.md` | The response intentionally exposes no secrets - only `secretConfigured: true|false`, the public payload URL, and the plugin version. |
+| `/app/teamcity-github-bridge/info` and `/info.md` | The response intentionally exposes no secrets - only `secretConfigured: true|false`, the public payload URL, the dedicated log path, and the plugin version. |
 
-Without these opt-outs, GitHub deliveries hit `401 Authentication
-required` from TeamCity's auth filter before any of the plugin's
-code (including HMAC verification) gets to run.
+The **admin page** (`/admin/...?tab=tcghAdmin`) is **not** anonymous.
+It is registered through `AdminPage`, which inherits TeamCity's
+standard admin authorisation filter. Only users with the relevant
+permission see the page; the JSP template never renders secrets,
+only the boolean `secretConfigured` and the path of the dedicated
+log file.
+
+Without the anonymous opt-out, GitHub deliveries would hit `401
+Authentication required` from TeamCity's auth filter before any of
+the plugin's code (including HMAC verification) could run.
 
 ### Fail-closed on the webhook
 

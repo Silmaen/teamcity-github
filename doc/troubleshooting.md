@@ -7,17 +7,22 @@ second, fix third.
 
 ```
 +---------------------------------------------------------------+
-|  1. Server log                                                |
+|  1. Plugin /info endpoint (one-shot health snapshot)          |
+|     curl https://<TC_HOST>/app/teamcity-github-bridge/info    |
+|     -> secretConfigured, logConfigured, payloadUrl, logFile   |
++---------------------------------------------------------------+
+|  2. Dedicated plugin log (if `logConfigured: true`)           |
+|     <TC_DATA_DIR>/logs/teamcity-github-bridge.log             |
+|     -> see `doc/configuration.md` to enable                   |
++---------------------------------------------------------------+
+|  3. Server log fallback (if dedicated log not configured)     |
 |     <TC_DATA_DIR>/logs/teamcity-server.log                    |
 |     Grep for `dlachouette` or `teamcity-github-bridge`        |
 +---------------------------------------------------------------+
-|  2. GitHub App webhook "Recent Deliveries" panel              |
+|  4. GitHub App webhook "Recent Deliveries" panel              |
 |     https://github.com/settings/apps/<your-app>/advanced      |
 +---------------------------------------------------------------+
-|  3. Plugin /info endpoint                                     |
-|     curl https://<TC_HOST>/app/teamcity-github-bridge/info    |
-+---------------------------------------------------------------+
-|  4. Queue UI                                                  |
+|  5. Queue UI                                                  |
 |     Look at the wait reason on held builds                    |
 +---------------------------------------------------------------+
 ```
@@ -319,6 +324,65 @@ Useful log lines:
 | `Cannot resolve token for <buildType>` | The connection ID is wrong or the App is uninstalled. |
 | `Cannot fetch PR info for <repo>#<n>` | GitHub API call failed. Check rate limits or permissions. |
 | `GitHub returned 4xx for <repo>#<n>` | API rejected. 401 = bad token, 403 = missing permission, 404 = repo not visible. |
+
+## Symptom: PR shows two TeamCity entries (Commit Status + Check Run)
+
+### What you see
+
+In the PR's "All checks" panel, each build appears twice:
+- a Commit Status line with description `"TeamCity build finished"`,
+- a Check Run line with the actual build status text.
+
+### Cause
+
+This is **expected** on opted-in build types as of v0.4.0. The plugin's
+`BuildStatusCheckRunPublisher` posts Check Runs but does **not** silence
+the bundled `commitStatusPublisher`, which keeps posting Commit
+Statuses with its hard-coded description.
+
+### Fix
+
+Two options:
+- **Leave both**, configure branch protection to require only the
+  Check Run name (e.g. `TeamCity / <buildType full name>`); treat the
+  Commit Status as informational.
+- **Disable `commitStatusPublisher`** on the opted-in build types via
+  the bundled feature's UI (`Edit Configuration -> Build Features ->
+  Commit status publisher -> Disable`). Confirm via the build's
+  "Build features" tab that the publisher is off.
+
+A future plugin iteration will provide a Build Feature to suppress the
+bundled publisher per-buildType automatically.
+
+## Symptom: admin page shows "No webhook deliveries yet"
+
+### What you see
+
+`Administration -> Server Administration -> GitHub Bridge` reports
+`No webhook deliveries yet.` even though you have configured GitHub.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The webhook URL or secret was wrong; GitHub never delivered | Check `Recent Deliveries` on the App's webhook page. If everything there shows 4xx, fix on the GitHub side and re-deliver. |
+| TC was restarted recently | The in-memory log is cleared on restart. Trigger a `ping` redeliver from GitHub. |
+| The dedicated log file shows entries but the admin page does not | The in-memory log is independent of the file log; only records calls that pass through `PluginWebhookController.doHandle`. If GitHub reaches a reverse proxy and the proxy returns 502 before TC, the plugin never sees the request. Check the proxy access log. |
+
+## Symptom: draft / ready tags are visible but not styled as pills
+
+### What you see
+
+Tags `draft` and `ready` appear in build lists as plain grey TC tags,
+not coloured pills.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The plugin is loaded but `BranchEnrichmentPageExtension` is not registered | Restart TC after upgrading; verify in the server log: `Registered BranchEnrichmentPageExtension at ALL_PAGES_FOOTER_PLUGIN_CONTAINER`. |
+| TeamCity's tag markup changed | The CSS selectors in `tcghBranchEnrichment.jsp` target `.buildTag`, `.tag`, `a.tagLabel`. If a TC update changes these classes, our enrichment silently no-ops. Open an issue. |
+| Browser cache | Hard refresh (Ctrl-Shift-R). The fragment is served as part of every page, no separate file to cache, but stale CSS rules on the host page can mask ours. |
 
 ## Debug logging
 

@@ -15,6 +15,7 @@ class PluginWebhookController(
     authInterceptor: AuthorizationInterceptor,
     private val webhookConfig: WebhookConfig,
     private val readyForReviewListener: ReadyForReviewListener,
+    private val recentEventsLog: RecentEventsLog,
 ) : BaseController() {
 
     init {
@@ -28,6 +29,11 @@ class PluginWebhookController(
         if (event == null) {
             response.status = HttpServletResponse.SC_BAD_REQUEST
             response.writer.write("Missing X-GitHub-Event header")
+            recentEventsLog.record(
+                event = "(missing)", repo = null, action = null,
+                httpStatus = HttpServletResponse.SC_BAD_REQUEST,
+                outcome = Outcome.REJECTED, detail = "missing X-GitHub-Event header",
+            )
             return null
         }
 
@@ -37,6 +43,11 @@ class PluginWebhookController(
             LOG.warn("Webhook with invalid or missing signature rejected (event=$event)")
             response.status = HttpServletResponse.SC_UNAUTHORIZED
             response.writer.write("Invalid signature")
+            recentEventsLog.record(
+                event = event, repo = null, action = null,
+                httpStatus = HttpServletResponse.SC_UNAUTHORIZED,
+                outcome = Outcome.REJECTED, detail = "invalid or missing signature",
+            )
             return null
         }
 
@@ -44,14 +55,24 @@ class PluginWebhookController(
             "ping" -> {
                 response.status = HttpServletResponse.SC_OK
                 response.writer.write("pong")
+                recentEventsLog.record(event, null, null, HttpServletResponse.SC_OK, Outcome.ACCEPTED, "pong")
             }
             "pull_request" -> {
-                handlePullRequest(String(payload, Charsets.UTF_8))
+                val result = handlePullRequest(String(payload, Charsets.UTF_8))
                 response.status = HttpServletResponse.SC_OK
+                recentEventsLog.record(
+                    event = event,
+                    repo = result.repo,
+                    action = result.action,
+                    httpStatus = HttpServletResponse.SC_OK,
+                    outcome = if (result.handled) Outcome.ACCEPTED else Outcome.SKIPPED,
+                    detail = if (result.handled) "ready_for_review handled" else "action ignored",
+                )
             }
             else -> {
                 LOG.debug("Ignoring unsupported event: $event")
                 response.status = HttpServletResponse.SC_NO_CONTENT
+                recentEventsLog.record(event, null, null, HttpServletResponse.SC_NO_CONTENT, Outcome.SKIPPED, "unsupported event")
             }
         }
         return null
@@ -66,10 +87,18 @@ class PluginWebhookController(
         return SignatureVerifier.verify(payload, provided, secret)
     }
 
-    private fun handlePullRequest(payload: String) {
-        val parsed = WebhookPayloadParser.parseReadyForReview(payload) ?: return
-        readyForReviewListener.handle(parsed)
+    private fun handlePullRequest(payload: String): HandledResult {
+        val (action, repo) = WebhookPayloadParser.peekActionAndRepo(payload)
+        val parsed = WebhookPayloadParser.parseReadyForReview(payload)
+        return if (parsed != null) {
+            readyForReviewListener.handle(parsed)
+            HandledResult(handled = true, action = action ?: "ready_for_review", repo = repo ?: parsed.repo.slug)
+        } else {
+            HandledResult(handled = false, action = action, repo = repo)
+        }
     }
+
+    private data class HandledResult(val handled: Boolean, val action: String?, val repo: String?)
 
     companion object {
         const val WEBHOOK_PATH: String = "/app/teamcity-github-bridge/webhook"

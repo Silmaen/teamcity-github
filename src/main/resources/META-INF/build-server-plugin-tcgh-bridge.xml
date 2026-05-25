@@ -8,6 +8,7 @@
     <bean class="io.github.dlachouette.teamcity.github.TeamCityGitHubBridgePlugin"/>
 
     <bean class="io.github.dlachouette.teamcity.github.config.WebhookConfig"/>
+    <bean class="io.github.dlachouette.teamcity.github.config.LogPathResolver"/>
 
     <bean class="io.github.dlachouette.teamcity.github.api.GitHubClient"/>
     <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
@@ -16,9 +17,15 @@
     <bean class="io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener"/>
     <bean class="io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher"/>
+    <bean class="io.github.dlachouette.teamcity.github.enrich.PrPromotionTagger"/>
     <bean class="io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter"/>
+    <bean class="io.github.dlachouette.teamcity.github.report.BuildStatusCheckRunPublisher"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.web.RecentEventsLog"/>
 
     <bean class="io.github.dlachouette.teamcity.github.web.PluginWebhookController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.WebhookInfoController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.AdminConsolePage"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.BranchEnrichmentPageExtension"/>
 
 </beans>

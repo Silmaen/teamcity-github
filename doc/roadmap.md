@@ -189,6 +189,33 @@ src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml  (+1 bean)
 
 ## Gap 2 — Branch display customization in TeamCity build lists
 
+> **SDK spike result (2026-05-25):** ❌ no public extension point in
+> TC 2026.1.
+>
+> Checked classes that would have done it server-side:
+> `BuildBranchInfoProvider`, `BranchDisplayNameProvider`,
+> `BuildBranchUiInfoProvider`, `PrBranchInfoProvider`. None of them
+> exist in the 2026.1 jars. `Branch.getDisplayName()` is read-only on
+> `jetbrains.buildServer.serverSide.Branch` and `BranchEx` adds no
+> mutator. `BuildPromotion.setDesiredBranchName` exists but rewrites
+> the actual ref, not the display string.
+>
+> **Partial mitigation shipped in v0.5.0:**
+> `BranchEnrichmentPageExtension` injects a CSS+JS fragment in
+> `ALL_PAGES_FOOTER_PLUGIN_CONTAINER` that re-styles the
+> `draft`/`ready` tags placed by `PrPromotionTagger` (Gap 1) into
+> coloured pills. Source branch is **not** rendered into the column;
+> users see it through `PrBuildEnricher` which sets
+> `buildNumber = "<n> <headRef>"` (visible in the Build column,
+> adjacent to the Branch column).
+>
+> **Full Gap 2 stays open** until JetBrains ships a public
+> `BranchDisplayNameProvider` SPI (track the
+> [TC issue tracker](https://youtrack.jetbrains.com/issues/TW)) or a
+> stable JSON endpoint listing buildPromotion -> branch metadata that
+> a client-side enrichment can consume without per-row API calls.
+
+
 ### Problem statement
 
 In every TC build-list view (project home, build configuration page,
@@ -487,6 +514,297 @@ src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml  (+1 bean)
 
 ---
 
+## Gap 4 — Dedicated log file for the plugin
+
+### Problem statement
+
+The plugin currently writes through `Logger.getInstance(class.java.name)`,
+which feeds the **server-wide** `teamcity-server.log`. On a busy TC
+server that log is dominated by core noise (VCS polling, agent
+heartbeats, build queue scheduler), drowning the plugin's lines. An
+operator chasing a webhook delivery has to grep through MBs of
+unrelated log to find `PluginWebhookController` entries.
+
+A dedicated log file makes plugin operation observable at a glance:
+who delivered a webhook, when, whether it was accepted, what the
+filter decided, what was retriggered.
+
+### Current behaviour
+
+All loggers under `io.github.dlachouette.teamcity.github.*` are
+attached only to TC's root log4j appender (`ROLL` -> `teamcity-server.log`).
+No dedicated appender, no rolling policy specific to the plugin.
+
+### Proposed design
+
+Ship a recommended log4j fragment that the operator adds (or merges)
+to `<TC_DATA_DIR>/config/teamcity-server-log4j.xml`. The fragment
+defines a `tcgh-bridge` appender writing to
+`<TC_DATA_DIR>/logs/teamcity-github-bridge.log` with daily rolling
+and 14-day retention, and routes our package's loggers to it
+(`additivity="false"` so they do not duplicate to the server log).
+
+The plugin itself does **not** modify log4j configuration at runtime
+(TC discourages plugins doing that — it's a global resource). It
+just provides the snippet and surfaces the recommended path via the
+`/info` endpoint so the admin page (Gap 5) can show it.
+
+### Sketch
+
+`src/main/resources/teamcity-github-bridge-log4j-snippet.xml`:
+
+```xml
+<!--
+  TeamCity GitHub Bridge - dedicated log file.
+  Merge into <TC_DATA_DIR>/config/teamcity-server-log4j.xml.
+-->
+<appender name="TCGH_BRIDGE" class="org.apache.log4j.rolling.RollingFileAppender">
+    <rollingPolicy class="jetbrains.buildServer.util.TCRollingPolicy">
+        <param name="FileNamePattern"
+               value="${teamcity_logs}/teamcity-github-bridge.log.%d{yyyy-MM-dd}.gz"/>
+        <param name="ActiveFileName" value="${teamcity_logs}/teamcity-github-bridge.log"/>
+        <param name="MaxHistory" value="14"/>
+    </rollingPolicy>
+    <layout class="org.apache.log4j.PatternLayout">
+        <param name="ConversionPattern" value="[%d{HH:mm:ss.SSS}] %-5p %c{1} - %m%n"/>
+    </layout>
+</appender>
+
+<logger name="io.github.dlachouette.teamcity.github" additivity="false">
+    <level value="INFO"/>
+    <appender-ref ref="TCGH_BRIDGE"/>
+</logger>
+```
+
+Expose the resolved path on `/info`:
+
+```json
+{
+  "payloadUrl": "...",
+  "logFile": "<TC_DATA_DIR>/logs/teamcity-github-bridge.log",
+  "logConfigured": true | false,
+  ...
+}
+```
+
+`logConfigured` is `true` when our logger has the dedicated
+`additivity="false"` appender attached — detected at runtime via
+`Logger.getInstance("io.github.dlachouette.teamcity.github").appenders`
+introspection (or, more robustly, by checking whether
+`tcgh-bridge.log` exists in the TC logs dir).
+
+### Alternatives considered
+
+- **Programmatic log4j configuration on plugin load**: rejected — it
+  changes global state and conflicts with operators who maintain
+  their own log routing.
+- **java.util.logging instead of IntelliJ Logger**: would side-step
+  log4j entirely but break the convention TC plugins follow and
+  lose the rolling/retention features.
+- **Console-only via System.out**: not a real solution; operators
+  expect a file.
+
+### Test plan
+
+Pure unit-testable parts are limited (the routing happens in the
+host log4j config). What we can test:
+
+- The `/info` response shape includes `logFile` and `logConfigured`.
+- The recommended snippet file is present in the jar resources and
+  is valid XML.
+
+End-to-end:
+
+- Install the plugin on TC with the snippet merged into the log
+  config; verify `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`
+  appears and accumulates our entries only.
+- Verify `teamcity-server.log` no longer contains
+  `io.github.dlachouette.*` entries (additivity off).
+
+### Risks
+
+- Snippet must merge cleanly into TC's stock `teamcity-server-log4j.xml`
+  layout. Test against a fresh 2026.1 install before documenting.
+- `${teamcity_logs}` is the TC log dir variable; confirm the exact
+  variable name in 2026.1 (was `${TC_LOGS_DIR}` in older versions).
+
+### Effort
+
+Small. ~50 lines plus doc.
+
+Files touched:
+
+```
+src/main/resources/teamcity-github-bridge-log4j-snippet.xml   (new)
+src/main/kotlin/.../web/WebhookInfo.kt                         (+ logFile, logConfigured)
+src/main/kotlin/.../web/WebhookInfoController.kt               (resolve log path)
+src/main/kotlin/.../config/LogPathResolver.kt                  (new, small helper)
+doc/configuration.md                                            (instructions to merge snippet)
+doc/troubleshooting.md                                          (logFile pointer)
+```
+
+---
+
+## Gap 5 — Admin / help page in TeamCity UI
+
+### Problem statement
+
+The plugin has zero presence in the TeamCity admin UI today.
+Operators discover it via:
+- `Administration -> Plugins List` (just shows the version chip).
+- the `/info` JSON endpoint (curl only, not browsable).
+- `doc/*.md` files in this repository.
+
+A dedicated admin page closes the gap: a single in-product view
+that shows the plugin is alive, what it is configured to do, what
+it has done recently, and how to reach the full documentation.
+
+### Proposed design
+
+A new `AdminPage` extension under
+`Administration -> Server Administration -> Diagnostics ->
+GitHub Bridge` (left sidebar tab), plus a `Help` accordion at the
+bottom of the same page.
+
+Page sections, top to bottom:
+
+```
++--------------------------------------------------------------+
+| Plugin status                                                |
+|   Version: 0.2.0                                             |
+|   Webhook URL: https://.../app/teamcity-github-bridge/webhook|
+|   Secret configured: yes / NO (link to internal-properties)  |
+|   Dedicated log: <path>      (or "not configured" + snippet) |
++--------------------------------------------------------------+
+| Live config snapshot   (mirror of /info)                     |
+|   pretty-printed JSON, copy-paste button                     |
++--------------------------------------------------------------+
+| Recent events                                                |
+|   last 20 webhook deliveries seen by the plugin              |
+|   timestamp | event | repo | action | http status            |
+|   (tailed from the dedicated log if available)               |
++--------------------------------------------------------------+
+| GitHub App quick-config                                      |
+|   one-click copy of:                                         |
+|     - payload URL                                            |
+|     - recommended events list                                |
+|     - secret status                                          |
++--------------------------------------------------------------+
+| Help                                                         |
+|   - one-paragraph "what this plugin does"                    |
+|   - link to README on GitHub                                 |
+|   - link to each doc/*.md page on GitHub                     |
+|   - troubleshooting collapsible (common 401/404 fixes)       |
++--------------------------------------------------------------+
+```
+
+### SDK signatures to verify
+
+```
+jetbrains.buildServer.web.openapi.SimplePageExtension          (base, prefer)
+jetbrains.buildServer.web.openapi.WebControllerManager          (registration)
+jetbrains.buildServer.controllers.admin.AdminPage               (admin-specific)
+jetbrains.buildServer.web.openapi.PagePlace                     (placement)
+jetbrains.buildServer.web.openapi.PlaceId                       (where to slot)
+```
+
+Probable path: subclass `AdminPage` (or `SimplePageExtension` if
+`AdminPage` is non-public in 2026.1), point at a JSP template
+located at `buildServerResources/admin/tcghAdmin.jsp` inside the
+plugin jar.
+
+### Sketch
+
+```kotlin
+class AdminConsolePage(
+    pagePlaces: PagePlaces,
+    pluginDescriptor: PluginDescriptor,
+    private val webhookConfig: WebhookConfig,
+    private val buildServer: SBuildServer,
+    private val eventLog: RecentEventsLog,    // new; in-memory ring buffer
+) : AdminPage(pagePlaces, "tcghAdmin", pluginDescriptor.pluginResourcesPath("admin/tcghAdmin.jsp"),
+              "GitHub Bridge") {
+
+    init {
+        addCssFile("/css/admin/diagnostics.css")
+    }
+
+    override fun getGroup(): String = "SERVER_RELATED_GROUP"
+
+    override fun fillModel(model: MutableMap<String, Any>, request: HttpServletRequest) {
+        model["pluginVersion"] = "0.2.0"
+        model["webhookUrl"] = absoluteWebhookUrl(request)
+        model["secretConfigured"] = webhookConfig.isSecretConfigured()
+        model["logFile"] = LogPathResolver(buildServer).resolveOrNull()
+        model["recentEvents"] = eventLog.snapshot()
+    }
+}
+```
+
+### Recent events tracking
+
+To populate the "Recent events" section, add a small `RecentEventsLog`
+bean (in-memory ring buffer, ~100 entries) that the controllers
+update on every accepted webhook:
+
+```kotlin
+class RecentEventsLog(private val capacity: Int = 100) {
+    private data class Entry(
+        val timestampMs: Long,
+        val event: String,
+        val repo: String?,
+        val action: String?,
+        val httpStatus: Int,
+        val outcome: String,   // "accepted" | "skipped" | "rejected"
+    )
+    private val ring = ArrayDeque<Entry>(capacity)
+    @Synchronized fun record(...) { ... }
+    @Synchronized fun snapshot(): List<Entry> = ring.toList()
+}
+```
+
+This avoids parsing the dedicated log file at admin-page render
+time (which would be fragile and slow) and works even when the
+dedicated log is not configured.
+
+### Test plan
+
+- Unit-test `RecentEventsLog` (capacity, FIFO eviction, thread
+  safety basic check).
+- Unit-test the JSP model population by calling `fillModel` with a
+  stubbed request.
+- E2E: navigate to the admin page on a running TC, verify each
+  section renders, deliver a webhook, confirm it shows up in
+  "Recent events" within seconds.
+
+### Effort
+
+Medium-large. JSP templating in the TC plugin SDK is a learning
+curve if you have not done it before. ~400 lines including JSP +
+small CSS.
+
+Files touched:
+
+```
+src/main/kotlin/.../web/AdminConsolePage.kt           (new)
+src/main/kotlin/.../web/RecentEventsLog.kt            (new)
+src/main/kotlin/.../web/PluginWebhookController.kt    (call eventLog.record)
+src/main/resources/buildServerResources/admin/tcghAdmin.jsp  (new)
+src/main/resources/buildServerResources/admin/tcgh.css       (new, small)
+src/test/kotlin/.../web/RecentEventsLogTest.kt        (new)
+src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml   (+2 beans)
+```
+
+### Risks
+
+- `AdminPage` may have moved between TC versions; verify the
+  placement constant (`SERVER_RELATED_GROUP` etc.) against 2026.1.
+- Resource paths in the plugin jar (`buildServerResources/...`) are
+  served under `/plugins/<pluginName>/...`. The assembly descriptor
+  may need a tweak to include them.
+
+---
+
 ## Cross-cutting concerns
 
 ### Validation against a real TeamCity instance
@@ -559,14 +877,19 @@ Owl's DSL is `CID_392f0141078df64b20e1bb01ada5697f`.
 
 ## Sequencing
 
-Recommended order if you're doing all three:
+Recommended order, updated for the five gaps:
 
-1. **Gap 1** first — small, low-risk, immediate UX win in the TC queue.
-2. **Gap 3** Path B — additive, reuses the Check Runs infrastructure
-   you just built, lets users opt into richer GitHub UI.
-3. **Gap 2** last — has an SDK-availability unknown that warrants a
-   short spike before committing.
+1. **Gap 1** — small, immediate UX win in the TC queue. Ships with
+   Gap 4 as v0.2.0.
+2. **Gap 4** — dedicated log file. Independent of the others;
+   pairs naturally with Gap 1 because they share a release.
+3. **Gap 5** — admin/help page. Needs Gap 4 (log path surfaced) but
+   degrades gracefully when log is not configured. Ships as v0.3.0.
+4. **Gap 3 Path B** — additive Check Runs publisher, reuses the
+   infrastructure already in `DraftCheckRunReporter`. v0.4.0.
+5. **Gap 2** — branch display; has an SDK-availability unknown that
+   warrants a short spike before committing. v0.5.0.
 
-After all three: revisit roadmap items 3 & 4 in
+After all five: revisit roadmap items in
 [development.md#roadmap](development.md#roadmap) — they may be merged
-or rewritten given what you've learned.
+or rewritten given what has been learned.

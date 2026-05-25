@@ -6,6 +6,8 @@ data class WebhookInfo(
     val sslVerification: Boolean,
     val recommendedEvents: List<String>,
     val secretConfigured: Boolean,
+    val logFile: String,
+    val logConfigured: Boolean,
     val pluginVersion: String,
 ) {
     fun toJson(): String = buildString {
@@ -17,6 +19,8 @@ data class WebhookInfo(
         append(recommendedEvents.joinToString(",") { quote(it) })
         append("],")
         append("\"secretConfigured\":$secretConfigured,")
+        append("\"logFile\":${quote(logFile)},")
+        append("\"logConfigured\":$logConfigured,")
         append("\"pluginVersion\":${quote(pluginVersion)}")
         append('}')
     }
@@ -37,6 +41,11 @@ data class WebhookInfo(
         |## Subscribe to events
         |
         |${recommendedEvents.joinToString("\n") { "- `$it`" }}
+        |
+        |## Dedicated log
+        |
+        |Expected path: `$logFile`
+        |Status: ${if (logConfigured) "configured (file exists)" else "**not configured** - merge the log4j snippet shipped with the plugin into `teamcity-server-log4j.xml`"}
         |
         |Plugin version: $pluginVersion
         |""".trimMargin()

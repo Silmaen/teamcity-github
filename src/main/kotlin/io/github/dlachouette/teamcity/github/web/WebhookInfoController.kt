@@ -1,5 +1,6 @@
 package io.github.dlachouette.teamcity.github.web
 
+import io.github.dlachouette.teamcity.github.config.LogPathResolver
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
 import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
@@ -14,6 +15,7 @@ class WebhookInfoController(
     authInterceptor: AuthorizationInterceptor,
     private val buildServer: SBuildServer,
     private val webhookConfig: WebhookConfig,
+    private val logPathResolver: LogPathResolver,
 ) : BaseController() {
 
     init {
@@ -31,6 +33,8 @@ class WebhookInfoController(
             sslVerification = scheme == "https",
             recommendedEvents = WebhookEvents.RECOMMENDED,
             secretConfigured = webhookConfig.isSecretConfigured(),
+            logFile = logPathResolver.expectedFile().absolutePath,
+            logConfigured = logPathResolver.isConfigured(),
             pluginVersion = buildServer.fullServerVersion,
         )
 

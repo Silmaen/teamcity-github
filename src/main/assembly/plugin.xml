@@ -24,6 +24,10 @@
                 <include>${project.artifactId}-${project.version}.jar</include>
             </includes>
         </fileSet>
+        <fileSet>
+            <directory>${project.basedir}/src/main/resources/buildServerResources</directory>
+            <outputDirectory>buildServerResources</outputDirectory>
+        </fileSet>
     </fileSets>
 
     <dependencySets>

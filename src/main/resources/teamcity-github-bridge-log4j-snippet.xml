@@ -1,0 +1,29 @@
+<!--
+  TeamCity GitHub Bridge - dedicated log file.
+
+  Merge this fragment into <TC_DATA_DIR>/config/teamcity-server-log4j.xml
+  inside the root <log4j:configuration> element. After saving, TeamCity
+  hot-reloads log4j; no restart required.
+
+  Result: all `io.github.dlachouette.teamcity.github.*` logger output
+  goes to <TC_DATA_DIR>/logs/teamcity-github-bridge.log instead of
+  drowning in teamcity-server.log.
+
+  Daily rotation, 14-day retention, gzipped older files.
+-->
+<appender name="TCGH_BRIDGE" class="org.apache.log4j.rolling.RollingFileAppender">
+    <rollingPolicy class="jetbrains.buildServer.util.TCRollingPolicy">
+        <param name="FileNamePattern"
+               value="${teamcity_logs}/teamcity-github-bridge.log.%d{yyyy-MM-dd}.gz"/>
+        <param name="ActiveFileName" value="${teamcity_logs}/teamcity-github-bridge.log"/>
+        <param name="MaxHistory" value="14"/>
+    </rollingPolicy>
+    <layout class="org.apache.log4j.PatternLayout">
+        <param name="ConversionPattern" value="[%d{HH:mm:ss.SSS}] %-5p %c{1} - %m%n"/>
+    </layout>
+</appender>
+
+<logger name="io.github.dlachouette.teamcity.github" additivity="false">
+    <level value="INFO"/>
+    <appender-ref ref="TCGH_BRIDGE"/>
+</logger>

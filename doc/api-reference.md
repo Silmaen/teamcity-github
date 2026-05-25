@@ -14,6 +14,7 @@ protected by HMAC and the info endpoints expose nothing sensitive.
 | `POST` | `/app/teamcity-github-bridge/webhook` | Receive GitHub webhooks | HMAC-SHA256 over the body |
 | `GET`  | `/app/teamcity-github-bridge/info` | Live webhook config snapshot (JSON) | none |
 | `GET`  | `/app/teamcity-github-bridge/info.md` | Same snapshot as Markdown | none |
+| `GET`  | `/admin/admin.html?tab=tcghAdmin&...` | Admin / help page (AdminPage tab, JSP-rendered) | TeamCity admin |
 
 ```mermaid
 flowchart LR
@@ -149,17 +150,21 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
     "ping"
   ],
   "secretConfigured": true,
+  "logFile": "/data/teamcity_server/datadir/logs/teamcity-github-bridge.log",
+  "logConfigured": true,
   "pluginVersion": "TeamCity 2026.1 (build 222521)"
 }
 ```
 
 | Field | Type | Meaning |
 |---|---|---|
-| `payloadUrl` | string | The absolute URL GitHub should POST events to. Computed from the request's host, scheme, port, and context path. |
+| `payloadUrl` | string | The absolute URL GitHub should POST events to. Computed from the request's host, scheme, port, and context path (with `X-Forwarded-Proto` and `X-Forwarded-Host` respected when present). |
 | `contentType` | string | Always `application/json`. The plugin does not parse `application/x-www-form-urlencoded`. |
-| `sslVerification` | boolean | `true` when the request reached the plugin over HTTPS. Reflected so the operator copies the right value into GitHub. |
-| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Currently acted on: `pull_request`, `ping`. Forward-listed: `pull_request_review`, `push`, `check_suite`. |
+| `sslVerification` | boolean | `true` when the request reached the plugin over HTTPS (after honouring `X-Forwarded-Proto`). Reflected so the operator copies the right value into GitHub. |
+| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Currently acted on: `pull_request` (action `ready_for_review`), `ping`. Forward-listed: `pull_request_review`, `push`, `check_suite`. |
 | `secretConfigured` | boolean | `true` when `tcgh.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
+| `logFile` | string | Absolute path where the plugin's dedicated log file lives (or *would* live) - always `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`. |
+| `logConfigured` | boolean | `true` when the dedicated log file currently exists, i.e. an operator has merged the log4j snippet (`teamcity-github-bridge-log4j-snippet.xml`) into `teamcity-server-log4j.xml`. |
 | `pluginVersion` | string | The TeamCity server version string. Used as a sanity check (the plugin is alive). |
 
 ### Response codes
@@ -205,6 +210,34 @@ Configure these values on your GitHub App webhook page
 
 Plugin version: TeamCity 2026.1 (build 222521)
 ```
+
+## Admin page
+
+The plugin registers an `AdminPage` tab visible at:
+
+```
+<TC_URL>/admin/admin.html?item=<...>&tab=tcghAdmin
+```
+
+Navigate to it via `Administration -> Server Administration ->
+GitHub Bridge` in the sidebar (the page is grouped under
+`SERVER_RELATED_GROUP`).
+
+The page shows:
+
+- Plugin and TC versions.
+- Webhook URL, with the secret and dedicated-log configuration
+  status (red / yellow / green chips).
+- Last 100 webhook deliveries in memory (event, action, repository,
+  HTTP status, outcome, detail). Cleared on server restart; the
+  dedicated log is the long-term record.
+- A copy-paste card with the GitHub App webhook quick-config.
+- A Help section linking to every page under `doc/` on GitHub plus
+  a "Common 401 / 404 troubleshooting" fold.
+
+Access is gated by TeamCity's standard admin auth - the JSP is
+served from inside `AdminPage`, which inherits TC's admin
+authorization filter.
 
 ## Versioning
 

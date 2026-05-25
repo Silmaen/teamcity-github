@@ -253,7 +253,131 @@ flowchart TD
     J[Build: web-lint x not enqueued]
 ```
 
-## Scenario 10: queue dedup
+## Scenario 10: a build finishes (Check Run publication)
+
+**Actor**: a build configuration opted into the bridge finishes (success or failure).
+
+**Expected outcome**: a GitHub Check Run is posted carrying the
+build's actual status text, replacing the bundled
+`commitStatusPublisher`'s hard-coded
+`"TeamCity build finished"` description for that build.
+
+```mermaid
+sequenceDiagram
+    participant Build as Running build
+    participant Pub as BuildStatusCheckRunPublisher
+    participant TR as TokenResolver
+    participant GC as GitHubClient
+    participant GH as GitHub API
+
+    Build->>Pub: buildStarted
+    Pub->>TR: resolveAccessToken
+    Pub->>GC: postCheckRun(status=in_progress)
+    GC->>GH: POST /repos/.../check-runs
+    GH-->>GC: 201
+
+    Note over Build: build runs, agent emits<br/>##teamcity[buildStatus text='3 warnings; 0 errors']
+
+    Build->>Pub: buildFinished
+    Pub->>Pub: mapBuildOutcome(status, isInterrupted)
+    Pub->>GC: postCheckRun(status=completed,<br/>conclusion=success/failure/cancelled,<br/>summary=<status text>)
+    GC->>GH: POST /repos/.../check-runs
+    GH-->>GC: 201
+```
+
+What appears on the PR:
+
+| State | GitHub UI shows |
+|---|---|
+| In progress | `TeamCity / <buildType full name>` with status "Expected" -> "In progress" |
+| Success | Check Run "Build passed", `output.summary` = the build's `statusDescriptor.text` (e.g. "3 warnings; 0 errors") |
+| Failure | Check Run "Build failed", same summary source |
+| Cancelled | Check Run "Build cancelled" (any underlying status, when the build was interrupted) |
+
+> **Coexistence with the bundled `commitStatusPublisher`**: until
+> you disable the bundled publisher on the opted-in build types,
+> GitHub shows **both** a Commit Status (TC's, generic text) and a
+> Check Run (this plugin's, rich text). Reconfigure branch
+> protection rules to require the Check Run name(s) and treat the
+> Commit Statuses as informational. A future iteration will provide
+> a Build Feature to silence the bundled publisher per buildType.
+
+## Scenario 11: operator visits the admin page
+
+**Actor**: a TC admin opening the in-product help page.
+
+**Expected outcome**: the admin lands on a self-contained dashboard
+that tells them at a glance whether the plugin is healthy.
+
+Navigation: `Administration -> Server Administration -> GitHub
+Bridge`.
+
+```
++----------------------------------------------------------+
+| TeamCity GitHub Bridge                                   |
++----------------------------------------------------------+
+| Plugin status                                            |
+|   Plugin version:    0.5.0                               |
+|   TeamCity version:  TeamCity 2026.1 (build 222521)      |
+|   Webhook URL:       https://.../app/.../webhook         |
+|   HMAC secret:       [configured]                        |
+|   Dedicated log:     [configured] /.../...-bridge.log    |
+|   Config snapshot:   JSON | Markdown                     |
++----------------------------------------------------------+
+| Recent events (last 12 in-memory)                        |
+|   2026-05-25 14:02:30  pull_request  ready_for_review    |
+|                        Silmaen/Owl   200  accepted       |
+|   2026-05-25 14:01:55  ping                              |
+|                                      200  accepted       |
+|   ...                                                    |
++----------------------------------------------------------+
+| GitHub App webhook quick-config                          |
+|   (paste-ready table for the App's webhook page)         |
++----------------------------------------------------------+
+| Help & documentation                                     |
+|   - README                                               |
+|   - Installation, GitHub App setup, Webhook setup, ...   |
+|   - Common 401 / 404 troubleshooting (fold)              |
++----------------------------------------------------------+
+```
+
+The "Recent events" table is in-memory only (ring buffer of 100
+entries, cleared on TC restart). The dedicated log file is the
+long-term audit. If you do not see any events after a webhook
+delivery, recheck signature and URL with the troubleshooting fold
+on the same page.
+
+## Scenario 12: draft / ready pill rendering in TC lists
+
+**Actor**: any user looking at a build configuration page or the
+queue page.
+
+**Expected outcome**: builds carrying the `draft` or `ready` tag
+(placed by `PrPromotionTagger` - scenario 1 / 3) display a coloured
+pill instead of TC's default grey chip.
+
+```
+Builds list
++----+--------------------+--------+------------------------------+
+| #  | Build              | Branch | Tags                         |
++----+--------------------+--------+------------------------------+
+| 87 | #87 Feature/raycast| pull/189 | [draft] (amber)            |
+| 86 | #86 main           | main     |                            |
+| 85 | #85 Feature/foo    | pull/188 | [ready] (green)            |
++----+--------------------+--------+------------------------------+
+```
+
+How it works: a `SimplePageExtension` registered in
+`ALL_PAGES_FOOTER_PLUGIN_CONTAINER` injects a small CSS + JS
+fragment into every page. The JS walks the rendered tag anchors
+and adds a CSS class when the text matches `draft` or `ready`. No
+network calls, no DOM dependencies beyond TC's stock tag markup;
+safe to ship.
+
+If TC ever changes the markup the styling silently stops, the page
+remains intact.
+
+## Scenario 13: queue dedup
 
 **Actor**: a build is already running for `pull/189` when the
 ready-for-review webhook arrives.
@@ -267,14 +391,18 @@ That decision lives in TC core.
 
 ## Summary table
 
-| Trigger | Plugin action | Build outcome |
+| Trigger | Plugin action | Build / GitHub outcome |
 |---|---|---|
-| Draft PR opened | Filter holds the build | Held in queue with wait reason |
-| Push to draft | Filter holds the new build | Same |
-| Marked ready for review | Listener enqueues + filter allows | Builds run on the latest revision |
+| Draft PR opened | Promotion tagged `draft` + skipped Check Run posted + filter holds | Held in queue with wait reason, pill visible, GitHub PR shows "Skipped: draft PR" |
+| Push to draft | Same path again on new revision | Same |
+| Marked ready for review | Listener enqueues + promotion tagged `ready` + filter allows | Builds run, ready pill visible, in-progress Check Run posted |
+| Build starts | `BuildStatusCheckRunPublisher.buildStarted` | GitHub Check Run status = `in_progress`, title "Building" |
+| Build finishes (success) | `BuildStatusCheckRunPublisher.buildFinished` | GitHub Check Run status = `completed`, conclusion `success`, summary = build's `statusDescriptor.text` |
+| Build finishes (failure) | Same hook, different mapping | conclusion `failure` |
+| Build cancelled | Same hook, `isInterrupted` short-circuits | conclusion `cancelled` |
 | Reverted to draft | None | In-flight builds continue, new ones held |
 | API error during draft check | Logged warning | Build allowed (fail-open) |
-| Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged |
+| Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
 | Build type not opted in | None | No change |
 
 ## See also

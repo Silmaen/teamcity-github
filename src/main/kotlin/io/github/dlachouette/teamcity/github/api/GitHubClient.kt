@@ -107,15 +107,22 @@ open class GitHubClient {
         }
 
         // Public for testing — verifies we build the exact JSON shape GitHub expects.
+        // GitHub Check Runs API: when status != completed, the conclusion field
+        // must NOT be sent. Otherwise it's required.
         fun encodeCheckRunPayload(request: CheckRunRequest): String {
             val root: ObjectNode = MAPPER.createObjectNode()
             root.put("name", request.name)
             root.put("head_sha", request.headSha)
-            root.put("status", "completed")
-            root.put("conclusion", request.conclusion.apiValue)
+            root.put("status", request.status.apiValue)
+            if (request.status == CheckRunStatus.COMPLETED) {
+                val conclusion = request.conclusion
+                    ?: error("CheckRunRequest with status=COMPLETED must carry a conclusion")
+                root.put("conclusion", conclusion.apiValue)
+            }
             val output: ObjectNode = root.putObject("output")
             output.put("title", request.outputTitle)
             output.put("summary", request.outputSummary)
+            request.detailsUrl?.let { root.put("details_url", it) }
             return MAPPER.writeValueAsString(root)
         }
     }
@@ -124,10 +131,18 @@ open class GitHubClient {
 data class CheckRunRequest(
     val name: String,
     val headSha: String,
-    val conclusion: CheckRunConclusion,
+    val status: CheckRunStatus,
+    val conclusion: CheckRunConclusion?,
     val outputTitle: String,
     val outputSummary: String,
+    val detailsUrl: String? = null,
 )
+
+enum class CheckRunStatus(val apiValue: String) {
+    QUEUED("queued"),
+    IN_PROGRESS("in_progress"),
+    COMPLETED("completed"),
+}
 
 enum class CheckRunConclusion(val apiValue: String) {
     SUCCESS("success"),

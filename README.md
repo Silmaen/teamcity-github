@@ -2,13 +2,15 @@
 
 > A TeamCity 2026.1+ server-side plugin that closes the gap between
 > TeamCity and GitHub: draft PR awareness, automatic retrigger on
-> ready-for-review, App-level webhooks with HMAC verification, and a
-> ready-to-paste configuration endpoint.
+> ready-for-review, App-level webhooks with HMAC verification, rich
+> GitHub Check Runs that carry the build's actual status text, and a
+> native admin page in TeamCity's UI.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](#status)
+[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 
 ---
 
@@ -56,14 +58,30 @@ Concretely:
 
 - **Suppresses builds for draft PRs** via a `StartBuildPrecondition`
   (per-buildType opt-in - paused configs are untouched).
+- **Tags held PRs with `draft` / `ready`** the moment they hit the
+  queue (`PrPromotionTagger`) so the queue UI shows at a glance
+  which builds are deliberately held versus agent-starved.
+- **Publishes a GitHub Check Run** at every lifecycle event:
+  `skipped` for held drafts (`DraftCheckRunReporter`), `in_progress`
+  on start and `success`/`failure`/`cancelled` on finish
+  (`BuildStatusCheckRunPublisher`) - propagating the build's
+  `statusDescriptor.text` into GitHub's PR UI instead of the
+  hard-coded `"TeamCity build finished"` from the bundled publisher.
 - **Listens for `pull_request.ready_for_review`** and enqueues every
   matching build configuration. No more "merged with stale green
   checks".
 - **One webhook URL for the whole GitHub App** instead of one per
   repository. HMAC-SHA256 verification is mandatory and fail-closed.
 - **`/info` endpoint** that returns the live webhook configuration
-  (URL, recommended events, secret status) as JSON or Markdown.
-  Paste-ready into GitHub's App settings.
+  (URL, recommended events, secret status, log path) as JSON or
+  Markdown. Paste-ready into GitHub's App settings.
+- **Native admin page** at `Administration -> Server Administration
+  -> GitHub Bridge` showing plugin status, recent events, and help
+  links.
+- **Dedicated log file** at `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`
+  via a shipped log4j snippet.
+- **Visual pill rendering** of the `draft` / `ready` tags in TC
+  build lists (client-side CSS via a `SimplePageExtension`).
 - **Forward-compatible with the new stateless `ghs_*` token format**
   - tokens are treated as opaque end-to-end.
 
@@ -74,7 +92,7 @@ Everything runs in Docker - nothing is installed on the host.
 ```bash
 # Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-0.1.0-SNAPSHOT.zip
+# -> target/teamcity-github-bridge-0.5.0.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
@@ -171,11 +189,25 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-Alpha. The plugin builds, tests are green (39 unit tests), the zip is
-produced - but it has not yet been validated end-to-end against a
-running TeamCity server. The next milestone is a manual installation
-on a staging instance to confirm the OAuth API signatures match what
-the bytecode promises.
+Beta. Current version is **0.5.0**. 63 unit tests pass. The plugin
+has been installed end-to-end on a real TeamCity 2026.1 server
+(`builder.argawaen.net`) and a signed GitHub App webhook delivery
+has been validated through to `200 pong`. Iterations 1 through 4 of
+the roadmap have shipped:
+
+- v0.2.0: queue tag for draft/ready (`PrPromotionTagger`),
+  dedicated log file.
+- v0.3.0: admin page in TC's UI + in-memory recent events log.
+- v0.4.0: rich GitHub Check Runs that carry the build's actual
+  status text.
+- v0.5.0: pill rendering of draft/ready tags via a client-side
+  Page Extension. **Gap 2 spike** (server-side branch column
+  override) concluded - the SDK does not expose the needed
+  extension point in 2026.1; the cosmetic mitigation ships, the
+  full server-side fix is parked until JetBrains lands the SPI.
+
+Open items are tracked in
+[doc/roadmap.md](doc/roadmap.md#sequencing).
 
 See the [milestone roadmap](doc/development.md#roadmap) for what's
 planned, and [doc/roadmap.md](doc/roadmap.md) for the deep-dive on the

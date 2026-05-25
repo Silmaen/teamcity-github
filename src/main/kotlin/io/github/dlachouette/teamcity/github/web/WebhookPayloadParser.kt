@@ -9,6 +9,20 @@ object WebhookPayloadParser {
     private val LOG = Logger.getInstance(WebhookPayloadParser::class.java.name)
     private val MAPPER = ObjectMapper()
 
+    // Cheap peek used by the events log to record the action and repo
+    // for any pull_request payload, regardless of whether it triggers
+    // a retrigger or not.
+    fun peekActionAndRepo(payload: String): Pair<String?, String?> {
+        return try {
+            val node = MAPPER.readTree(payload)
+            val action = node.path("action").asText("").takeIf { it.isNotBlank() }
+            val repo = node.path("repository").path("full_name").asText("").takeIf { it.isNotBlank() }
+            action to repo
+        } catch (e: Exception) {
+            null to null
+        }
+    }
+
     fun parseReadyForReview(payload: String): ReadyForReviewPayload? {
         return try {
             val node = MAPPER.readTree(payload)

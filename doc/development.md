@@ -37,16 +37,22 @@ teamcity-github/
     |   +-- resources/
     |   |   +-- teamcity-plugin.xml                       # plugin descriptor
     |   |   +-- META-INF/build-server-plugin-tcgh-bridge.xml  # Spring DI
+    |   |   +-- teamcity-github-bridge-log4j-snippet.xml  # log4j fragment for ops
+    |   |   +-- buildServerResources/
+    |   |       +-- admin/tcghAdmin.jsp                   # admin/help page
+    |   |       +-- display/tcghBranchEnrichment.jsp      # draft/ready pill CSS+JS
     |   +-- kotlin/io/github/dlachouette/teamcity/github/
     |       +-- TeamCityGitHubBridgePlugin.kt
-    |       +-- api/                                       # HTTP + token + DTO
-    |       +-- cache/                                     # PR info cache
-    |       +-- config/                                    # internal property reader
-    |       +-- filter/                                    # StartBuildPrecondition
-    |       +-- retrigger/                                 # ready_for_review handler
-    |       +-- web/                                       # controllers + parsers + HMAC
+    |       +-- api/        # HTTP client, token resolver, DTOs (PrInfo, CheckRunRequest, etc.)
+    |       +-- cache/      # PrInfoCache (TTL-based)
+    |       +-- config/     # WebhookConfig, LogPathResolver
+    |       +-- enrich/     # PrBuildEnricher (buildStarted), PrPromotionTagger (queue tag)
+    |       +-- filter/     # DraftAwareBuildFilter (StartBuildPrecondition)
+    |       +-- report/     # DraftCheckRunReporter, BuildStatusCheckRunPublisher
+    |       +-- retrigger/  # ReadyForReviewListener
+    |       +-- web/        # 2 controllers + AdminConsolePage + page extension + signature verifier + payload parser + events log
     +-- test/kotlin/io/github/dlachouette/teamcity/github/
-        +-- api/        cache/        web/    testsupport/   # unit tests
+        +-- api/  cache/  enrich/  report/  web/  testsupport/   # 11 test classes, 63 tests
 ```
 
 ## The Docker-only workflow
@@ -104,15 +110,21 @@ Expected entries: `teamcity-plugin.xml` at the root and
 ./dev test
 ```
 
-Surefire 3.x picks up JUnit 5 automatically. 23 tests covering:
+Surefire 3.x picks up JUnit 5 automatically. 63 tests covering:
 
 | Class | What it tests |
 |---|---|
 | `RepoCoordsTest` | Parser for the `owner/name` slug. |
 | `GitHubClientParsingTest` | Jackson parsing of PR JSON. |
+| `CheckRunPayloadTest` | JSON encoding of Check Run requests, status / conclusion handling, `details_url`. |
 | `WebhookPayloadParserTest` | Jackson parsing of webhook payloads. |
 | `SignatureVerifierTest` | HMAC verification, including the GitHub-published vector and constant-time comparison. |
 | `PrInfoCacheTest` | TTL, invalidation, fallback on fetch failure. |
+| `RecentEventsLogTest` | Ring buffer capacity, FIFO eviction, thread safety. |
+| `PrBuildEnricherTest` | Pure helper that computes build number + tag enrichment from PR info. |
+| `PrPromotionTaggerTest` | Pure helper that computes the draft/ready tag plan on the promotion. |
+| `DraftCheckRunReporterTest` | Pure helper that decides whether to emit a Check Run + the shape of the request. |
+| `BuildStatusCheckRunPublisherTest` | TC `Status` -> GitHub Check Run conclusion mapping, summary truncation. |
 
 ### The `LoggerBootstrap` indirection
 

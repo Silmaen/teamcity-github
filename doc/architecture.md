@@ -12,6 +12,7 @@ flowchart TB
     classDef logic fill:#fff3e0,stroke:#f57c00
     classDef cache fill:#f3e5f5,stroke:#7b1fa2
     classDef sdk fill:#eceff1,stroke:#455a64
+    classDef ui fill:#e8f5e9,stroke:#43a047
 
     subgraph TCSDK["TeamCity SDK"]
         OCM[OAuthConnectionsManager]:::sdk
@@ -19,19 +20,32 @@ flowchart TB
         PM[ProjectManager]:::sdk
         WCM[WebControllerManager]:::sdk
         SBS[SBuildServer]:::sdk
+        SP[ServerPaths]:::sdk
+        PP[PagePlaces]:::sdk
         SBP[StartBuildPrecondition<br/>SPI]:::sdk
+        BSA[BuildServerAdapter<br/>SPI]:::sdk
     end
 
     subgraph Plugin["teamcity-github-bridge"]
         TCB[TeamCityGitHubBridgePlugin<br/>lifecycle bean]:::logic
-        WC[WebhookConfig<br/>HMAC secret reader]:::logic
+        WC[WebhookConfig]:::logic
+        LPR[LogPathResolver]:::logic
         TR[TokenResolver]:::logic
-        GC[GitHubClient<br/>REST + Jackson]:::io
+        GC[GitHubClient<br/>REST + Jackson<br/>getPr / postCheckRun]:::io
         PIC[PrInfoCache<br/>TTL 60s]:::cache
+        REL[RecentEventsLog<br/>ring buffer N=100]:::cache
+
         RFR[ReadyForReviewListener]:::logic
         DAF[DraftAwareBuildFilter]:::logic
+        PBE[PrBuildEnricher<br/>buildStarted]:::logic
+        PPT[PrPromotionTagger<br/>queue tag]:::logic
+        DCR[DraftCheckRunReporter<br/>skipped Check Run]:::logic
+        BSCRP[BuildStatusCheckRunPublisher<br/>in_progress / completed]:::logic
+
         PWC[PluginWebhookController]:::io
         WIC[WebhookInfoController]:::io
+        ACP[AdminConsolePage<br/>TC admin tab]:::ui
+        BEPE[BranchEnrichmentPageExtension<br/>draft/ready pills CSS+JS]:::ui
         WPP[WebhookPayloadParser]:::logic
         SV[SignatureVerifier]:::logic
     end
@@ -39,25 +53,54 @@ flowchart TB
     OCM --> TR
     OTS --> TR
     TR --> DAF
-    TR -.future use.-> GC
+    TR --> PBE
+    TR --> PPT
+    TR --> DCR
+    TR --> BSCRP
 
     GC --> PIC
+    GC --> DCR
+    GC --> BSCRP
     PIC --> DAF
+    PIC --> PBE
+    PIC --> PPT
+    PIC --> DCR
 
     PM --> RFR
     PIC --> RFR
 
+    SBS --> RFR
+    SBS --> PBE
+    SBS --> PPT
+    SBS --> DCR
+    SBS --> BSCRP
+
+    SP --> LPR
+    LPR --> WIC
+    LPR --> ACP
+
     WCM --> PWC
     WCM --> WIC
+    PP --> ACP
+    PP --> BEPE
+
     WC --> PWC
     WC --> WIC
+    WC --> ACP
     SBS --> WIC
+    SBS --> ACP
 
     PWC --> SV
     PWC --> WPP
+    PWC --> REL
+    REL --> ACP
     WPP --> RFR
 
     DAF -.implements.-> SBP
+    PBE -.extends.-> BSA
+    PPT -.extends.-> BSA
+    DCR -.extends.-> BSA
+    BSCRP -.extends.-> BSA
 ```
 
 ## Packages
@@ -66,24 +109,35 @@ flowchart TB
 io.github.dlachouette.teamcity.github
 +-- TeamCityGitHubBridgePlugin   (main lifecycle bean)
 +-- api/
-|   +-- GitHubClient              (open class, HTTP + Jackson)
+|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, postCheckRun)
 |   +-- PrInfo                    (data class)
 |   +-- RepoCoords                (data class + parser)
-|   +-- TokenResolver             (connection -> access token)
+|   +-- TokenResolver             (connection -> access token, opaque)
+|   +-- CheckRunRequest / CheckRunStatus / CheckRunConclusion
 +-- cache/
-|   +-- PrInfoCache               (TTL-based map)
+|   +-- PrInfoCache               (TTL-based, ConcurrentHashMap)
 +-- config/
 |   +-- WebhookConfig             (reads tcgh.webhook.secret)
+|   +-- LogPathResolver           (expected dedicated log path + exists check)
++-- enrich/
+|   +-- PrBuildEnricher           (BuildServerAdapter.buildStarted)
+|   +-- PrPromotionTagger         (BuildServerAdapter.buildTypeAddedToQueue)
 +-- filter/
 |   +-- DraftAwareBuildFilter     (StartBuildPrecondition)
++-- report/
+|   +-- DraftCheckRunReporter         (queued draft -> skipped Check Run)
+|   +-- BuildStatusCheckRunPublisher  (start/finish -> in_progress / completed Check Run)
 +-- retrigger/
-|   +-- ReadyForReviewListener    (enqueues via BuildTypeEx)
+|   +-- ReadyForReviewListener    (enqueues via BuildTypeEx.addToQueue)
 +-- web/
-    +-- PluginWebhookController   (POST /webhook)
-    +-- WebhookInfoController     (GET /info, /info.md)
-    +-- WebhookInfo               (config snapshot DTO)
-    +-- WebhookPayloadParser      (Jackson on pull_request payloads)
-    +-- SignatureVerifier         (HMAC SHA-256 + constant-time eq)
+    +-- PluginWebhookController       (POST /webhook, HMAC, records to RecentEventsLog)
+    +-- WebhookInfoController         (GET /info, /info.md)
+    +-- WebhookInfo                   (config snapshot DTO)
+    +-- WebhookPayloadParser          (Jackson on pull_request payloads)
+    +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
+    +-- RecentEventsLog               (ring buffer, capacity 100)
+    +-- AdminConsolePage              (AdminPage, JSP at admin/tcghAdmin.jsp)
+    +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/tcghBranchEnrichment.jsp)
 ```
 
 ## Spring DI wiring
