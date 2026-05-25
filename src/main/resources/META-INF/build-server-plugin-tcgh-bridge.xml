@@ -18,6 +18,7 @@
 
     <bean class="io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener"/>
     <bean class="io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter"/>
+    <bean class="io.github.dlachouette.teamcity.github.parameters.IsDraftParameterProvider"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrPromotionTagger"/>
     <bean class="io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter"/>

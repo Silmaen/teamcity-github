@@ -35,11 +35,9 @@ class DraftAwareBuildFilter(
         val repoSlug = buildType.parameters[PARAM_REPO_SLUG] ?: return null
         val connectionId = buildType.parameters[PARAM_CONNECTION_ID] ?: return null
 
-        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId)
-        if (accessToken == null) {
-            LOG.warn("Cannot resolve token for ${buildType.externalId}; allowing build to proceed")
-            return null
-        }
+        // TokenResolver logs the underlying cause (rate-limited); a
+        // null return here is silent so we don't double-spam the log.
+        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return null
 
         val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, accessToken)
         if (pr == null) {

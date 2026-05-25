@@ -38,11 +38,8 @@ class PrBuildEnricher(
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
 
-        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId)
-        if (accessToken == null) {
-            LOG.warn("Cannot resolve token for ${buildType.externalId}; skipping enrichment")
-            return
-        }
+        // TokenResolver already logs the cause (rate-limited).
+        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
 
         val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, accessToken)
         if (pr == null) {

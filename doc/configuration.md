@@ -43,6 +43,39 @@ Set in `<TC_DATA_DIR>/config/internal.properties`. Hot-reloaded.
 | `tcgh.github.api.base` | (plugin default) | no | Override for GitHub Enterprise; e.g. `https://github.acme.com/api/v3`. |
 | `tcgh.prinfo.cache.ttl.seconds` | `60` | no | Increase if you hit GitHub rate limits; decrease for tighter loops. |
 
+### Published build parameters (v0.8.0+)
+
+For every build that opts into the plugin (i.e. has both
+`tcgh.github.repo` and `tcgh.github.connectionId` set), the plugin
+publishes one extra build parameter that build steps can read:
+
+| Parameter | Values | Meaning |
+|---|---|---|
+| `teamcity.github.isdraft` | `true` / `false` | `true` exactly when the build runs on a `pull/N` branch *and* the PR's `draft` field is `true`. `false` in every other case (not a PR, PR not draft, PR could not be resolved, missing token, etc.). |
+
+The parameter is available both server-side (visible in the build's
+"Parameters" tab) and on the agent (`%teamcity.github.isdraft%`).
+This closes the knowledge-base gap about TC's bundled
+`pullRequests` feature not publishing `teamcity.pullRequest.isDraft`.
+
+Use it in DSL conditions, script steps, etc.:
+
+```kotlin
+// DSL: skip a step on draft PRs
+script {
+    scriptContent = "echo running heavy step"
+    conditions { equals("teamcity.github.isdraft", "false") }
+}
+```
+
+```bash
+# Agent-side: same idea from a shell step
+if [ "%teamcity.github.isdraft%" = "true" ]; then
+    echo "Skipping heavy step on draft PR"
+    exit 0
+fi
+```
+
 ### Plugin-owned settings file (v0.6.0+)
 
 `<TC_DATA_DIR>/config/teamcity-github-bridge.properties` holds

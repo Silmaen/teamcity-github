@@ -9,7 +9,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 
 ---
@@ -189,7 +189,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-Beta. Current version is **0.7.0**. 74 unit tests pass. The plugin
+Beta. Current version is **0.8.0**. 81 unit tests pass. The plugin
 has been installed end-to-end on a real TeamCity 2026.1 server
 (`builder.argawaen.net`) and a signed GitHub App webhook delivery
 has been validated through to `200 pong`. Iterations 1 through 4 of
@@ -212,6 +212,13 @@ the roadmap have shipped:
   builds (Gap A4 in the roadmap). Consumers can now retire the
   bundled `commitStatusPublisher` on every opted-in buildType
   without losing GitHub PR coverage.
+- v0.7.1: `TokenResolver` accepts both `CID_<hash>` and
+  `PROJECT_EXT_<N>` for `tcgh.github.connectionId`; warns are
+  rate-limited to one per minute per (project, id) pair.
+- v0.8.0: new build parameter `teamcity.github.isdraft`
+  (`true`/`false`) exposed to every opted-in build - closes the
+  long-standing knowledge-base gap about `teamcity.pullRequest.isDraft`
+  not being published by TC.
 
 Open items are tracked in
 [doc/roadmap.md](doc/roadmap.md#sequencing).

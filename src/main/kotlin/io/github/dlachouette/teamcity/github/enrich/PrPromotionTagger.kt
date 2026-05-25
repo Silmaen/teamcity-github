@@ -43,11 +43,8 @@ class PrPromotionTagger(
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
 
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId)
-        if (token == null) {
-            LOG.warn("Cannot resolve token for ${buildType.externalId}; skipping promotion tag")
-            return
-        }
+        // TokenResolver already logs the cause (rate-limited).
+        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
 
         val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, token)
         if (pr == null) {

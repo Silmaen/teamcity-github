@@ -99,11 +99,8 @@ class BuildStatusCheckRunPublisher(
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return null
 
         val headSha = build.revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId)
-        if (token == null) {
-            LOG.warn("Cannot resolve token for ${buildType.externalId}; skipping check run publish")
-            return null
-        }
+        // TokenResolver already logs the cause (rate-limited).
+        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return null
         return PrBuildContext(
             repo = RepoCoords.parse(repoSlug),
             buildType = buildType,

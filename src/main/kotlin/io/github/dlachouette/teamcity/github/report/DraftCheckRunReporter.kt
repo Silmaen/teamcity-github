@@ -60,11 +60,8 @@ class DraftCheckRunReporter(
 
         if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
 
-        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId)
-        if (accessToken == null) {
-            LOG.warn("Cannot resolve token for ${buildType.externalId}; skipping check run report")
-            return
-        }
+        // TokenResolver already logs the cause (rate-limited).
+        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
 
         val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, accessToken)
         if (pr == null) {
