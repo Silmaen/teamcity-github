@@ -198,6 +198,26 @@ object GitHubAwarePR : Template({
 })
 ```
 
+### Behaviour on draft PRs
+
+Once a build configuration is opted in (the three parameters above
+set), the plugin **removes** any queued build for a draft PR from
+the queue (`DraftBuildQueueCleaner`). It does not hold the build
+with a wait reason; the queue stays clean.
+
+The user still sees the deliberate skip on GitHub through the
+`skipped` Check Run posted by `DraftCheckRunReporter` (visible in
+the PR's "Checks" tab as `TeamCity / <buildType> -> Skipped:
+draft PR`). When the PR is marked ready for review, the App-level
+webhook fires and `ReadyForReviewListener` re-enqueues a fresh
+build on the latest revision.
+
+If the cleaner fails (typically because the GitHub API was
+unreachable when the build hit the queue), `DraftAwareBuildFilter`
+serves as a safety net: the build is held with the wait reason
+`PR #N is draft and ...ignoreDrafts is enabled` until the next
+attempt resolves the PR state.
+
 ### Enable on a build configuration
 
 1. Pick a build configuration that runs on PR refs (`+:refs/pull/*/head`

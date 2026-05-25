@@ -23,6 +23,7 @@
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrPromotionTagger"/>
     <bean class="io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter"/>
     <bean class="io.github.dlachouette.teamcity.github.report.BuildStatusCheckRunPublisher"/>
+    <bean class="io.github.dlachouette.teamcity.github.queue.DraftBuildQueueCleaner"/>
 
     <bean class="io.github.dlachouette.teamcity.github.web.RecentEventsLog"/>
 

@@ -9,7 +9,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-0.10.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 
 ---
@@ -189,7 +189,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-Beta. Current version is **0.10.0**. 82 unit tests pass. The plugin
+Beta. Current version is **0.11.0**. 84 unit tests pass. The plugin
 has been installed end-to-end on a real TeamCity 2026.1 server
 (`builder.argawaen.net`) and the full self-test battery passes
 (19/19), validating webhook delivery, HMAC verification, token
@@ -245,6 +245,13 @@ issuance and the GitHub REST round-trip. Release lineage:
   parameters instead. **Breaking**: the previous
   `teamcity.github.bridge.isdraft` (all-lowercase) is renamed to
   `teamcity.github.bridge.isDraft` for consistency.
+- v0.11.0: **`DraftBuildQueueCleaner`** removes draft builds from
+  the TC queue instead of holding them with a wait reason. No more
+  "held draft" clutter; the GitHub Check Run still surfaces the
+  intentional skip, and the build is re-enqueued automatically
+  when the PR becomes ready for review. `DraftAwareBuildFilter`
+  stays in place as a safety net for edge cases where the
+  cleaner fails.
 
 Open items are tracked in
 [doc/roadmap.md](doc/roadmap.md#sequencing).
