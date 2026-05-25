@@ -92,11 +92,8 @@ class BuildStatusCheckRunPublisher(
     }
 
     private fun resolveContext(build: SBuild): PrBuildContext? {
-        val branchName = build.branch?.name ?: return null
-        if (!branchName.startsWith("pull/")) return null
-
         val buildType = build.buildType ?: return null
-        if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return null
+        if (!isOptedIn(buildType.parameters)) return null
 
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return null
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return null
@@ -124,6 +121,23 @@ class BuildStatusCheckRunPublisher(
 
     companion object {
         private val LOG = Logger.getInstance(BuildStatusCheckRunPublisher::class.java.name)
+
+        // Single opt-in for the status publisher since v0.7.0: a
+        // buildType participates as soon as it carries both the
+        // repo slug and the connection ID. The previous version
+        // also required `tcgh.ignoreDrafts=true` and a `pull/N`
+        // branch (Gap A4 in the roadmap), which scoped the
+        // publisher to a subset of builds and forced consumers to
+        // keep the bundled commitStatusPublisher around for the
+        // rest. Lifting both guards gives the plugin full
+        // lifecycle coverage (main + opt-out PR builds + opt-in PR
+        // builds), so consumers can disable the bundled publisher
+        // without losing rows in the GitHub PR UI.
+        fun isOptedIn(parameters: Map<String, String>): Boolean {
+            val repo = parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG]
+            val conn = parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID]
+            return !repo.isNullOrBlank() && !conn.isNullOrBlank()
+        }
 
         // GitHub limits output.summary to 65535 characters. Truncate
         // conservatively to leave headroom for the ellipsis.

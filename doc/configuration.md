@@ -238,6 +238,24 @@ If you only want debug temporarily and do not care about routing:
 
 Reload via `Administration -> Diagnostics -> Logging` or restart.
 
+## Check Run publisher coverage
+
+Since v0.7.0 the plugin's `BuildStatusCheckRunPublisher` posts
+GitHub Check Runs on every lifecycle event of **every** build
+configuration that carries the two parameters
+`tcgh.github.repo` + `tcgh.github.connectionId`. This includes:
+
+- PR builds with `tcgh.ignoreDrafts=true` (the original draft-aware path).
+- PR builds with `tcgh.ignoreDrafts=false` (opt-out subsets, e.g. draft-friendly Linux Clang in Owl).
+- Builds on `main` after merge.
+- Any other branch covered by the buildType's VCS root.
+
+Previously the publisher also required `tcgh.ignoreDrafts == "true"`
+and a `pull/` branch ref; both guards were removed (roadmap
+[Gap A4](roadmap.md#gap-a4)). As a result you can now disable the
+bundled `commitStatusPublisher` for every opted-in build type and
+still have full GitHub PR coverage from the plugin.
+
 ## Check Run publisher coexistence with the bundled `commitStatusPublisher`
 
 As of v0.4.0, the plugin's `BuildStatusCheckRunPublisher` posts

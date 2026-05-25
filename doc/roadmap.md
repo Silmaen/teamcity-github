@@ -23,7 +23,7 @@ open item** below.
 | #A1 — Tag held-in-queue draft builds | ✅ shipped | `enrich/PrPromotionTagger` |
 | #A2 — Branch display customisation | ✅ shipped | `web/BranchEnrichmentPageExtension` + `display/tcghBranchEnrichment.jsp` |
 | #A3 — Enriched commit status publisher | ⚠️ partial | `report/BuildStatusCheckRunPublisher` — covers opted-in PR builds only |
-| #A4 — Extend status publisher to cover main + opt-out PR builds | ❌ open | (this doc, section [Gap A4](#gap-a4)) |
+| #A4 — Extend status publisher to cover main + opt-out PR builds | ✅ shipped in v0.7.0 | `report/BuildStatusCheckRunPublisher.isOptedIn` (Option 1) |
 
 ## Snapshot of the plugin (read this before opening a feature)
 
@@ -60,6 +60,23 @@ What is **not yet** done — and why this document still exists:
 ---
 
 ## Gap A4 — Extend BuildStatusCheckRunPublisher to cover main + opt-out PR builds  {#gap-a4}
+
+> **Status: ✅ shipped in v0.7.0** (Option 1 below).
+>
+> Both guards were removed from `BuildStatusCheckRunPublisher.resolveContext`:
+> the `pull/` branch check and the `tcgh.ignoreDrafts == "true"`
+> check. The single opt-in is now `tcgh.github.repo` +
+> `tcgh.github.connectionId`, exposed as the pure helper
+> `BuildStatusCheckRunPublisher.isOptedIn(parameters)` and
+> covered by `BuildStatusCheckRunPublisherTest`.
+>
+> Consumer projects can now disable the bundled
+> `commitStatusPublisher` on every opted-in buildType without
+> losing GitHub PR coverage on main, opt-out PR builds, or
+> `tcgh.ignoreDrafts=false` configurations. See
+> [doc/configuration.md](configuration.md#check-run-publisher-coverage)
+> for the new operating model.
+
 
 ### Problem statement
 

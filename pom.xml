@@ -7,7 +7,7 @@
 
     <groupId>io.github.dlachouette</groupId>
     <artifactId>teamcity-github-bridge</artifactId>
-    <version>0.6.0</version>
+    <version>0.7.0</version>
     <packaging>jar</packaging>
 
     <name>TeamCity GitHub Bridge</name>
