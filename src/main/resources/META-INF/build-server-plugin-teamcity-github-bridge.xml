@@ -30,6 +30,9 @@
     <bean class="io.github.dlachouette.teamcity.github.web.WebhookInfoController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminConsolePage"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminSettingsController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.AdminTestController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BranchEnrichmentPageExtension"/>
+
+    <bean class="io.github.dlachouette.teamcity.github.selftest.PluginSelfTester"/>
 
 </beans>

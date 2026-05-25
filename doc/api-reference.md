@@ -14,7 +14,7 @@ protected by HMAC and the info endpoints expose nothing sensitive.
 | `POST` | `/app/teamcity-github-bridge/webhook` | Receive GitHub webhooks | HMAC-SHA256 over the body |
 | `GET`  | `/app/teamcity-github-bridge/info` | Live webhook config snapshot (JSON) | none |
 | `GET`  | `/app/teamcity-github-bridge/info.md` | Same snapshot as Markdown | none |
-| `GET`  | `/admin/admin.html?tab=tcghAdmin&...` | Admin / help page (AdminPage tab, JSP-rendered) | TeamCity admin |
+| `GET`  | `/admin/admin.html?tab=bridgeAdmin&...` | Admin / help page (AdminPage tab, JSP-rendered) | TeamCity admin |
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,7 @@ Body: a JSON payload as documented in
 | `200 OK` | Event handled. Body: `pong` for `ping`, empty otherwise. |
 | `204 No Content` | Event recognised but not acted on (e.g. `push` in current version). |
 | `400 Bad Request` | `X-GitHub-Event` header missing. |
-| `401 Unauthorized` | Signature missing, malformed, or invalid; or `tcgh.webhook.secret` not configured. Body: `Invalid signature`. |
+| `401 Unauthorized` | Signature missing, malformed, or invalid; or `teamcity.github.bridge.webhook.secret` not configured. Body: `Invalid signature`. |
 
 ### Handled actions
 
@@ -162,7 +162,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
 | `contentType` | string | Always `application/json`. The plugin does not parse `application/x-www-form-urlencoded`. |
 | `sslVerification` | boolean | `true` when the request reached the plugin over HTTPS (after honouring `X-Forwarded-Proto`). Reflected so the operator copies the right value into GitHub. |
 | `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Currently acted on: `pull_request` (action `ready_for_review`), `ping`. Forward-listed: `pull_request_review`, `push`, `check_suite`. |
-| `secretConfigured` | boolean | `true` when `tcgh.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
+| `secretConfigured` | boolean | `true` when `teamcity.github.bridge.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
 | `logFile` | string | Absolute path where the plugin's dedicated log file lives (or *would* live) - always `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`. |
 | `logConfigured` | boolean | `true` when the dedicated log file currently exists, i.e. an operator has merged the log4j snippet (`teamcity-github-bridge-log4j-snippet.xml`) into `teamcity-server-log4j.xml`. |
 | `pluginVersion` | string | The TeamCity server version string. Used as a sanity check (the plugin is alive). |
@@ -216,7 +216,7 @@ Plugin version: TeamCity 2026.1 (build 222521)
 The plugin registers an `AdminPage` tab visible at:
 
 ```
-<TC_URL>/admin/admin.html?item=<...>&tab=tcghAdmin
+<TC_URL>/admin/admin.html?item=<...>&tab=bridgeAdmin
 ```
 
 Navigate to it via `Administration -> Server Administration ->

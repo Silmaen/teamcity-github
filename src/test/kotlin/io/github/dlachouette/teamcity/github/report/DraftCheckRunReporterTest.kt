@@ -75,7 +75,7 @@ class DraftCheckRunReporterTest {
     }
 
     @Test
-    fun `returns null when one of the tcgh params is missing`() {
+    fun `returns null when one of the bridge params is missing`() {
         val incomplete = optInParams.toMutableMap().apply { remove(DraftAwareBuildFilter.PARAM_REPO_SLUG) }
         val req = DraftCheckRunReporter.buildRequest(
             branchName = "pull/42",

@@ -42,7 +42,7 @@ sequenceDiagram
     participant TC as TeamCity
     participant GH as GitHub App settings
 
-    Admin->>TC: 1. set tcgh.webhook.secret<br/>in internal.properties
+    Admin->>TC: 1. set teamcity.github.bridge.webhook.secret<br/>in internal.properties
     Admin->>TC: 2. GET /app/teamcity-github-bridge/info
     TC-->>Admin: payloadUrl, recommendedEvents,<br/>contentType, secretConfigured: true
     Admin->>GH: 3. paste payloadUrl + secret<br/>+ tick events
@@ -81,7 +81,7 @@ Internal Properties` (direct URL:
 and add:
 
 ```properties
-tcgh.webhook.secret=<paste the string here>
+teamcity.github.bridge.webhook.secret=<paste the string here>
 ```
 
 If both sources are populated, the plugin's own file takes
@@ -100,7 +100,7 @@ webhook.secret=<paste the string here>
 or `<TC_DATA_DIR>/config/internal.properties`:
 
 ```properties
-tcgh.webhook.secret=<paste the string here>
+teamcity.github.bridge.webhook.secret=<paste the string here>
 ```
 
 Both are hot-reloaded; no restart needed.
@@ -202,7 +202,7 @@ Recent Deliveries
 If you see `200 pong`, the round-trip is complete.
 
 If you see `401 Invalid signature`:
-- The secret on GitHub and the one in `tcgh.webhook.secret` differ.
+- The secret on GitHub and the one in `teamcity.github.bridge.webhook.secret` differ.
 - Or a reverse proxy is rewriting the request body. Check your
   ingress config; the plugin signs over the raw body bytes.
 
@@ -228,7 +228,7 @@ Eventually you'll want to rotate. The plugin does not support
 overlapping secrets, so coordinate the rotation:
 
 1. Generate a new secret.
-2. Update `tcgh.webhook.secret` in TeamCity's `internal.properties`.
+2. Update `teamcity.github.bridge.webhook.secret` in TeamCity's `internal.properties`.
    TeamCity hot-reloads the file - the new secret is live within a
    second.
 3. Update the secret on the GitHub App webhook page and save.

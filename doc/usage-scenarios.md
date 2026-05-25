@@ -5,7 +5,7 @@ the operator should expect to see in the TeamCity UI.
 
 Each scenario assumes the plugin is installed and a build
 configuration has the three opt-in parameters
-(`tcgh.ignoreDrafts`, `tcgh.github.repo`, `tcgh.github.connectionId`)
+(`teamcity.github.bridge.ignoreDrafts`, `teamcity.github.bridge.repo`, `teamcity.github.bridge.connectionId`)
 set as described in [configuration.md](configuration.md).
 
 ## Scenario 1: a draft PR is opened
@@ -33,7 +33,7 @@ sequenceDiagram
     Cache->>API: GET /repos/.../pulls/189
     API-->>Cache: {draft: true, ...}
     Cache-->>F: PrInfo(draft=true)
-    F-->>TC: SimpleWaitReason("PR #189 is draft<br/>and tcgh.ignoreDrafts is enabled")
+    F-->>TC: SimpleWaitReason("PR #189 is draft<br/>and teamcity.github.bridge.ignoreDrafts is enabled")
     Note over TC: Build held in queue<br/>with the wait reason visible
 ```
 
@@ -44,7 +44,7 @@ In the TeamCity UI, the queued build shows:
 | Build queue                                        |
 |  o  pull/189  Build_LinuxX64_Clang  10:23         |
 |     Waiting reason: PR #189 is draft and          |
-|                     tcgh.ignoreDrafts is enabled. |
+|                     teamcity.github.bridge.ignoreDrafts is enabled. |
 +----------------------------------------------------+
 ```
 
@@ -97,9 +97,9 @@ sequenceDiagram
     W->>L: handle(payload)
     L->>Cache: invalidate(repo, 189)
     L->>L: scan ProjectManager.activeBuildTypes
-    Note over L: filter by tcgh.github.repo<br/>and tcgh.ignoreDrafts="true"
+    Note over L: filter by teamcity.github.bridge.repo<br/>and teamcity.github.bridge.ignoreDrafts="true"
     loop for each matched buildType
-        L->>Q: addToQueue(promotion, "tcgh-bridge")
+        L->>Q: addToQueue(promotion, "teamcity-github-bridge")
     end
     Note over Q: queue optimizer dedupes against<br/>any pending build on same revision
     Q->>F: canStart for each
@@ -168,13 +168,13 @@ query the API - it trusts the signed webhook payload.
 
 ## Scenario 6: the webhook secret is missing
 
-**Actor**: brand-new install, ops forgot to set `tcgh.webhook.secret`.
+**Actor**: brand-new install, ops forgot to set `teamcity.github.bridge.webhook.secret`.
 
 **Expected outcome**: every webhook delivery is rejected with HTTP
 401 and a loud warning in the log.
 
 ```
-[WARN  ] PluginWebhookController - Webhook secret is not configured (set internal property tcgh.webhook.secret) - refusing request
+[WARN  ] PluginWebhookController - Webhook secret is not configured (set internal property teamcity.github.bridge.webhook.secret) - refusing request
 [WARN  ] PluginWebhookController - Webhook with invalid or missing signature rejected (event=ping)
 ```
 
@@ -214,7 +214,7 @@ maintenance window is non-fatal.
 
 ## Scenario 8: build type without the bridge enabled
 
-**Actor**: build type does **not** have `tcgh.ignoreDrafts=true`.
+**Actor**: build type does **not** have `teamcity.github.bridge.ignoreDrafts=true`.
 
 **Expected outcome**: nothing the plugin does affects it.
 
@@ -236,14 +236,14 @@ the three parameters.
 `acme/web`), both opted in.
 
 **Expected outcome**: a webhook for `acme/api` only retriggers
-builds with `tcgh.github.repo=acme/api`. Builds for `acme/web` are
+builds with `teamcity.github.bridge.repo=acme/api`. Builds for `acme/web` are
 untouched.
 
 ```mermaid
 flowchart TD
     A[Webhook: action=ready_for_review<br/>repository=acme/api #42] --> B[ReadyForReviewListener]
     B --> C[scan all activeBuildTypes]
-    C --> D{tcgh.github.repo<br/>== acme/api?}
+    C --> D{teamcity.github.bridge.repo<br/>== acme/api?}
     D -->|yes| E[enqueue]
     D -->|no| F[skip]
 
@@ -385,7 +385,7 @@ ready-for-review webhook arrives.
 **Expected outcome**: no duplicate build. TeamCity's queue optimiser
 deduplicates by (buildType, revision).
 
-The plugin always calls `buildType.addToQueue(promotion, "tcgh-bridge")`;
+The plugin always calls `buildType.addToQueue(promotion, "teamcity-github-bridge")`;
 it never tries to be clever about whether one is already running.
 That decision lives in TC core.
 

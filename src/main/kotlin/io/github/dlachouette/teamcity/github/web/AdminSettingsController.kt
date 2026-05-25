@@ -13,7 +13,7 @@ import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 
 // POST endpoint that backs the secret-management form in
-// AdminConsolePage. The form submits to /admin/tcgh/saveSecret with
+// AdminConsolePage. The form submits to /admin/bridge/saveSecret with
 // fields:
 //   action=set    + secret=<value>   -> set the secret
 //   action=clear                     -> remove the stored value
@@ -56,7 +56,7 @@ class AdminSettingsController(
         }
 
         // Redirect back to the admin page (PRG pattern, avoids resubmit on refresh).
-        val redirect = request.contextPath.trimEnd('/') + "/admin/admin.html?item=tcghAdmin&tab=tcghAdmin&tcghResult=$result"
+        val redirect = request.contextPath.trimEnd('/') + "/admin/admin.html?item=bridgeAdmin&tab=bridgeAdmin&bridgeResult=$result"
         return ModelAndView(RedirectView(redirect, true))
     }
 
@@ -88,7 +88,7 @@ class AdminSettingsController(
     }
 
     companion object {
-        const val PATH: String = "/admin/tcgh/saveSecret.html"
+        const val PATH: String = "/admin/bridge/saveSecret.html"
         private val LOG = Logger.getInstance(AdminSettingsController::class.java.name)
     }
 }

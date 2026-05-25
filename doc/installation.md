@@ -21,7 +21,7 @@ GitHub App, continue with [github-app-setup.md](github-app-setup.md).
  |  |    teamcity-github-bridge- |
  |  |    0.5.0.zip               |  <-- drop the archive here
  |  |- config/                   |
- |  |    internal.properties     |  <-- tcgh.webhook.secret goes here
+ |  |    internal.properties     |  <-- teamcity.github.bridge.webhook.secret goes here
  |  |    teamcity-server-log4j.xml   <-- optional log tuning
  +-------------------------------+
 ```

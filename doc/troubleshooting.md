@@ -104,7 +104,7 @@ WARN  - PluginWebhookController - Webhook with invalid or missing signature reje
 
 | Cause | Fix |
 |---|---|
-| `tcgh.webhook.secret` not set | Add the property in `<TC_DATA_DIR>/config/internal.properties`. |
+| `teamcity.github.bridge.webhook.secret` not set | Add the property in `<TC_DATA_DIR>/config/internal.properties`. |
 | Secret on GitHub differs from TC | Re-paste the same value on both sides and save. |
 | Reverse proxy rewrites the body | The signature is computed over the **raw bytes**. Disable body rewriting in your ingress (nginx `proxy_set_body`, AWS ALB content-modifying rules, etc.). |
 | Wrong header name on GitHub | Should be `X-Hub-Signature-256` (sent by default). If you wrote `X-Hub-Signature` only, the older SHA1 header is ignored. |
@@ -134,9 +134,9 @@ TeamCity, not a held one with a wait reason.
 
 | Cause | Fix |
 |---|---|
-| Build type does not have `tcgh.ignoreDrafts=true` | Add it. See [configuration.md](configuration.md). |
-| Build type does not have `tcgh.github.repo` | Add it; the slug must match `repository.full_name` from GitHub. |
-| `tcgh.github.connectionId` points to a wrong/non-existent connection | The plugin logs `No GitHub App connection found for id=...`. Fix the ID. |
+| Build type does not have `teamcity.github.bridge.ignoreDrafts=true` | Add it. See [configuration.md](configuration.md). |
+| Build type does not have `teamcity.github.bridge.repo` | Add it; the slug must match `repository.full_name` from GitHub. |
+| `teamcity.github.bridge.connectionId` points to a wrong/non-existent connection | The plugin logs `No GitHub App connection found for id=...`. Fix the ID. |
 | GitHub App lacks `Pull requests: read` permission | API returns 403; plugin logs the warning and fails open. Add the permission and accept it on the App page. |
 | Branch does not look like `pull/N` | The filter only acts on branch names matching `pull/<number>`. Check the VCS root's branchSpec. |
 
@@ -168,8 +168,8 @@ queue.
 
 | Cause | Fix |
 |---|---|
-| `tcgh.github.repo` slug does not match GitHub's `repository.full_name` | Compare case-sensitively. GitHub normalises owner/name casing differently in some places. |
-| Build types do not have `tcgh.ignoreDrafts=true` | The retrigger filter requires both `tcgh.github.repo` match and `tcgh.ignoreDrafts="true"`. |
+| `teamcity.github.bridge.repo` slug does not match GitHub's `repository.full_name` | Compare case-sensitively. GitHub normalises owner/name casing differently in some places. |
+| Build types do not have `teamcity.github.bridge.ignoreDrafts=true` | The retrigger filter requires both `teamcity.github.bridge.repo` match and `teamcity.github.bridge.ignoreDrafts="true"`. |
 | Build queue optimiser deduped against an existing build | A build for `pull/N` on the same revision may already be running. Check the running builds list. |
 | Build types are paused | `ProjectManager.activeBuildTypes` excludes paused. Unpause or use a sibling build type. |
 
@@ -317,10 +317,10 @@ Useful log lines:
 |---|---|
 | `TeamCity GitHub Bridge plugin loaded` | Bean wired, plugin healthy at startup. |
 | `Registered webhook controller at /app/teamcity-github-bridge/webhook` | Endpoint live. |
-| `Webhook secret is not configured (...)` | Set `tcgh.webhook.secret` immediately. |
+| `Webhook secret is not configured (...)` | Set `teamcity.github.bridge.webhook.secret` immediately. |
 | `Webhook with invalid or missing signature rejected (event=X)` | Signature mismatch; check both sides. |
 | `Handling ready_for_review for <repo>#<n>` | Webhook received and verified. |
-| `No build types found for <repo>` | None of the active build types have `tcgh.github.repo=<repo>` + `tcgh.ignoreDrafts=true`. |
+| `No build types found for <repo>` | None of the active build types have `teamcity.github.bridge.repo=<repo>` + `teamcity.github.bridge.ignoreDrafts=true`. |
 | `Suppressing build of <buildType> for draft PR <repo>#<n>` | Draft filter applied. |
 | `Cannot resolve token for <buildType>` | The connection ID is wrong or the App is uninstalled. |
 | `Cannot fetch PR info for <repo>#<n>` | GitHub API call failed. Check rate limits or permissions. |
@@ -382,7 +382,7 @@ not coloured pills.
 | Cause | Fix |
 |---|---|
 | The plugin is loaded but `BranchEnrichmentPageExtension` is not registered | Restart TC after upgrading; verify in the server log: `Registered BranchEnrichmentPageExtension at ALL_PAGES_FOOTER_PLUGIN_CONTAINER`. |
-| TeamCity's tag markup changed | The CSS selectors in `tcghBranchEnrichment.jsp` target `.buildTag`, `.tag`, `a.tagLabel`. If a TC update changes these classes, our enrichment silently no-ops. Open an issue. |
+| TeamCity's tag markup changed | The CSS selectors in `bridgeBranchEnrichment.jsp` target `.buildTag`, `.tag`, `a.tagLabel`. If a TC update changes these classes, our enrichment silently no-ops. Open an issue. |
 | Browser cache | Hard refresh (Ctrl-Shift-R). The fragment is served as part of every page, no separate file to cache, but stale CSS rules on the host page can mask ours. |
 
 ## Debug logging

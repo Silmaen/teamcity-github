@@ -213,9 +213,9 @@ the roadmap have shipped:
   bundled `commitStatusPublisher` on every opted-in buildType
   without losing GitHub PR coverage.
 - v0.7.1: `TokenResolver` accepts both `CID_<hash>` and
-  `PROJECT_EXT_<N>` for `tcgh.github.connectionId`; warns are
+  `PROJECT_EXT_<N>` for `teamcity.github.bridge.connectionId`; warns are
   rate-limited to one per minute per (project, id) pair.
-- v0.8.0: new build parameter `teamcity.github.isdraft`
+- v0.8.0: new build parameter `teamcity.github.bridge.isdraft`
   (`true`/`false`) exposed to every opted-in build - closes the
   long-standing knowledge-base gap about `teamcity.pullRequest.isDraft`
   not being published by TC.

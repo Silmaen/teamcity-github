@@ -83,7 +83,7 @@ of that protection:
 | `/app/teamcity-github-bridge/webhook` | GitHub does not send TeamCity credentials. HMAC-SHA256 over the body is the real auth. |
 | `/app/teamcity-github-bridge/info` and `/info.md` | The response intentionally exposes no secrets - only `secretConfigured: true|false`, the public payload URL, the dedicated log path, and the plugin version. |
 
-The **admin page** (`/admin/...?tab=tcghAdmin`) is **not** anonymous.
+The **admin page** (`/admin/...?tab=bridgeAdmin`) is **not** anonymous.
 It is registered through `AdminPage`, which inherits TeamCity's
 standard admin authorisation filter. Only users with the relevant
 permission see the page; the JSP template never renders secrets,
@@ -108,7 +108,7 @@ flowchart TD
     E -->|yes| F[Process payload]
 ```
 
-If the operator forgets to set `tcgh.webhook.secret`, every delivery
+If the operator forgets to set `teamcity.github.bridge.webhook.secret`, every delivery
 is rejected. The plugin loudly logs
 `Webhook secret is not configured (...)` on every request, so the
 misconfiguration is impossible to miss in the log.
@@ -246,7 +246,7 @@ visible to operators) and only enable `DEBUG` when investigating.
 
 ## Hardening checklist for operators
 
-- [ ] `tcgh.webhook.secret` set to a random >=32-byte string and
+- [ ] `teamcity.github.bridge.webhook.secret` set to a random >=32-byte string and
       stored only in `internal.properties`.
 - [ ] TeamCity is fronted by TLS (the plugin assumes HTTPS in the
       `payloadUrl` returned by `/info`).

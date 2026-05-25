@@ -122,7 +122,7 @@ class BuildStatusCheckRunPublisher(
         // Single opt-in for the status publisher since v0.7.0: a
         // buildType participates as soon as it carries both the
         // repo slug and the connection ID. The previous version
-        // also required `tcgh.ignoreDrafts=true` and a `pull/N`
+        // also required `teamcity.github.bridge.ignoreDrafts=true` and a `pull/N`
         // branch (Gap A4 in the roadmap), which scoped the
         // publisher to a subset of builds and forced consumers to
         // keep the bundled commitStatusPublisher around for the

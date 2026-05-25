@@ -36,7 +36,7 @@ data class WebhookInfo(
         || Payload URL | `$payloadUrl` |
         || Content type | `$contentType` |
         || SSL verification | ${if (sslVerification) "Enable" else "Disable"} |
-        || Secret | ${if (secretConfigured) "configured server-side - reuse the same value" else "**not configured** - set the `tcgh.webhook.secret` internal property"} |
+        || Secret | ${if (secretConfigured) "configured server-side - reuse the same value" else "**not configured** - set the `teamcity.github.bridge.webhook.secret` internal property"} |
         |
         |## Subscribe to events
         |

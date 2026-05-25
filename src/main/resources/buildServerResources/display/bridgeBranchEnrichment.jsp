@@ -21,19 +21,19 @@
     .tag[data-tag-name="draft"],
     a[title="draft"],
     span.buildTag:where(:is(:contains("draft"))) {
-        --tcgh-bg: #fff8e1;
-        --tcgh-fg: #ad8400;
-        --tcgh-bd: #ffe082;
+        --bridge-bg: #fff8e1;
+        --bridge-fg: #ad8400;
+        --bridge-bd: #ffe082;
     }
     .buildTag[data-tag-name="ready"],
     .tag[data-tag-name="ready"],
     a[title="ready"] {
-        --tcgh-bg: #e8f5e9;
-        --tcgh-fg: #1b5e20;
-        --tcgh-bd: #a5d6a7;
+        --bridge-bg: #e8f5e9;
+        --bridge-fg: #1b5e20;
+        --bridge-bd: #a5d6a7;
     }
 
-    .tcgh-pill {
+    .bridge-pill {
         display: inline-block;
         padding: 1px 8px;
         border-radius: 10px;
@@ -42,9 +42,9 @@
         line-height: 16px;
         vertical-align: middle;
         margin-right: 4px;
-        background: var(--tcgh-bg, transparent);
-        color: var(--tcgh-fg, inherit);
-        border: 1px solid var(--tcgh-bd, transparent);
+        background: var(--bridge-bg, transparent);
+        color: var(--bridge-fg, inherit);
+        border: 1px solid var(--bridge-bd, transparent);
     }
 </style>
 
@@ -53,7 +53,7 @@
     'use strict';
 
     // Walk all TC-rendered tag elements (anchors that link to a
-    // tag-filtered list) and apply the .tcgh-pill class when the
+    // tag-filtered list) and apply the .bridge-pill class when the
     // text matches one of ours. Idempotent; safe to call multiple
     // times (TC re-renders parts of the page via AJAX).
     function enrich() {
@@ -64,8 +64,8 @@
             nodes.forEach(function (el) {
                 var text = (el.textContent || '').trim().toLowerCase();
                 if (text === 'draft' || text === 'ready') {
-                    if (!el.classList.contains('tcgh-pill')) {
-                        el.classList.add('tcgh-pill');
+                    if (!el.classList.contains('bridge-pill')) {
+                        el.classList.add('bridge-pill');
                         el.setAttribute('data-tag-name', text);
                     }
                 }

@@ -28,10 +28,10 @@ this default.
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `tcgh.github.api.base` | `https://api.github.com` | Override for GitHub Enterprise. |
-| `tcgh.github.api.version` | `2022-11-28` | The `X-GitHub-Api-Version` header value sent on REST calls. |
-| `tcgh.prinfo.cache.ttl.seconds` | `60` | TTL for the in-memory PR info cache. |
-| `tcgh.webhook.path` | `/app/teamcity-github-bridge/webhook` | The endpoint path. Changing this also affects what `/info` returns. |
+| `teamcity.github.bridge.api.base` | `https://api.github.com` | Override for GitHub Enterprise. |
+| `teamcity.github.bridge.api.version` | `2022-11-28` | The `X-GitHub-Api-Version` header value sent on REST calls. |
+| `teamcity.github.bridge.prinfo.cache.ttl.seconds` | `60` | TTL for the in-memory PR info cache. |
+| `teamcity.github.bridge.webhook.path` | `/app/teamcity-github-bridge/webhook` | The endpoint path. Changing this also affects what `/info` returns. |
 
 ## 2. Server-wide internal properties
 
@@ -39,22 +39,22 @@ Set in `<TC_DATA_DIR>/config/internal.properties`. Hot-reloaded.
 
 | Property | Default | Required | Purpose |
 |---|---|---|---|
-| `tcgh.webhook.secret` | _unset_ | **yes** (or set via the admin page) | HMAC secret used to verify webhook signatures. Without this, every request is rejected with 401. Since v0.6.0 you can also set this from the admin page; the plugin's own file (`teamcity-github-bridge.properties`) takes precedence over this key. |
-| `tcgh.github.api.base` | (plugin default) | no | Override for GitHub Enterprise; e.g. `https://github.acme.com/api/v3`. |
-| `tcgh.prinfo.cache.ttl.seconds` | `60` | no | Increase if you hit GitHub rate limits; decrease for tighter loops. |
+| `teamcity.github.bridge.webhook.secret` | _unset_ | **yes** (or set via the admin page) | HMAC secret used to verify webhook signatures. Without this, every request is rejected with 401. Since v0.6.0 you can also set this from the admin page; the plugin's own file (`teamcity-github-bridge.properties`) takes precedence over this key. |
+| `teamcity.github.bridge.api.base` | (plugin default) | no | Override for GitHub Enterprise; e.g. `https://github.acme.com/api/v3`. |
+| `teamcity.github.bridge.prinfo.cache.ttl.seconds` | `60` | no | Increase if you hit GitHub rate limits; decrease for tighter loops. |
 
 ### Published build parameters (v0.8.0+)
 
 For every build that opts into the plugin (i.e. has both
-`tcgh.github.repo` and `tcgh.github.connectionId` set), the plugin
+`teamcity.github.bridge.repo` and `teamcity.github.bridge.connectionId` set), the plugin
 publishes one extra build parameter that build steps can read:
 
 | Parameter | Values | Meaning |
 |---|---|---|
-| `teamcity.github.isdraft` | `true` / `false` | `true` exactly when the build runs on a `pull/N` branch *and* the PR's `draft` field is `true`. `false` in every other case (not a PR, PR not draft, PR could not be resolved, missing token, etc.). |
+| `teamcity.github.bridge.isdraft` | `true` / `false` | `true` exactly when the build runs on a `pull/N` branch *and* the PR's `draft` field is `true`. `false` in every other case (not a PR, PR not draft, PR could not be resolved, missing token, etc.). |
 
 The parameter is available both server-side (visible in the build's
-"Parameters" tab) and on the agent (`%teamcity.github.isdraft%`).
+"Parameters" tab) and on the agent (`%teamcity.github.bridge.isdraft%`).
 This closes the knowledge-base gap about TC's bundled
 `pullRequests` feature not publishing `teamcity.pullRequest.isDraft`.
 
@@ -64,13 +64,13 @@ Use it in DSL conditions, script steps, etc.:
 // DSL: skip a step on draft PRs
 script {
     scriptContent = "echo running heavy step"
-    conditions { equals("teamcity.github.isdraft", "false") }
+    conditions { equals("teamcity.github.bridge.isdraft", "false") }
 }
 ```
 
 ```bash
 # Agent-side: same idea from a shell step
-if [ "%teamcity.github.isdraft%" = "true" ]; then
+if [ "%teamcity.github.bridge.isdraft%" = "true" ]; then
     echo "Skipping heavy step on draft PR"
     exit 0
 fi
@@ -83,7 +83,7 @@ values that the admin page writes. Currently a single key:
 
 | Key | Purpose |
 |---|---|
-| `webhook.secret` | Same role as `tcgh.webhook.secret` above, but stored separately so the plugin never has to mutate `internal.properties`. Wins over `tcgh.webhook.secret` if both are set. |
+| `webhook.secret` | Same role as `teamcity.github.bridge.webhook.secret` above, but stored separately so the plugin never has to mutate `internal.properties`. Wins over `teamcity.github.bridge.webhook.secret` if both are set. |
 
 You can edit this file by hand if you prefer, but the admin page is
 the supported path.
@@ -91,8 +91,8 @@ the supported path.
 Example `internal.properties` entry:
 
 ```properties
-# tcgh-bridge: HMAC secret for the App-level webhook
-tcgh.webhook.secret=0a4f0c9b5e8e3c1d2a4b6c8d9e0f1a2b3c4d5e6f7a8b9c0d
+# teamcity-github-bridge: HMAC secret for the App-level webhook
+teamcity.github.bridge.webhook.secret=0a4f0c9b5e8e3c1d2a4b6c8d9e0f1a2b3c4d5e6f7a8b9c0d
 ```
 
 ## 3. Per-buildType parameters
@@ -103,9 +103,9 @@ types.
 
 | Parameter | Required | Example | Purpose |
 |---|---|---|---|
-| `tcgh.ignoreDrafts` | yes | `true` | Setting to `"true"` enables draft suppression and inclusion in the ready-for-review retrigger. |
-| `tcgh.github.repo` | yes | `Silmaen/Owl` | The `owner/name` slug as GitHub reports it in `repository.full_name`. |
-| `tcgh.github.connectionId` | yes | `PROJECT_EXT_42` | The TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager`. Visible in the URL of the project's Connections page. |
+| `teamcity.github.bridge.ignoreDrafts` | yes | `true` | Setting to `"true"` enables draft suppression and inclusion in the ready-for-review retrigger. |
+| `teamcity.github.bridge.repo` | yes | `Silmaen/Owl` | The `owner/name` slug as GitHub reports it in `repository.full_name`. |
+| `teamcity.github.bridge.connectionId` | yes | `PROJECT_EXT_42` | The TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager`. Visible in the URL of the project's Connections page. |
 
 ### How to set them
 
@@ -122,9 +122,9 @@ Put them on a parent template and the children inherit:
 +------------------------------------------------+
 | Template: GitHubAwarePR                        |
 |   parameters:                                  |
-|     tcgh.ignoreDrafts        = true            |
-|     tcgh.github.repo         = Silmaen/Owl     |
-|     tcgh.github.connectionId = PROJECT_EXT_42  |
+|     teamcity.github.bridge.ignoreDrafts        = true            |
+|     teamcity.github.bridge.repo         = Silmaen/Owl     |
+|     teamcity.github.bridge.connectionId = PROJECT_EXT_42  |
 +------------------------------------------------+
           |
           v inherits
@@ -142,9 +142,9 @@ object GitHubAwarePR : Template({
     id("GitHubAwarePR")
     name = "GitHub-aware PR template"
     params {
-        param("tcgh.ignoreDrafts", "true")
-        param("tcgh.github.repo", "Silmaen/Owl")
-        param("tcgh.github.connectionId", "PROJECT_EXT_42")
+        param("teamcity.github.bridge.ignoreDrafts", "true")
+        param("teamcity.github.bridge.repo", "Silmaen/Owl")
+        param("teamcity.github.bridge.connectionId", "PROJECT_EXT_42")
     }
 })
 ```
@@ -156,7 +156,7 @@ object GitHubAwarePR : Template({
 2. Add the three parameters above.
 3. Save. The next queued build hits the plugin's
    `StartBuildPrecondition`; if the PR is draft, the build is held
-   with a wait reason `"PR #N is draft and tcgh.ignoreDrafts is enabled"`.
+   with a wait reason `"PR #N is draft and teamcity.github.bridge.ignoreDrafts is enabled"`.
 
 There is **no UI badge** indicating the plugin is active on a build
 type. The presence of the three parameters is the sole signal.
@@ -167,11 +167,11 @@ Future versions may add a Build Feature for clearer UX; tracked in
 
 ```mermaid
 flowchart TD
-    A[tcgh.webhook.secret read by WebhookConfig] --> B{internal.properties<br/>has the key?}
+    A[teamcity.github.bridge.webhook.secret read by WebhookConfig] --> B{internal.properties<br/>has the key?}
     B -->|yes| C[Use that value]
     B -->|no, blank| D[Return null<br/>-> reject every webhook]
 
-    E[tcgh.github.api.base etc] --> F{Plugin-level<br/>parameter set?}
+    E[teamcity.github.bridge.api.base etc] --> F{Plugin-level<br/>parameter set?}
     F -->|yes via TC API| G[Use that value]
     F -->|no| H[Use shipped default<br/>from teamcity-plugin.xml]
 ```
@@ -276,14 +276,14 @@ Reload via `Administration -> Diagnostics -> Logging` or restart.
 Since v0.7.0 the plugin's `BuildStatusCheckRunPublisher` posts
 GitHub Check Runs on every lifecycle event of **every** build
 configuration that carries the two parameters
-`tcgh.github.repo` + `tcgh.github.connectionId`. This includes:
+`teamcity.github.bridge.repo` + `teamcity.github.bridge.connectionId`. This includes:
 
-- PR builds with `tcgh.ignoreDrafts=true` (the original draft-aware path).
-- PR builds with `tcgh.ignoreDrafts=false` (opt-out subsets, e.g. draft-friendly Linux Clang in Owl).
+- PR builds with `teamcity.github.bridge.ignoreDrafts=true` (the original draft-aware path).
+- PR builds with `teamcity.github.bridge.ignoreDrafts=false` (opt-out subsets, e.g. draft-friendly Linux Clang in Owl).
 - Builds on `main` after merge.
 - Any other branch covered by the buildType's VCS root.
 
-Previously the publisher also required `tcgh.ignoreDrafts == "true"`
+Previously the publisher also required `teamcity.github.bridge.ignoreDrafts == "true"`
 and a `pull/` branch ref; both guards were removed (roadmap
 [Gap A4](roadmap.md#gap-a4)). As a result you can now disable the
 bundled `commitStatusPublisher` for every opted-in build type and
@@ -328,12 +328,12 @@ release will provide a Build Feature for one-click opt-out.
 The plugin does not actively validate the parameters at save time
 (no UI hook yet). What it does:
 
-- **`tcgh.github.repo` malformed** -> `RepoCoords.parse` throws
+- **`teamcity.github.bridge.repo` malformed** -> `RepoCoords.parse` throws
   `IllegalArgumentException`, caught and logged. The build is
   allowed to proceed (fail-open).
-- **`tcgh.github.connectionId` not found** -> `TokenResolver`
+- **`teamcity.github.bridge.connectionId` not found** -> `TokenResolver`
   returns null, logged as warning. Build proceeds (fail-open).
-- **`tcgh.ignoreDrafts` value other than `"true"`** -> treated as
+- **`teamcity.github.bridge.ignoreDrafts` value other than `"true"`** -> treated as
   disabled. No error.
 
 To validate without queuing a build, watch the server log while you

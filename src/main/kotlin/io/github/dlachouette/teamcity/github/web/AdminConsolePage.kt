@@ -2,8 +2,10 @@ package io.github.dlachouette.teamcity.github.web
 
 import io.github.dlachouette.teamcity.github.config.LogPathResolver
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
+import io.github.dlachouette.teamcity.github.selftest.TestResult
 import jetbrains.buildServer.controllers.admin.AdminPage
 import jetbrains.buildServer.serverSide.SBuildServer
+import jetbrains.buildServer.web.CSRFFilter
 import jetbrains.buildServer.web.openapi.PagePlaces
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import java.text.SimpleDateFormat
@@ -21,7 +23,7 @@ class AdminConsolePage(
 ) : AdminPage(
     pagePlaces,
     PAGE_ID,
-    pluginDescriptor.getPluginResourcesPath("admin/tcghAdmin.jsp"),
+    pluginDescriptor.getPluginResourcesPath("admin/bridgeAdmin.jsp"),
     TAB_TITLE,
 ) {
 
@@ -49,14 +51,36 @@ class AdminConsolePage(
         model["recommendedEvents"] = WebhookEvents.RECOMMENDED
         model["snippetResourceName"] = "teamcity-github-bridge-log4j-snippet.xml"
         model["saveSecretUrl"] = request.contextPath.trimEnd('/') + AdminSettingsController.PATH
-        resultBannerFor(request.getParameter("tcghResult"))?.let { model["resultBanner"] = it }
+        model["runTestsUrl"] = request.contextPath.trimEnd('/') + AdminTestController.PATH
+        model["csrfToken"] = CSRFFilter.setSessionAttribute(request.getSession(true))
+        model["csrfTokenName"] = CSRFFilter.ATTRIBUTE
+        resultBannerFor(request.getParameter("bridgeResult"))?.let { model["resultBanner"] = it }
+
+        // Pick up self-test results stashed by AdminTestController (PRG).
+        val session = request.getSession(false)
+        if (session != null) {
+            val results = session.getAttribute(AdminTestController.SESSION_ATTR)
+            if (results is List<*>) {
+                model["testResults"] = results.mapNotNull { r ->
+                    val tr = r as? TestResult ?: return@mapNotNull null
+                    mapOf(
+                        "name" to tr.name,
+                        "status" to tr.status.label(),
+                        "cssClass" to tr.status.cssClass(),
+                        "detail" to tr.detail,
+                    )
+                }
+                session.removeAttribute(AdminTestController.SESSION_ATTR)
+            }
+        }
     }
 
     private fun resultBannerFor(code: String?): Map<String, String>? = when (code) {
         "saved" -> mapOf("level" to "ok", "text" to "Webhook secret saved.")
         "cleared" -> mapOf("level" to "ok", "text" to "Webhook secret cleared. Until a new secret is set, every webhook delivery will be rejected with 401.")
         "blank" -> mapOf("level" to "warn", "text" to "Submitted secret was blank; nothing changed.")
-        "error" -> mapOf("level" to "bad", "text" to "Could not save the secret. Check the dedicated log for details.")
+        "tested" -> mapOf("level" to "ok", "text" to "Self-tests finished; results below.")
+        "error" -> mapOf("level" to "bad", "text" to "Could not complete the operation. Check the dedicated log for details.")
         else -> null
     }
 
@@ -98,13 +122,13 @@ class AdminConsolePage(
     )
 
     private fun Outcome.cssClass(): String = when (this) {
-        Outcome.ACCEPTED -> "tcgh-accepted"
-        Outcome.SKIPPED -> "tcgh-skipped"
-        Outcome.REJECTED -> "tcgh-rejected"
+        Outcome.ACCEPTED -> "bridge-accepted"
+        Outcome.SKIPPED -> "bridge-skipped"
+        Outcome.REJECTED -> "bridge-rejected"
     }
 
     companion object {
-        const val PAGE_ID: String = "tcghAdmin"
+        const val PAGE_ID: String = "bridgeAdmin"
         const val TAB_TITLE: String = "GitHub Bridge"
         const val SERVER_RELATED_GROUP: String = "SERVER_RELATED_GROUP"
 

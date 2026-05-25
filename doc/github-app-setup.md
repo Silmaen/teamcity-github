@@ -129,7 +129,7 @@ In TeamCity:
 After save, the connection has an ID visible in the URL:
 `.../admin/editProject.html?projectId=...&tab=oauthConnections&editingConnection=PROJECT_EXT_<n>`.
 This `PROJECT_EXT_<n>` value is what you'll paste as
-`tcgh.github.connectionId` on each opted-in build type.
+`teamcity.github.bridge.connectionId` on each opted-in build type.
 
 ```
 Project: MyTeam

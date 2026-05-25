@@ -54,9 +54,9 @@ class DraftAwareBuildFilter(
     }
 
     companion object {
-        const val PARAM_IGNORE_DRAFTS: String = "tcgh.ignoreDrafts"
-        const val PARAM_REPO_SLUG: String = "tcgh.github.repo"
-        const val PARAM_CONNECTION_ID: String = "tcgh.github.connectionId"
+        const val PARAM_IGNORE_DRAFTS: String = "teamcity.github.bridge.ignoreDrafts"
+        const val PARAM_REPO_SLUG: String = "teamcity.github.bridge.repo"
+        const val PARAM_CONNECTION_ID: String = "teamcity.github.bridge.connectionId"
 
         private val LOG = Logger.getInstance(DraftAwareBuildFilter::class.java.name)
     }

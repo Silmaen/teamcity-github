@@ -36,11 +36,11 @@ teamcity-github/
     |   +-- assembly/plugin.xml   # builds the plugin.zip layout
     |   +-- resources/
     |   |   +-- teamcity-plugin.xml                       # plugin descriptor
-    |   |   +-- META-INF/build-server-plugin-tcgh-bridge.xml  # Spring DI
+    |   |   +-- META-INF/build-server-plugin-teamcity-github-bridge.xml  # Spring DI
     |   |   +-- teamcity-github-bridge-log4j-snippet.xml  # log4j fragment for ops
     |   |   +-- buildServerResources/
-    |   |       +-- admin/tcghAdmin.jsp                   # admin/help page
-    |   |       +-- display/tcghBranchEnrichment.jsp      # draft/ready pill CSS+JS
+    |   |       +-- admin/bridgeAdmin.jsp                   # admin/help page
+    |   |       +-- display/bridgeBranchEnrichment.jsp      # draft/ready pill CSS+JS
     |   +-- kotlin/io/github/dlachouette/teamcity/github/
     |       +-- TeamCityGitHubBridgePlugin.kt
     |       +-- api/        # HTTP client, token resolver, DTOs (PrInfo, CheckRunRequest, etc.)
@@ -150,7 +150,7 @@ opaque; the `init { ... }` is one line and idempotent.
 
 1. Write the class in the right package under
    `src/main/kotlin/.../teamcity/github/`.
-2. Declare it in `build-server-plugin-tcgh-bridge.xml`:
+2. Declare it in `build-server-plugin-teamcity-github-bridge.xml`:
    ```xml
    <bean class="io.github.dlachouette.teamcity.github.<pkg>.MyBean"/>
    ```
@@ -260,10 +260,11 @@ What's planned, roughly in priority order.
 | 4  | Use the GitHub Check Runs API instead of Commit Statuses to support `skipped`/`neutral`/`cancelled` conclusions | **done** — `DraftCheckRunReporter` + `BuildStatusCheckRunPublisher` cover the relevant conclusions |
 | 5  | Reject duplicate webhook deliveries (replay protection) via `X-GitHub-Delivery` deduplication | not started |
 | 6  | Wire `pull_request_review` events to surface review state on the TC build | not started |
-| 7  | Branch display customisation (replaces the dead `Nicologies/PrExtras` plugin) | **done** — `BranchEnrichmentPageExtension` + `tcghBranchEnrichment.jsp` ship a draft/ready pill |
+| 7  | Branch display customisation (replaces the dead `Nicologies/PrExtras` plugin) | **done** — `BranchEnrichmentPageExtension` + `bridgeBranchEnrichment.jsp` ship a draft/ready pill |
 | 8  | CI workflow building + releasing on tag | not started |
 | 9  | Tag held-in-queue draft builds (was: `PrBuildEnricher` only tags on `buildStarted`) | **done** — `PrPromotionTagger` tags at `buildTypeAddedToQueue` |
-| 10 | Extend `BuildStatusCheckRunPublisher` to also cover main branch and opt-out (`ignoreDrafts=false`) PR builds, so the bundled publisher can be retired by consumers without losing coverage | not started |
+| 10 | Extend `BuildStatusCheckRunPublisher` to also cover main branch and opt-out (`ignoreDrafts=false`) PR builds, so the bundled publisher can be retired by consumers without losing coverage | **done** — `isOptedIn` check in v0.7.0 dropped both the `pull/` and `ignoreDrafts` guards |
+| 11 | Let manual `Run` / `Re-run` and Custom Build param overrides bypass the draft hold in `DraftAwareBuildFilter` (today a user click on an opt-in buildType for a draft PR is silently swallowed) | not started |
 
 Detailed designs for the open items that touch the SDK — including
 code sketches, alternatives, and test plans — live in

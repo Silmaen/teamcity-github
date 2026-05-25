@@ -66,7 +66,7 @@ class PluginLogConfigurator(
     companion object {
         const val FILE_NAME: String = "teamcity-github-bridge.log"
         const val PACKAGE: String = "io.github.dlachouette.teamcity.github"
-        const val APPENDER_NAME: String = "TCGH_BRIDGE_AUTO"
+        const val APPENDER_NAME: String = "BRIDGE_AUTO"
 
         private val STARTUP_LOG = Logger.getInstance(PluginLogConfigurator::class.java.name)
     }

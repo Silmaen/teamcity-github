@@ -9,9 +9,9 @@
             detects PR draft state, retriggers builds on draft-to-ready
             transitions, and exposes richer commit statuses.
         </description>
-        <version>0.8.0</version>
+        <version>0.9.3</version>
         <vendor>
-            <name>silmaen</name>
+            <name>Damien Lachouette</name>
             <url>https://github.com/silmaen/teamcity-github</url>
         </vendor>
         <email>damien.lachouette@hexagon.com</email>
@@ -21,9 +21,9 @@
     <deployment use-separate-classloader="true"/>
 
     <parameters>
-        <parameter name="tcgh.github.api.base">https://api.github.com</parameter>
-        <parameter name="tcgh.github.api.version">2022-11-28</parameter>
-        <parameter name="tcgh.prinfo.cache.ttl.seconds">60</parameter>
-        <parameter name="tcgh.webhook.path">/app/teamcity-github-bridge/webhook</parameter>
+        <parameter name="teamcity.github.bridge.api.base">https://api.github.com</parameter>
+        <parameter name="teamcity.github.bridge.api.version">2022-11-28</parameter>
+        <parameter name="teamcity.github.bridge.prinfo.cache.ttl.seconds">60</parameter>
+        <parameter name="teamcity.github.bridge.webhook.path">/app/teamcity-github-bridge/webhook</parameter>
     </parameters>
 </teamcity-plugin>

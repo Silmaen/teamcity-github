@@ -4,7 +4,7 @@ import jetbrains.buildServer.serverSide.TeamCityProperties
 
 // Two sources, checked in order:
 //   1. The plugin-owned settings file (written by the admin page form).
-//   2. The legacy `tcgh.webhook.secret` key in TC's internal.properties
+//   2. The legacy `teamcity.github.bridge.webhook.secret` key in TC's internal.properties
 //      (kept for backwards compatibility with operators who set the
 //      secret manually before v0.6.0).
 class WebhookConfig(
@@ -30,7 +30,7 @@ class WebhookConfig(
     enum class SecretSource { PLUGIN_SETTINGS, INTERNAL_PROPERTIES, UNSET }
 
     companion object {
-        const val SECRET_PROPERTY: String = "tcgh.webhook.secret"
+        const val SECRET_PROPERTY: String = "teamcity.github.bridge.webhook.secret"
         const val SIGNATURE_HEADER: String = "X-Hub-Signature-256"
         const val SIGNATURE_ALGORITHM: String = "HmacSHA256"
         const val SIGNATURE_PREFIX: String = "sha256="

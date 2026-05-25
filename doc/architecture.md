@@ -117,7 +117,7 @@ io.github.dlachouette.teamcity.github
 +-- cache/
 |   +-- PrInfoCache               (TTL-based, ConcurrentHashMap)
 +-- config/
-|   +-- WebhookConfig             (reads tcgh.webhook.secret)
+|   +-- WebhookConfig             (reads teamcity.github.bridge.webhook.secret)
 |   +-- LogPathResolver           (expected dedicated log path + exists check)
 +-- enrich/
 |   +-- PrBuildEnricher           (BuildServerAdapter.buildStarted)
@@ -136,14 +136,14 @@ io.github.dlachouette.teamcity.github
     +-- WebhookPayloadParser          (Jackson on pull_request payloads)
     +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
     +-- RecentEventsLog               (ring buffer, capacity 100)
-    +-- AdminConsolePage              (AdminPage, JSP at admin/tcghAdmin.jsp)
-    +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/tcghBranchEnrichment.jsp)
+    +-- AdminConsolePage              (AdminPage, JSP at admin/bridgeAdmin.jsp)
+    +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/bridgeBranchEnrichment.jsp)
 ```
 
 ## Spring DI wiring
 
 Declared in
-`src/main/resources/META-INF/build-server-plugin-tcgh-bridge.xml`:
+`src/main/resources/META-INF/build-server-plugin-teamcity-github-bridge.xml`:
 
 ```xml
 <beans default-autowire="constructor">
@@ -197,7 +197,7 @@ sequenceDiagram
             RFR->>PM: activeBuildTypes
             PM-->>RFR: List<SBuildType>
             loop matching build types
-                RFR->>Q: addToQueue(promotion, "tcgh-bridge")
+                RFR->>Q: addToQueue(promotion, "teamcity-github-bridge")
             end
         end
         PWC-->>GH: 200 OK
@@ -298,11 +298,11 @@ itself loads.
   `X-GitHub-Stateless-S2S-Token` header applies to the token
   issuance call which TeamCity performs internally - we never touch
   it. See `api/TokenResolver.kt`.
-- **GitHub Enterprise**: `tcgh.github.api.base` is read at every
+- **GitHub Enterprise**: `teamcity.github.bridge.api.base` is read at every
   call (no caching), so an Enterprise instance can be configured
   via a single internal property.
 - **API version**: `X-GitHub-Api-Version` is parameterised as
-  `tcgh.github.api.version`, defaulting to `2022-11-28`. Bumping
+  `teamcity.github.bridge.api.version`, defaulting to `2022-11-28`. Bumping
   is a config change, not a recompile.
 
 ## Cross-references

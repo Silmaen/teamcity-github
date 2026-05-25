@@ -23,7 +23,7 @@ class BranchEnrichmentPageExtension(
     pagePlaces,
     PlaceId.ALL_PAGES_FOOTER_PLUGIN_CONTAINER,
     EXTENSION_ID,
-    pluginDescriptor.getPluginResourcesPath("display/tcghBranchEnrichment.jsp"),
+    pluginDescriptor.getPluginResourcesPath("display/bridgeBranchEnrichment.jsp"),
 ) {
 
     init {
@@ -34,7 +34,7 @@ class BranchEnrichmentPageExtension(
     override fun isAvailable(request: HttpServletRequest): Boolean = true
 
     companion object {
-        const val EXTENSION_ID: String = "tcghBranchEnrichment"
+        const val EXTENSION_ID: String = "bridgeBranchEnrichment"
         private val LOG = Logger.getInstance(BranchEnrichmentPageExtension::class.java.name)
     }
 }

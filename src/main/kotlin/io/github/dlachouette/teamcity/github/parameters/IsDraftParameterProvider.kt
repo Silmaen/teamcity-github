@@ -9,7 +9,7 @@ import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvider
 
-// Exposes `teamcity.github.isdraft` to every opted-in build. Value
+// Exposes `teamcity.github.bridge.isdraft` to every opted-in build. Value
 // is "true" exactly when the build runs on a pull/N branch and the
 // PR's `draft` field is true; "false" in every other case (not a PR,
 // PR not draft, PR could not be resolved, missing token, etc.).
@@ -20,11 +20,11 @@ import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvid
 // can use it directly:
 //
 //     ##teamcity[buildStatus status='SUCCESS']
-//     conditions { equals("teamcity.github.isdraft", "false") }
+//     conditions { equals("teamcity.github.bridge.isdraft", "false") }
 //
 // The parameter is published on the server side (visible in TC's
 // build params view) AND exposed to the agent (build steps can read
-// it via %teamcity.github.isdraft%).
+// it via %teamcity.github.bridge.isdraft%).
 class IsDraftParameterProvider(
     private val tokenResolver: TokenResolver,
     private val prInfoCache: PrInfoCache,
@@ -69,10 +69,10 @@ class IsDraftParameterProvider(
         ) listOf(PARAM_NAME) else emptyList()
     }
 
-    override fun getPrefix(): String = "tcgh"
+    override fun getPrefix(): String = "teamcity.github.bridge"
 
     companion object {
-        const val PARAM_NAME: String = "teamcity.github.isdraft"
+        const val PARAM_NAME: String = "teamcity.github.bridge.isdraft"
         private val LOG = Logger.getInstance(IsDraftParameterProvider::class.java.name)
 
         // Pure helper - testable without TC SDK fixtures.
