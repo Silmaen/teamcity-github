@@ -9,7 +9,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-0.10.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 
 ---
@@ -189,11 +189,11 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-Beta. Current version is **0.8.0**. 81 unit tests pass. The plugin
+Beta. Current version is **0.10.0**. 82 unit tests pass. The plugin
 has been installed end-to-end on a real TeamCity 2026.1 server
-(`builder.argawaen.net`) and a signed GitHub App webhook delivery
-has been validated through to `200 pong`. Iterations 1 through 4 of
-the roadmap have shipped:
+(`builder.argawaen.net`) and the full self-test battery passes
+(19/19), validating webhook delivery, HMAC verification, token
+issuance and the GitHub REST round-trip. Release lineage:
 
 - v0.2.0: queue tag for draft/ready (`PrPromotionTagger`),
   dedicated log file.
@@ -219,6 +219,32 @@ the roadmap have shipped:
   (`true`/`false`) exposed to every opted-in build - closes the
   long-standing knowledge-base gap about `teamcity.pullRequest.isDraft`
   not being published by TC.
+- v0.8.1: `OAuthTokensStorage.getProjectTokens` query path replaces
+  the broken `getToken(project, storageId, ...)` call which expected
+  the full `tc_token_id:CID_:...:UUID` form rather than the bare
+  storage ID we were passing in.
+- v0.9.0: **Run self-tests** button on the admin page - 7+ end-to-end
+  checks (config, GitHub reachability, HMAC, webhook self-delivery,
+  token resolution per project) reported as a PASS / WARN / FAIL /
+  SKIP table.
+- v0.9.1: `ProjectConnectionCredentialsManager.requestConnectionCredentials`
+  becomes the primary token-acquisition path (forces minting via
+  the bundled github-app provider), with `getProjectTokens` as the
+  cache-only fallback. Property-key discovery logs the
+  `ConnectionCredentials.properties` keys when the access token
+  is published under a new name.
+- v0.9.2 / v0.9.3: better diagnostics + silenced
+  `"Unsupported Connection Provider type: GitHubApp"` warning
+  (it's a TC SDK limitation, not actionable). The cache-only path
+  is now the correct path for GitHub App connections on TC 2026.1.
+- v0.10.0: **full PR parameter set**. The plugin now publishes 8
+  variables under `teamcity.github.bridge.*` (isPullRequest,
+  isDraft, pullRequest.number / title / author / sourceBranch /
+  targetBranch / headSha). Consumers can disable the bundled
+  `pullRequests` build feature and rely on this plugin's
+  parameters instead. **Breaking**: the previous
+  `teamcity.github.bridge.isdraft` (all-lowercase) is renamed to
+  `teamcity.github.bridge.isDraft` for consistency.
 
 Open items are tracked in
 [doc/roadmap.md](doc/roadmap.md#sequencing).

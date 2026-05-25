@@ -112,23 +112,29 @@ io.github.dlachouette.teamcity.github
 |   +-- GitHubClient              (open class, HTTP + Jackson: getPr, postCheckRun)
 |   +-- PrInfo                    (data class)
 |   +-- RepoCoords                (data class + parser)
-|   +-- TokenResolver             (connection -> access token, opaque)
+|   +-- TokenResolver             (CredentialsManager -> getProjectTokens fallback, opaque tokens)
 |   +-- CheckRunRequest / CheckRunStatus / CheckRunConclusion
 +-- cache/
 |   +-- PrInfoCache               (TTL-based, ConcurrentHashMap)
 +-- config/
-|   +-- WebhookConfig             (reads teamcity.github.bridge.webhook.secret)
-|   +-- LogPathResolver           (expected dedicated log path + exists check)
+|   +-- WebhookConfig             (reads webhook secret from plugin file + internal.properties fallback)
+|   +-- PluginSettingsStorage     (reads/writes plugin-owned settings file)
+|   +-- PluginLogConfigurator     (attaches RollingFileAppender at startup)
+|   +-- LogPathResolver           (state of the dedicated log file)
 +-- enrich/
 |   +-- PrBuildEnricher           (BuildServerAdapter.buildStarted)
 |   +-- PrPromotionTagger         (BuildServerAdapter.buildTypeAddedToQueue)
 +-- filter/
 |   +-- DraftAwareBuildFilter     (StartBuildPrecondition)
++-- parameters/
+|   +-- PrParameterProvider  (publishes teamcity.github.bridge.isdraft)
 +-- report/
 |   +-- DraftCheckRunReporter         (queued draft -> skipped Check Run)
 |   +-- BuildStatusCheckRunPublisher  (start/finish -> in_progress / completed Check Run)
 +-- retrigger/
 |   +-- ReadyForReviewListener    (enqueues via BuildTypeEx.addToQueue)
++-- selftest/
+|   +-- PluginSelfTester          (7 end-to-end checks driven by the admin button)
 +-- web/
     +-- PluginWebhookController       (POST /webhook, HMAC, records to RecentEventsLog)
     +-- WebhookInfoController         (GET /info, /info.md)
@@ -137,6 +143,8 @@ io.github.dlachouette.teamcity.github
     +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
     +-- RecentEventsLog               (ring buffer, capacity 100)
     +-- AdminConsolePage              (AdminPage, JSP at admin/bridgeAdmin.jsp)
+    +-- AdminSettingsController       (POST /admin/bridge/saveSecret.html, CSRF-protected)
+    +-- AdminTestController           (POST /admin/bridge/runTests.html, CSRF-protected)
     +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/bridgeBranchEnrichment.jsp)
 ```
 

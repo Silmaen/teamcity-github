@@ -522,7 +522,7 @@ project's parameters wired up and run the manual smoke sequence:
 
 ```bash
 cd /data/sources/Sources/IT/teamcity-github
-./dev test            # JUnit5 tests (currently 63, will grow)
+./dev test            # JUnit5 tests (currently 81, will grow)
 ./dev package         # produces target/teamcity-github-bridge-*.zip
 ./dev shell           # interactive bash in the maven container
 ```

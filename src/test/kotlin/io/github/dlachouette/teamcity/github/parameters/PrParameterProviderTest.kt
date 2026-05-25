@@ -1,0 +1,112 @@
+package io.github.dlachouette.teamcity.github.parameters
+
+import io.github.dlachouette.teamcity.github.api.PrInfo
+import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
+
+class PrParameterProviderTest {
+
+    init { LoggerBootstrap.install() }
+
+    private val draftPr = pr(
+        number = 189,
+        title = "Add raycast shadows",
+        author = "alice",
+        headRef = "feature/raycast",
+        baseRef = "main",
+        headSha = "deadbeef1234",
+        draft = true,
+    )
+    private val readyPr = draftPr.copy(draft = false)
+
+    @Test
+    fun `non-PR branches default to isPullRequest=false and empty PR vars`() {
+        val params = PrParameterProvider.computeParams("main") { _ -> draftPr }
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_DRAFT])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_NUMBER])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_TITLE])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_AUTHOR])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_SOURCE_BRANCH])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_TARGET_BRANCH])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_HEAD_SHA])
+    }
+
+    @Test
+    fun `null branch defaults to non-PR`() {
+        val params = PrParameterProvider.computeParams(null) { _ -> draftPr }
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+    }
+
+    @Test
+    fun `PR branch with draft PR populates all keys and isDraft=true`() {
+        val params = PrParameterProvider.computeParams("pull/189") { _ -> draftPr }
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_DRAFT])
+        assertEquals("189", params[PrParameterProvider.PARAM_PR_NUMBER])
+        assertEquals("Add raycast shadows", params[PrParameterProvider.PARAM_PR_TITLE])
+        assertEquals("alice", params[PrParameterProvider.PARAM_PR_AUTHOR])
+        assertEquals("feature/raycast", params[PrParameterProvider.PARAM_PR_SOURCE_BRANCH])
+        assertEquals("main", params[PrParameterProvider.PARAM_PR_TARGET_BRANCH])
+        assertEquals("deadbeef1234", params[PrParameterProvider.PARAM_PR_HEAD_SHA])
+    }
+
+    @Test
+    fun `PR branch with ready PR sets isDraft=false`() {
+        val params = PrParameterProvider.computeParams("pull/189") { _ -> readyPr }
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_DRAFT])
+        assertEquals("Add raycast shadows", params[PrParameterProvider.PARAM_PR_TITLE])
+    }
+
+    @Test
+    fun `PR branch with unresolvable PR keeps number from branch name and empties the rest`() {
+        val params = PrParameterProvider.computeParams("pull/42") { _ -> null }
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_DRAFT])
+        assertEquals("42", params[PrParameterProvider.PARAM_PR_NUMBER])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_TITLE])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_AUTHOR])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_SOURCE_BRANCH])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_TARGET_BRANCH])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_HEAD_SHA])
+    }
+
+    @Test
+    fun `malformed PR number falls back to non-PR defaults`() {
+        val params = PrParameterProvider.computeParams("pull/abc") { _ -> draftPr }
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_NUMBER])
+    }
+
+    @Test
+    fun `resolver throwing returns isPullRequest=true with empty details`() {
+        val params = PrParameterProvider.computeParams("pull/42") { _ ->
+            throw RuntimeException("simulated GitHub outage")
+        }
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("42", params[PrParameterProvider.PARAM_PR_NUMBER])
+        assertEquals("", params[PrParameterProvider.PARAM_PR_TITLE])
+    }
+
+    @Test
+    fun `ALL_KEYS lists exactly 8 keys and matches DEFAULT_NON_PR_PARAMS`() {
+        assertEquals(8, PrParameterProvider.ALL_KEYS.size)
+        assertEquals(PrParameterProvider.ALL_KEYS.toSet(), PrParameterProvider.DEFAULT_NON_PR_PARAMS.keys)
+    }
+
+    private fun pr(
+        number: Int,
+        title: String,
+        author: String,
+        headRef: String,
+        baseRef: String,
+        headSha: String,
+        draft: Boolean,
+    ) = PrInfo(
+        number = number, title = title, author = author,
+        headRef = headRef, baseRef = baseRef, headSha = headSha,
+        draft = draft, state = "open",
+    )
+}

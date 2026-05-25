@@ -43,38 +43,87 @@ Set in `<TC_DATA_DIR>/config/internal.properties`. Hot-reloaded.
 | `teamcity.github.bridge.api.base` | (plugin default) | no | Override for GitHub Enterprise; e.g. `https://github.acme.com/api/v3`. |
 | `teamcity.github.bridge.prinfo.cache.ttl.seconds` | `60` | no | Increase if you hit GitHub rate limits; decrease for tighter loops. |
 
-### Published build parameters (v0.8.0+)
+### Published build parameters (v0.10.0+)
 
 For every build that opts into the plugin (i.e. has both
 `teamcity.github.bridge.repo` and `teamcity.github.bridge.connectionId` set), the plugin
-publishes one extra build parameter that build steps can read:
+publishes a complete set of 8 PR-related parameters that build
+steps can read. They mirror what the bundled `pullRequests`
+build feature would have provided, plus extras (`isPullRequest`,
+`isDraft`, `headSha`) that TC never published. Consumers who
+configure the three opt-in parameters can disable the bundled
+`pullRequests` feature entirely.
 
-| Parameter | Values | Meaning |
-|---|---|---|
-| `teamcity.github.bridge.isdraft` | `true` / `false` | `true` exactly when the build runs on a `pull/N` branch *and* the PR's `draft` field is `true`. `false` in every other case (not a PR, PR not draft, PR could not be resolved, missing token, etc.). |
+| Parameter | Value when **not** a PR | Value on a PR (resolved) | Source |
+|---|---|---|---|
+| `teamcity.github.bridge.isPullRequest` | `false` | `true` | derived from branch name |
+| `teamcity.github.bridge.isDraft` | `false` | `true` if `draft=true`, else `false` | GitHub API |
+| `teamcity.github.bridge.pullRequest.number` | `""` | `"189"` | branch name (no API call needed) |
+| `teamcity.github.bridge.pullRequest.title` | `""` | `"Add raycast shadows"` | GitHub API |
+| `teamcity.github.bridge.pullRequest.author` | `""` | `"alice"` | GitHub API |
+| `teamcity.github.bridge.pullRequest.sourceBranch` | `""` | `"feature/raycast"` | GitHub API |
+| `teamcity.github.bridge.pullRequest.targetBranch` | `""` | `"main"` | GitHub API |
+| `teamcity.github.bridge.pullRequest.headSha` | `""` | `"deadbeef1234..."` | GitHub API |
 
-The parameter is available both server-side (visible in the build's
-"Parameters" tab) and on the agent (`%teamcity.github.bridge.isdraft%`).
-This closes the knowledge-base gap about TC's bundled
-`pullRequests` feature not publishing `teamcity.pullRequest.isDraft`.
+All keys are **always emitted** for opted-in builds, with empty
+strings on non-PR branches, so DSL conditions never fail with
+"Unresolved parameter". On PR branches where the GitHub API call
+fails (token outage, repo not reachable), the parameters degrade
+to `isPullRequest=true` + `number=N` (extracted from the branch
+name) and empty strings for the rest.
 
-Use it in DSL conditions, script steps, etc.:
+Parameters are visible server-side in the build's "Parameters"
+tab and on the agent (`%teamcity.github.bridge.pullRequest.number%`,
+etc.).
+
+Use them in DSL conditions, script steps, status messages:
 
 ```kotlin
-// DSL: skip a step on draft PRs
+// DSL: skip a heavy step on draft PRs
 script {
     scriptContent = "echo running heavy step"
-    conditions { equals("teamcity.github.bridge.isdraft", "false") }
+    conditions { equals("teamcity.github.bridge.isDraft", "false") }
+}
+
+// DSL: only run on PR builds
+script {
+    scriptContent = "echo PR-specific check"
+    conditions { equals("teamcity.github.bridge.isPullRequest", "true") }
 }
 ```
 
 ```bash
-# Agent-side: same idea from a shell step
-if [ "%teamcity.github.bridge.isdraft%" = "true" ]; then
-    echo "Skipping heavy step on draft PR"
-    exit 0
+# Agent-side: tag the build with the PR title
+echo "##teamcity[buildNumber '%teamcity.github.bridge.pullRequest.number% - %teamcity.github.bridge.pullRequest.title%']"
+
+# Or pick a different target environment based on the destination branch
+if [ "%teamcity.github.bridge.pullRequest.targetBranch%" = "main" ]; then
+    deploy_to_staging
 fi
 ```
+
+#### Migration from the bundled `pullRequests` feature
+
+If you previously consumed the bundled feature's variables, swap
+them for these:
+
+| Bundled (`teamcity.pullRequest.*`) | This plugin (`teamcity.github.bridge.pullRequest.*`) |
+|---|---|
+| `teamcity.pullRequest.number` | `teamcity.github.bridge.pullRequest.number` |
+| `teamcity.pullRequest.title` | `teamcity.github.bridge.pullRequest.title` |
+| `teamcity.pullRequest.author` | `teamcity.github.bridge.pullRequest.author` |
+| `teamcity.pullRequest.source.branch` | `teamcity.github.bridge.pullRequest.sourceBranch` |
+| `teamcity.pullRequest.target.branch` | `teamcity.github.bridge.pullRequest.targetBranch` |
+| `teamcity.pullRequest.branch.pullrequests` | `teamcity.github.bridge.pullRequest.number` (same data) |
+| _not published by TC_ | `teamcity.github.bridge.isPullRequest` |
+| _not published by TC_ | `teamcity.github.bridge.isDraft` |
+| _not published by TC_ | `teamcity.github.bridge.pullRequest.headSha` |
+
+> **Renaming note (v0.10.0)**: the earlier variable
+> `teamcity.github.bridge.isdraft` (all lowercase, shipped in
+> v0.8.0) was renamed to `teamcity.github.bridge.isDraft` for
+> consistency with the rest of the namespace. If you referenced
+> it in DSL, update accordingly.
 
 ### Plugin-owned settings file (v0.6.0+)
 

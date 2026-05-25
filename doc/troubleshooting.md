@@ -7,26 +7,64 @@ second, fix third.
 
 ```
 +---------------------------------------------------------------+
-|  1. Plugin /info endpoint (one-shot health snapshot)          |
+|  1. Self-test button (v0.9.0+)  *** start here ***            |
+|     Admin -> Server Admin -> GitHub Bridge -> Run self-tests  |
+|     -> PASS/WARN/FAIL/SKIP table localises the broken step    |
++---------------------------------------------------------------+
+|  2. Plugin /info endpoint (one-shot health snapshot)          |
 |     curl https://<TC_HOST>/app/teamcity-github-bridge/info    |
 |     -> secretConfigured, logConfigured, payloadUrl, logFile   |
 +---------------------------------------------------------------+
-|  2. Dedicated plugin log (if `logConfigured: true`)           |
+|  3. Dedicated plugin log                                      |
 |     <TC_DATA_DIR>/logs/teamcity-github-bridge.log             |
-|     -> see `doc/configuration.md` to enable                   |
+|     -> auto-configured at startup since v0.6.0                |
 +---------------------------------------------------------------+
-|  3. Server log fallback (if dedicated log not configured)     |
+|  4. Server log fallback (if dedicated log was overridden)     |
 |     <TC_DATA_DIR>/logs/teamcity-server.log                    |
-|     Grep for `io.github.dlachouette` (package) or            |
+|     Grep for `io.github.dlachouette` (package) or             |
 |     `teamcity-github-bridge` (plugin name).                   |
 +---------------------------------------------------------------+
-|  4. GitHub App webhook "Recent Deliveries" panel              |
+|  5. GitHub App webhook "Recent Deliveries" panel              |
 |     https://github.com/settings/apps/<your-app>/advanced      |
 +---------------------------------------------------------------+
-|  5. Queue UI                                                  |
+|  6. Queue UI                                                  |
 |     Look at the wait reason on held builds                    |
 +---------------------------------------------------------------+
 ```
+
+## Symptom: self-test shows "Token resolution" FAIL on every project
+
+### What you see
+
+After clicking **Run self-tests** the rows
+`Token resolution / <project> / <repo>` are all FAIL with detail
+`TC could not produce an installation token.`
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The GitHub App connection has never been "Test connected" in TC | Open `Project -> Connections -> Edit the GitHub App connection -> Test connection`. This triggers the first token mint, which the plugin then reads from TC's cache. |
+| The App is not installed on the target repository | Visit `https://github.com/settings/apps/<your-app>/installations` and add the repo. |
+| The App's permissions do not cover the repo | Add `Pull requests: Read` and `Contents: Read` minimum; accept on the App's installation page. |
+| The `teamcity.github.bridge.connectionId` value points at a project the connection is not visible from | Confirm in TC: `Project -> Connections` should list the connection on the project's own page or one of its parents. |
+
+The dedicated log file will carry one warning per failed project /
+connection pair, with the exact reason TC reported. Look there
+first if the table message is not enough.
+
+### Note
+
+On TC 2026.1 the high-level
+`ProjectConnectionCredentialsManager.requestConnectionCredentials`
+call refuses GitHub App connections (`Unsupported Connection Provider
+type: GitHubApp`). This is a TC SDK limitation, **not** an error.
+The plugin falls back to `OAuthTokensStorage.getProjectTokens`,
+which returns the cached token TC stores after the first "Test
+connection" or commit-status-publisher use. The log entry that
+states this is at INFO level (`ConnectionCredentialsFactory does
+not handle provider type 'GitHubApp' on this TC version`) and only
+fires once per provider type per server lifetime.
 
 ## Symptom: plugin does not load
 

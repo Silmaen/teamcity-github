@@ -15,6 +15,8 @@ protected by HMAC and the info endpoints expose nothing sensitive.
 | `GET`  | `/app/teamcity-github-bridge/info` | Live webhook config snapshot (JSON) | none |
 | `GET`  | `/app/teamcity-github-bridge/info.md` | Same snapshot as Markdown | none |
 | `GET`  | `/admin/admin.html?tab=bridgeAdmin&...` | Admin / help page (AdminPage tab, JSP-rendered) | TeamCity admin |
+| `POST` | `/admin/bridge/saveSecret.html` | Set or clear the webhook HMAC secret (form on the admin page) | TC `CHANGE_SERVER_SETTINGS` + CSRF token |
+| `POST` | `/admin/bridge/runTests.html` | Run the self-test battery (button on the admin page) | TC `CHANGE_SERVER_SETTINGS` + CSRF token |
 
 ```mermaid
 flowchart LR
@@ -238,6 +240,71 @@ The page shows:
 Access is gated by TeamCity's standard admin auth - the JSP is
 served from inside `AdminPage`, which inherits TC's admin
 authorization filter.
+
+## POST /admin/bridge/saveSecret.html
+
+Mutates the plugin-owned settings file
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties`. Backs the
+"HMAC secret" form on the admin page.
+
+### Request
+
+POST, `Content-Type: application/x-www-form-urlencoded`, form fields:
+
+| Field | Required | Values | Meaning |
+|---|---|---|---|
+| `action` | yes | `set` or `clear` | What to do. |
+| `secret` | yes when `action=set` | non-blank string | New secret value. |
+| `tc-csrf-token` | yes | TC's per-session CSRF token | Without it TC's `CSRFFilter` rejects the request with 403. |
+
+### Responses
+
+| Status | Meaning |
+|---|---|
+| `302` (redirect to the admin page) | Operation accepted; the redirected admin page shows a banner indicating result. |
+| `401 Unauthorized` | No user session. |
+| `403 Forbidden` | The user does not have `CHANGE_SERVER_SETTINGS`, **or** CSRF token missing/invalid. |
+
+The endpoint never echoes the new secret back. Server log records
+`Webhook secret updated by <username>` at INFO level.
+
+## POST /admin/bridge/runTests.html
+
+Runs the full self-test battery against the live plugin instance.
+Backs the "Run self-tests" button on the admin page.
+
+### Request
+
+POST, no body fields except CSRF.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `tc-csrf-token` | yes | Per-session CSRF token. |
+
+### Responses
+
+| Status | Meaning |
+|---|---|
+| `302` (redirect with `?bridgeResult=tested`) | Tests ran; results stashed in the user session and rendered on the next admin-page GET. |
+| `401 Unauthorized` | No user session. |
+| `403 Forbidden` | Missing `CHANGE_SERVER_SETTINGS` or invalid CSRF token. |
+
+The tests run synchronously (target: under 5 seconds) and the
+result list is one-shot: it is consumed on the next admin-page
+render then cleared from the session.
+
+### Tests run (as of v0.9.3)
+
+1. **Webhook secret configured** - is `teamcity.github.bridge.webhook.secret` set anywhere.
+2. **Dedicated log file** - has `PluginLogConfigurator` attached the appender, or has an operator wired one manually.
+3. **GitHub API reachable** - `GET https://api.github.com/zen` without auth.
+4. **HMAC roundtrip** - sign a known payload with the configured secret, verify with `SignatureVerifier`.
+5. **Webhook self-delivery** - HMAC-signed POST to our own webhook URL; expects `200 pong`.
+6. **Token resolution / `<project>` / `<repo>`** - one row per opted-in buildType project; uses `TokenResolver.resolveAccessToken`.
+7. **GitHub API auth / `<project>` / `<repo>`** - one row per project that produced a token; `GET /rate_limit` with the token.
+
+Each test reports `PASS` / `WARN` / `FAIL` / `SKIP` with a free-form
+detail string.
 
 ## Versioning
 

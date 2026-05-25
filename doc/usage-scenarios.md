@@ -317,7 +317,7 @@ Bridge`.
 | TeamCity GitHub Bridge                                   |
 +----------------------------------------------------------+
 | Plugin status                                            |
-|   Plugin version:    0.5.0                               |
+|   Plugin version:    0.9.3                               |
 |   TeamCity version:  TeamCity 2026.1 (build 222521)      |
 |   Webhook URL:       https://.../app/.../webhook         |
 |   HMAC secret:       [configured]                        |
@@ -346,6 +346,64 @@ entries, cleared on TC restart). The dedicated log file is the
 long-term audit. If you do not see any events after a webhook
 delivery, recheck signature and URL with the troubleshooting fold
 on the same page.
+
+The admin page also exposes:
+- A **HMAC secret form** to set or rotate the webhook secret (CSRF
+  protected, writes to `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`).
+- A **Run self-tests** button (see scenario 11.b below).
+
+## Scenario 11.b: operator runs the self-tests
+
+**Actor**: an admin clicks **Run self-tests** on the admin page.
+
+**Expected outcome**: a synchronous POST validates every part of the
+plugin pipeline and renders the results as a colour-coded table.
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Admin page
+    participant Ctl as AdminTestController
+    participant T as PluginSelfTester
+    participant GH as api.github.com
+    participant Self as PluginWebhookController (own)
+    participant TR as TokenResolver
+
+    Admin->>UI: Click "Run self-tests"
+    UI->>Ctl: POST /admin/bridge/runTests.html<br/>+ tc-csrf-token
+    Ctl->>Ctl: check CHANGE_SERVER_SETTINGS perm
+    Ctl->>T: runAllTests(webhookUrl)
+    T->>T: passive checks (secret, log)
+    T->>GH: GET /zen
+    T->>T: HMAC sign + verify
+    T->>Self: POST /webhook (signed ping)
+    Self-->>T: 200 pong
+    par for each opted-in (project, repo)
+        T->>TR: resolveAccessToken(project, conn)
+        T->>GH: GET /rate_limit (Bearer)
+    end
+    T-->>Ctl: List<TestResult>
+    Ctl->>Ctl: session.setAttribute(results)
+    Ctl-->>UI: 302 redirect ?bridgeResult=tested
+    UI->>Admin: render PASS/WARN/FAIL/SKIP table
+```
+
+The seven test categories are described in
+[api-reference.md](api-reference.md#tests-run-as-of-v0.9.3).
+
+Typical reading:
+- All PASS: the plugin is healthy. Webhooks will land, tokens will
+  resolve, builds on opted-in PRs will get Check Runs.
+- "Webhook self-delivery" FAIL while the API reachability passes:
+  the reverse proxy strips a header or the secret was rotated on
+  one side only.
+- "Token resolution" FAIL on every project: the connection ID is
+  wrong, the App is not installed on the repo, or the connection
+  has never been "Test connected" in TC (which is what mints the
+  first token).
+- "GitHub API auth" FAIL after "Token resolution" PASS: GitHub
+  rejected the token. The App's installation may have been revoked
+  on the org side.
 
 ## Scenario 12: draft / ready pill rendering in TC lists
 

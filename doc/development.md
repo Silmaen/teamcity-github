@@ -52,7 +52,8 @@ teamcity-github/
     |       +-- retrigger/  # ReadyForReviewListener
     |       +-- web/        # 2 controllers + AdminConsolePage + page extension + signature verifier + payload parser + events log
     +-- test/kotlin/io/github/dlachouette/teamcity/github/
-        +-- api/  cache/  enrich/  report/  web/  testsupport/   # 11 test classes, 63 tests
+        +-- api/  cache/  config/  enrich/
+        +-- parameters/  report/  web/  testsupport/             # 13 test classes, 81 tests
 ```
 
 ## The Docker-only workflow
@@ -110,7 +111,7 @@ Expected entries: `teamcity-plugin.xml` at the root and
 ./dev test
 ```
 
-Surefire 3.x picks up JUnit 5 automatically. 63 tests covering:
+Surefire 3.x picks up JUnit 5 automatically. 81 tests covering:
 
 | Class | What it tests |
 |---|---|
@@ -124,7 +125,9 @@ Surefire 3.x picks up JUnit 5 automatically. 63 tests covering:
 | `PrBuildEnricherTest` | Pure helper that computes build number + tag enrichment from PR info. |
 | `PrPromotionTaggerTest` | Pure helper that computes the draft/ready tag plan on the promotion. |
 | `DraftCheckRunReporterTest` | Pure helper that decides whether to emit a Check Run + the shape of the request. |
-| `BuildStatusCheckRunPublisherTest` | TC `Status` -> GitHub Check Run conclusion mapping, summary truncation. |
+| `BuildStatusCheckRunPublisherTest` | TC `Status` -> GitHub Check Run conclusion mapping, summary truncation, `isOptedIn`. |
+| `PrParameterProviderTest` | Pure helper that maps branch + PR draft state to the `teamcity.github.bridge.isdraft` value. |
+| `PluginSettingsStorageTest` | Atomic read/write round-trips for the plugin's properties file. |
 
 ### The `LoggerBootstrap` indirection
 
