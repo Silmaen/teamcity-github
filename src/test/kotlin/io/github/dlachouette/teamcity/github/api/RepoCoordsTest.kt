@@ -8,10 +8,10 @@ class RepoCoordsTest {
 
     @Test
     fun `parse valid slug`() {
-        val coords = RepoCoords.parse("Silmaen/Owl")
-        assertEquals("Silmaen", coords.owner)
-        assertEquals("Owl", coords.name)
-        assertEquals("Silmaen/Owl", coords.slug)
+        val coords = RepoCoords.parse("acme/widget")
+        assertEquals("acme", coords.owner)
+        assertEquals("widget", coords.name)
+        assertEquals("acme/widget", coords.slug)
     }
 
     @Test
@@ -24,14 +24,14 @@ class RepoCoordsTest {
     @Test
     fun `parse rejects empty owner`() {
         assertThrows(IllegalArgumentException::class.java) {
-            RepoCoords.parse("/Owl")
+            RepoCoords.parse("/widget")
         }
     }
 
     @Test
     fun `parse rejects empty name`() {
         assertThrows(IllegalArgumentException::class.java) {
-            RepoCoords.parse("Silmaen/")
+            RepoCoords.parse("acme/")
         }
     }
 

@@ -278,7 +278,7 @@
         <p>Add these three parameters to the build configuration (or a shared template) under <code>Parameters</code>:</p>
         <table class="bridge-kv">
             <tr><th><code>teamcity.github.bridge.ignoreDrafts</code></th><td><code>true</code></td></tr>
-            <tr><th><code>teamcity.github.bridge.repo</code></th><td><code>owner/name</code> (e.g. <code>Silmaen/Owl</code>)</td></tr>
+            <tr><th><code>teamcity.github.bridge.repo</code></th><td><code>owner/name</code> (e.g. <code>acme/widget</code>)</td></tr>
             <tr><th><code>teamcity.github.bridge.connectionId</code></th><td>The connection ID of the GitHub App connection (e.g. <code>PROJECT_EXT_42</code>)</td></tr>
         </table>
         <p>That is the only opt-in. Build types without these parameters are untouched by the plugin.</p>

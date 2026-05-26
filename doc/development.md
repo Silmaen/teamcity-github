@@ -30,7 +30,7 @@ teamcity-github/
 +-- .cache/                       # Maven local repo + HOME, git-ignored
 +-- doc/
 |   +-- *.md                      # human + AI-facing documentation
-|   +-- teamcity-plugin-knowledge-base.md   # French transfer doc
+|   +-- historical/               # early design transfer documents (kept for context)
 +-- src/
     +-- main/
     |   +-- assembly/plugin.xml   # builds the plugin.zip layout
@@ -287,13 +287,9 @@ any of them.
 
 ## Pointer to historical context
 
-The French transfer document
-[`teamcity-plugin-knowledge-base.md`](teamcity-plugin-knowledge-base.md)
-explains:
-- Why TeamCity behaves the way it does for PR refs.
-- What we tried in the Owl project before the plugin existed.
-- Trapdoors we hit (DSL pitfalls, classloader quirks, branch
-  display limitations).
-
-If you ever wonder "why did they design it this way", that document
-is the answer.
+Early design notes from the first integration of this plugin live
+under [`historical/`](historical/). They cover the original SDK
+exploration, the trapdoors hit at the time, and the rationale
+behind some still-load-bearing decisions. Useful when you wonder
+"why did they design it this way"; not maintained as current
+documentation.

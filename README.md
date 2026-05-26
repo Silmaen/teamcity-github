@@ -9,8 +9,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](#status)
-[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](#status)
+[![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
 
@@ -92,7 +92,7 @@ Everything runs in Docker - nothing is installed on the host.
 ```bash
 # Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-0.5.0.zip
+# -> target/teamcity-github-bridge-1.0.0.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
@@ -180,86 +180,29 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 - [Developer guide](doc/development.md) - building with Docker,
   running tests, layout, conventions, how to add a feature.
 
-### Historical context
+### Project meta
 
-- [TC 2026.1 knowledge base](doc/teamcity-plugin-knowledge-base.md)
-  (French) - the transfer document that motivated this plugin. Why
-  TeamCity behaves the way it does, what we tried first, what
-  trapdoors we hit.
+- [Changelog](CHANGELOG.md) - per-version change log from 0.1.0 to current.
+- [Contributing](CONTRIBUTING.md) - build, test, coding conventions, how to release.
+- [Roadmap](doc/roadmap.md) - forward-looking work items.
+- [Historical](doc/historical/) - early design transfer documents kept for context, not maintained.
 
 ## Status
 
-Beta. Current version is **0.11.0**. 84 unit tests pass. The plugin
-has been installed end-to-end on a real TeamCity 2026.1 server
-(`builder.argawaen.net`) and the full self-test battery passes
-(19/19), validating webhook delivery, HMAC verification, token
-issuance and the GitHub REST round-trip. Release lineage:
+**Stable**. Current version is **1.0.0**. 84 unit tests pass. The
+plugin has been installed end-to-end against a live TeamCity
+2026.1 server and the in-product self-test battery passes 19/19,
+validating webhook delivery, HMAC verification, token issuance and
+the GitHub REST round-trip.
 
-- v0.2.0: queue tag for draft/ready (`PrPromotionTagger`),
-  dedicated log file.
-- v0.3.0: admin page in TC's UI + in-memory recent events log.
-- v0.4.0: rich GitHub Check Runs that carry the build's actual
-  status text.
-- v0.5.0: pill rendering of draft/ready tags via a client-side
-  Page Extension. **Gap 2 spike** (server-side branch column
-  override) concluded - the SDK does not expose the needed
-  extension point in 2026.1; the cosmetic mitigation ships, the
-  full server-side fix is parked until JetBrains lands the SPI.
-- v0.6.0: self-managed dedicated log file (no log4j snippet to
-  merge) + webhook secret editable directly from the admin page
-  (no more shell access to `internal.properties` required).
-- v0.7.0: `BuildStatusCheckRunPublisher` covers main + opt-out PR
-  builds (Gap A4 in the roadmap). Consumers can now retire the
-  bundled `commitStatusPublisher` on every opted-in buildType
-  without losing GitHub PR coverage.
-- v0.7.1: `TokenResolver` accepts both `CID_<hash>` and
-  `PROJECT_EXT_<N>` for `teamcity.github.bridge.connectionId`; warns are
-  rate-limited to one per minute per (project, id) pair.
-- v0.8.0: new build parameter `teamcity.github.bridge.isdraft`
-  (`true`/`false`) exposed to every opted-in build - closes the
-  long-standing knowledge-base gap about `teamcity.pullRequest.isDraft`
-  not being published by TC.
-- v0.8.1: `OAuthTokensStorage.getProjectTokens` query path replaces
-  the broken `getToken(project, storageId, ...)` call which expected
-  the full `tc_token_id:CID_:...:UUID` form rather than the bare
-  storage ID we were passing in.
-- v0.9.0: **Run self-tests** button on the admin page - 7+ end-to-end
-  checks (config, GitHub reachability, HMAC, webhook self-delivery,
-  token resolution per project) reported as a PASS / WARN / FAIL /
-  SKIP table.
-- v0.9.1: `ProjectConnectionCredentialsManager.requestConnectionCredentials`
-  becomes the primary token-acquisition path (forces minting via
-  the bundled github-app provider), with `getProjectTokens` as the
-  cache-only fallback. Property-key discovery logs the
-  `ConnectionCredentials.properties` keys when the access token
-  is published under a new name.
-- v0.9.2 / v0.9.3: better diagnostics + silenced
-  `"Unsupported Connection Provider type: GitHubApp"` warning
-  (it's a TC SDK limitation, not actionable). The cache-only path
-  is now the correct path for GitHub App connections on TC 2026.1.
-- v0.10.0: **full PR parameter set**. The plugin now publishes 8
-  variables under `teamcity.github.bridge.*` (isPullRequest,
-  isDraft, pullRequest.number / title / author / sourceBranch /
-  targetBranch / headSha). Consumers can disable the bundled
-  `pullRequests` build feature and rely on this plugin's
-  parameters instead. **Breaking**: the previous
-  `teamcity.github.bridge.isdraft` (all-lowercase) is renamed to
-  `teamcity.github.bridge.isDraft` for consistency.
-- v0.11.0: **`DraftBuildQueueCleaner`** removes draft builds from
-  the TC queue instead of holding them with a wait reason. No more
-  "held draft" clutter; the GitHub Check Run still surfaces the
-  intentional skip, and the build is re-enqueued automatically
-  when the PR becomes ready for review. `DraftAwareBuildFilter`
-  stays in place as a safety net for edge cases where the
-  cleaner fails.
+The public API surface (the `teamcity.github.bridge.*` namespace,
+the `/app/teamcity-github-bridge/*` endpoints, the
+`/admin/bridge/*` form actions) is stable. Future minor releases
+may add fields and endpoints; they will not rename or remove what
+already exists.
 
-Open items are tracked in
-[doc/roadmap.md](doc/roadmap.md#sequencing).
-
-See the [milestone roadmap](doc/development.md#roadmap) for what's
-planned, and [doc/roadmap.md](doc/roadmap.md) for the deep-dive on the
-three highest-priority gaps (held-draft tagging, enriched status
-publisher, branch display).
+See [CHANGELOG.md](CHANGELOG.md) for the per-version change log.
+See [doc/roadmap.md](doc/roadmap.md) for what comes after 1.0.
 
 ## License
 

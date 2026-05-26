@@ -142,8 +142,8 @@ the draft check, with a warning in the log.
 
 ```
 [INFO  ] PluginWebhookController - Registered webhook controller at /app/teamcity-github-bridge/webhook
-[WARN  ] GitHubClient - GitHub returned 403 for Silmaen/Owl#189
-[WARN  ] DraftAwareBuildFilter - Cannot fetch PR info for Silmaen/Owl#189; allowing build to proceed
+[WARN  ] GitHubClient - GitHub returned 403 for acme/widget#189
+[WARN  ] DraftAwareBuildFilter - Cannot fetch PR info for acme/widget#189; allowing build to proceed
 ```
 
 ```mermaid
@@ -326,7 +326,7 @@ Bridge`.
 +----------------------------------------------------------+
 | Recent events (last 12 in-memory)                        |
 |   2026-05-25 14:02:30  pull_request  ready_for_review    |
-|                        Silmaen/Owl   200  accepted       |
+|                        acme/widget   200  accepted       |
 |   2026-05-25 14:01:55  ping                              |
 |                                      200  accepted       |
 |   ...                                                    |

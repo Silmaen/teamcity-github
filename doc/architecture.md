@@ -317,7 +317,7 @@ itself loads.
 
 - The bytecode-level inspection that drove these design choices is
   documented in
-  [`teamcity-plugin-knowledge-base.md`](teamcity-plugin-knowledge-base.md)
+  [`historical/2026-05-23-teamcity-2026.1-internals-fr.md`](historical/2026-05-23-teamcity-2026.1-internals-fr.md)
   (French, transfer doc).
 - See [security.md](security.md) for the trust boundaries and the
   signature-verification path in detail.

@@ -97,7 +97,7 @@ Content-Type: application/json
     "head": {"ref": "Feature/raycast", "sha": "deadbeef1234..."},
     "base": {"ref": "main"}
   },
-  "repository": {"full_name": "Silmaen/Owl"}
+  "repository": {"full_name": "acme/widget"}
 }
 ```
 

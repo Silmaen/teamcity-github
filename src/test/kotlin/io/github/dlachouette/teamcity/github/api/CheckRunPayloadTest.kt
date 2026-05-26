@@ -99,13 +99,13 @@ class CheckRunPayloadTest {
             conclusion = CheckRunConclusion.SUCCESS,
             outputTitle = "Build passed",
             outputSummary = "All green.",
-            detailsUrl = "https://tc.example.com/buildConfiguration/Owl_Build/42",
+            detailsUrl = "https://tc.example.com/buildConfiguration/MyProject_Build/42",
         )
 
         val json = GitHubClient.encodeCheckRunPayload(request)
         val node = mapper.readTree(json)
 
-        assertEquals("https://tc.example.com/buildConfiguration/Owl_Build/42", node.path("details_url").asText())
+        assertEquals("https://tc.example.com/buildConfiguration/MyProject_Build/42", node.path("details_url").asText())
     }
 
     @Test

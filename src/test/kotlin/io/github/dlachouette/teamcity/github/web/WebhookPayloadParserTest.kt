@@ -19,7 +19,7 @@ class WebhookPayloadParserTest {
             "head": {"ref": "Feature/raycast", "sha": "deadbeef1234"},
             "base": {"ref": "main"}
           },
-          "repository": {"full_name": "Silmaen/Owl"}
+          "repository": {"full_name": "acme/widget"}
         }
     """.trimIndent()
 
@@ -29,8 +29,8 @@ class WebhookPayloadParserTest {
         assertNotNull(parsed)
         parsed!!
         assertEquals(189, parsed.prNumber)
-        assertEquals("Silmaen", parsed.repo.owner)
-        assertEquals("Owl", parsed.repo.name)
+        assertEquals("acme", parsed.repo.owner)
+        assertEquals("widget", parsed.repo.name)
         assertEquals("deadbeef1234", parsed.headSha)
         assertEquals("Feature/raycast", parsed.headRef)
         assertEquals("main", parsed.baseRef)

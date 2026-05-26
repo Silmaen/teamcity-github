@@ -153,7 +153,7 @@ types.
 | Parameter | Required | Example | Purpose |
 |---|---|---|---|
 | `teamcity.github.bridge.ignoreDrafts` | yes | `true` | Setting to `"true"` enables draft suppression and inclusion in the ready-for-review retrigger. |
-| `teamcity.github.bridge.repo` | yes | `Silmaen/Owl` | The `owner/name` slug as GitHub reports it in `repository.full_name`. |
+| `teamcity.github.bridge.repo` | yes | `acme/widget` | The `owner/name` slug as GitHub reports it in `repository.full_name`. |
 | `teamcity.github.bridge.connectionId` | yes | `PROJECT_EXT_42` | The TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager`. Visible in the URL of the project's Connections page. |
 
 ### How to set them
@@ -172,7 +172,7 @@ Put them on a parent template and the children inherit:
 | Template: GitHubAwarePR                        |
 |   parameters:                                  |
 |     teamcity.github.bridge.ignoreDrafts        = true            |
-|     teamcity.github.bridge.repo         = Silmaen/Owl     |
+|     teamcity.github.bridge.repo         = acme/widget     |
 |     teamcity.github.bridge.connectionId = PROJECT_EXT_42  |
 +------------------------------------------------+
           |
@@ -192,7 +192,7 @@ object GitHubAwarePR : Template({
     name = "GitHub-aware PR template"
     params {
         param("teamcity.github.bridge.ignoreDrafts", "true")
-        param("teamcity.github.bridge.repo", "Silmaen/Owl")
+        param("teamcity.github.bridge.repo", "acme/widget")
         param("teamcity.github.bridge.connectionId", "PROJECT_EXT_42")
     }
 })
@@ -348,7 +348,7 @@ configuration that carries the two parameters
 `teamcity.github.bridge.repo` + `teamcity.github.bridge.connectionId`. This includes:
 
 - PR builds with `teamcity.github.bridge.ignoreDrafts=true` (the original draft-aware path).
-- PR builds with `teamcity.github.bridge.ignoreDrafts=false` (opt-out subsets, e.g. draft-friendly Linux Clang in Owl).
+- PR builds with `teamcity.github.bridge.ignoreDrafts=false` (opt-out subsets).
 - Builds on `main` after merge.
 - Any other branch covered by the buildType's VCS root.
 
