@@ -252,6 +252,48 @@ class). Run as a Maven `verify`-phase suite, not on every
 Large. The harness is well documented but setting it up the first
 time takes time.
 
+## Item 9 - Self-mint installation tokens (TC 2026.1 unblock) — **shipped in v1.2.0**
+
+### What shipped
+
+A third token-acquisition path inside `TokenResolver` that mints
+installation tokens directly from the connection's stored App ID +
+private key. JWT signing via `auth0/java-jwt`, two REST calls to
+GitHub (`/app/installations`,
+`/app/installations/{id}/access_tokens`), local cache keyed on
+installation ID with a 10 minute safety margin under the 60 minute
+GitHub-side lifetime.
+
+Resolution order is now:
+
+1. **`AppTokenMinter.mint(...)` — primary, new in v1.2.0.** Works on
+   a vanilla TC 2026.1 sandbox; no prior "Test connection" click
+   needed.
+2. `ProjectConnectionCredentialsManager.requestConnectionCredentials`
+   (kept for forward-compatibility with a future TC fix).
+
+The `OAuthTokensStorage.getProjectTokens` cache-only path that
+older versions used as a fallback has been dropped: TC's "refresh
+if necessary" flag does not refresh GitHub App tokens reliably on
+2026.1, so the cache ended up handing out 401-rejected stale
+tokens.
+
+### Files added
+
+- `src/main/kotlin/.../api/AppTokenMinter.kt`
+- `src/main/kotlin/.../api/AppTokenCache.kt`
+- `src/test/kotlin/.../api/AppTokenMinterTest.kt` (10 tests)
+- `src/test/kotlin/.../api/AppTokenCacheTest.kt` (7 tests)
+
+### Notes on the shipped implementation
+
+The PEM parser handles both PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`)
+and PKCS#8 (`-----BEGIN PRIVATE KEY-----`) without pulling
+BouncyCastle: a tiny in-process ASN.1 wrapper converts PKCS#1 to
+PKCS#8 so Java's stock `KeyFactory` can load it. Literal `\n`
+escape sequences (when the key is pasted into a single-line field)
+are normalised to real newlines before parsing.
+
 ## Open SDK questions worth revisiting
 
 These items are blocked on JetBrains shipping a SDK feature rather
@@ -261,7 +303,7 @@ than on our willingness to ship them. Re-check on each TC release.
 |---|---|---|
 | Public `BuildBranchInfoProvider` | Override the branch column display | Not in `server-openapi`; see Item 2 above. |
 | Per-buildType disable of bundled features via DSL | Suppress `commitStatusPublisher` cleanly | Not in `server-openapi`; see Item 4. |
-| `ConnectionCredentialsFactory` for GitHub App | High-level token acquisition that does not need our `getProjectTokens` fallback | Not supported (`Unsupported Connection Provider type: GitHubApp`). The fallback is fine; this is just a code-cleanliness wish. |
+| `ConnectionCredentialsFactory` for GitHub App | High-level token acquisition that does not need our self-mint path | Not supported (`Unsupported Connection Provider type: GitHubApp`). **Worked around in v1.2.0** by the self-mint path (Item 9). When/if JetBrains adds it, the self-mint primary path can be dropped — the credentials-manager fallback would suffice again. |
 
 ## Where to record new ideas
 

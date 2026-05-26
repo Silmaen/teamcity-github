@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -88,6 +88,10 @@ Concretely:
   build lists (client-side CSS via a `SimplePageExtension`).
 - **Forward-compatible with the new stateless `ghs_*` token format**
   - tokens are treated as opaque end-to-end.
+- **Self-mints its own installation tokens** from the App's private
+  key (signed JWT + `POST /app/installations/{id}/access_tokens`),
+  so the plugin works on a vanilla TeamCity 2026.1 sandbox without
+  any prior interaction with TC's connection cache.
 
 ## Quick start
 
@@ -96,7 +100,7 @@ Everything runs in Docker - nothing is installed on the host.
 ```bash
 # Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-1.0.0.zip
+# -> target/teamcity-github-bridge-1.2.0.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
@@ -137,7 +141,12 @@ Then follow the three setup pages:
 |          |  Bearer ghs_xxxx...      |              ^              |
 |          |  X-GitHub-Api-Version    |              |              |
 |          |                          |        TokenResolver        |
-|          |                          |        (OAuthTokensStorage) |
+|          |                          |              |              |
+|          |                          |              v              |
+|          |  POST /app/installations |        AppTokenMinter       |
+|          |  /{id}/access_tokens     |        (signs RS256 JWT     |
+|          |<==============================   with the App's key   |
+|          |  Bearer <JWT>            |         + caches ghs_*)     |
 +----------+                          +-----------------------------+
 ```
 
@@ -186,18 +195,20 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ### Project meta
 
-- [Changelog](CHANGELOG.md) - per-version change log from 0.1.0 to current.
+- [Changelog](CHANGELOG.md) - per-version change log.
 - [Contributing](CONTRIBUTING.md) - build, test, coding conventions, how to release.
 - [Roadmap](doc/roadmap.md) - forward-looking work items.
 - [Historical](doc/historical/) - early design transfer documents kept for context, not maintained.
 
 ## Status
 
-**Stable**. Current version is **1.0.0**. 84 unit tests pass. The
-plugin has been installed end-to-end against a live TeamCity
-2026.1 server and the in-product self-test battery passes 19/19,
-validating webhook delivery, HMAC verification, token issuance and
-the GitHub REST round-trip.
+**Stable**. Current version is **1.2.0**. 104 unit tests pass.
+The plugin has been installed end-to-end against both vanilla
+github.com and a live GitHub Enterprise (`github.example.com`)
+TeamCity 2026.1 server. The in-product self-test battery
+validates webhook delivery, HMAC verification, token issuance
+(via the plugin's own self-mint path) and the GitHub REST
+round-trip - 35/35 PASS on a correctly-configured installation.
 
 The public API surface (the `teamcity.github.bridge.*` namespace,
 the `/app/teamcity-github-bridge/*` endpoints, the

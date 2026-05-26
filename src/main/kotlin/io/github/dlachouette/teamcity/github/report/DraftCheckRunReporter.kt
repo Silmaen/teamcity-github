@@ -60,10 +60,16 @@ class DraftCheckRunReporter(
 
         if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
 
-        // TokenResolver already logs the cause (rate-limited).
-        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
+        val repo = try {
+            RepoCoords.parse(repoSlug)
+        } catch (e: IllegalArgumentException) {
+            return
+        }
 
-        val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, accessToken)
+        // TokenResolver already logs the cause (rate-limited).
+        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
+
+        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
         if (pr == null) {
             LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; skipping check run report")
             return
@@ -85,7 +91,7 @@ class DraftCheckRunReporter(
         val dedupKey = sha to buildType.externalId
         if (!published.add(dedupKey)) return
 
-        val ok = gitHubClient.postCheckRun(accessToken, RepoCoords.parse(repoSlug), request)
+        val ok = gitHubClient.postCheckRun(access.token, repo, request, access.apiBase)
         if (!ok) {
             published.remove(dedupKey)
             LOG.warn("Check Run POST failed for $repoSlug@$sha (${buildType.externalId})")

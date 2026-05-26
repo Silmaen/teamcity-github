@@ -83,7 +83,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     private fun post(ctx: PrBuildContext, request: CheckRunRequest, label: String) {
-        val ok = gitHubClient.postCheckRun(ctx.accessToken, ctx.repo, request)
+        val ok = gitHubClient.postCheckRun(ctx.accessToken, ctx.repo, request, ctx.apiBase)
         if (!ok) {
             LOG.warn("Check Run POST ($label) failed for ${ctx.repo.slug}@${ctx.headSha}")
         } else {
@@ -97,15 +97,21 @@ class BuildStatusCheckRunPublisher(
 
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return null
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return null
+        val repo = try {
+            RepoCoords.parse(repoSlug)
+        } catch (e: IllegalArgumentException) {
+            return null
+        }
 
         val headSha = build.revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
         // TokenResolver already logs the cause (rate-limited).
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return null
+        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return null
         return PrBuildContext(
-            repo = RepoCoords.parse(repoSlug),
+            repo = repo,
             buildType = buildType,
             headSha = headSha,
-            accessToken = token,
+            accessToken = access.token,
+            apiBase = access.apiBase,
         )
     }
 
@@ -114,6 +120,7 @@ class BuildStatusCheckRunPublisher(
         val buildType: jetbrains.buildServer.serverSide.SBuildType,
         val headSha: String,
         val accessToken: String,
+        val apiBase: String,
     )
 
     companion object {

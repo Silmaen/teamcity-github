@@ -15,14 +15,14 @@ flowchart LR
     GH[GitHub]:::untrusted
     BRIDGE[teamcity-github-bridge]:::plugin
     TC[TeamCity internals]:::trusted
-    SECRETS[OAuthTokensStorage<br/>+ internal.properties]:::trusted
+    SECRETS[Connection descriptor<br/>+ internal.properties]:::trusted
 
     INET -.spoofed traffic.- BRIDGE
     GH -- pull_request webhook<br/>signed with shared secret --> BRIDGE
     BRIDGE -- HMAC verify --> BRIDGE
     BRIDGE -- enqueue --> TC
-    SECRETS -- secret, installation tokens --> BRIDGE
-    BRIDGE -- Bearer token --> GH
+    SECRETS -- App ID + private key, HMAC secret --> BRIDGE
+    BRIDGE -- signs JWT, mints ghs_*<br/>Bearer ghs_* on every call --> GH
 ```
 
 The plugin treats anything coming in from the network as untrusted
@@ -30,9 +30,14 @@ until proven otherwise. The proof is:
 - For inbound webhooks: a valid HMAC-SHA256 signature over the raw
   body, using the shared secret stored in TeamCity's
   `internal.properties`.
-- For outbound API calls: TeamCity owns the credentials; the plugin
-  only sees a short-lived bearer token via
-  `OAuthTokensStorage.getToken(...)`.
+- For outbound API calls: the plugin reads the GitHub App's
+  private key from the TC connection descriptor, signs a
+  short-lived RS256 JWT as the App, and mints a 1-hour
+  installation token via the GitHub REST API. The minted token
+  is cached locally with a 50-minute TTL (safety margin under
+  GitHub's 60-minute lifetime). The private key never leaves
+  the TC server; only the minted `ghs_*` installation token
+  reaches GitHub on subsequent REST calls.
 
 ## Inbound: webhook signature verification
 
@@ -132,25 +137,36 @@ trigger arbitrary builds.
 ## Outbound: GitHub App installation tokens
 
 The plugin authenticates outbound REST calls with bearer tokens
-issued by the GitHub App. It never sees, signs with, or stores the
-App's private key - that is TeamCity's job.
+issued by the GitHub App. The plugin reads the App's private key
+from the TC connection descriptor (the same place TeamCity stores
+it), signs a JWT, and mints a 1-hour installation token via
+GitHub's REST API. The private key never leaves the TC host.
 
 ```mermaid
 sequenceDiagram
     participant Plugin
-    participant OTS as OAuthTokensStorage
-    participant TC as TeamCity core
-    participant GH as github.com
+    participant OCM as OAuthConnectionsManager
+    participant ATM as AppTokenMinter
+    participant ATC as AppTokenCache
+    participant GH as GitHub REST
 
-    Plugin->>OTS: getToken(project, storageId, true, true)
-    OTS->>TC: read encrypted token from storage
-    alt token expired or near expiry
-        TC->>GH: POST /app/installations/{id}/access_tokens<br/>(JWT signed with App private key)
-        GH-->>TC: new installation token (1h TTL)
-        TC->>TC: re-encrypt + persist
+    Plugin->>OCM: findConnection(project, connectionId)
+    OCM-->>Plugin: OAuthConnectionDescriptor (App ID + private key + ownerUrl)
+    Plugin->>ATM: mint(...)
+    ATM->>ATC: get(installationId)
+    alt cache hit (within 50 min)
+        ATC-->>ATM: cached ghs_* token
+    else cache miss
+        ATM->>ATM: build JWT (iss=appId, iat=now-60s, exp=iat+540s)<br/>sign with App private key (RS256)
+        ATM->>GH: GET /app/installations<br/>Authorization: Bearer <JWT>
+        GH-->>ATM: list of installations
+        ATM->>ATM: pick installation matching repo.owner
+        ATM->>GH: POST /app/installations/{id}/access_tokens<br/>Authorization: Bearer <JWT>
+        GH-->>ATM: { token: "ghs_*", expires_at: ... }
+        ATM->>ATC: put(installationId, token, expiresAt - 10 min)
     end
-    OTS-->>Plugin: OAuthToken (accessToken: opaque)
-    Plugin->>GH: GET /repos/.../pulls/N<br/>Authorization: Bearer <accessToken>
+    ATM-->>Plugin: ghs_* token
+    Plugin->>GH: GET /repos/.../pulls/N<br/>Authorization: Bearer ghs_*
     GH-->>Plugin: PR JSON
 ```
 
@@ -176,8 +192,8 @@ See the commented contract at the top of `api/TokenResolver.kt`.
 |---|---|---|
 | GitHub App settings | App private key (.pem) | persistent, rotate annually |
 | TeamCity `<connection>` config | App ID, Client ID, Client Secret, private key, optionally webhook secret | persistent, encrypted in TC config |
-| `OAuthTokensStorage` (TC DB) | Installation access tokens | ~1h, refreshed automatically |
-| Plugin memory (PrInfoCache) | PR JSON snippets (number, title, author, draft, ...) | 60 seconds |
+| Plugin memory (`AppTokenCache`) | Installation access tokens, keyed by installation ID | 50 minutes (GitHub-side lifetime is 60 min; we keep a 10 min safety margin) |
+| Plugin memory (`PrInfoCache`) | PR JSON snippets (number, title, author, draft, ...) | 60 seconds |
 | Plugin memory (during request) | Access token in `String` | discarded at end of call |
 
 The plugin never writes tokens to disk, never logs them at any

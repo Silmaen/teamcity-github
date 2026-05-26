@@ -16,7 +16,7 @@ flowchart TB
 
     subgraph TCSDK["TeamCity SDK"]
         OCM[OAuthConnectionsManager]:::sdk
-        OTS[OAuthTokensStorage]:::sdk
+        PCCM[ProjectConnection<br/>CredentialsManager]:::sdk
         PM[ProjectManager]:::sdk
         WCM[WebControllerManager]:::sdk
         SBS[SBuildServer]:::sdk
@@ -30,8 +30,10 @@ flowchart TB
         TCB[TeamCityGitHubBridgePlugin<br/>lifecycle bean]:::logic
         WC[WebhookConfig]:::logic
         LPR[LogPathResolver]:::logic
-        TR[TokenResolver]:::logic
-        GC[GitHubClient<br/>REST + Jackson<br/>getPr / postCheckRun]:::io
+        TR[TokenResolver<br/>self-mint primary]:::logic
+        ATM[AppTokenMinter<br/>JWT + installation token]:::logic
+        ATC[AppTokenCache<br/>per-installation TTL]:::cache
+        GC[GitHubClient<br/>REST + Jackson<br/>getPr / postCheckRun /<br/>listInstallations / mintToken]:::io
         PIC[PrInfoCache<br/>TTL 60s]:::cache
         REL[RecentEventsLog<br/>ring buffer N=100]:::cache
 
@@ -51,7 +53,10 @@ flowchart TB
     end
 
     OCM --> TR
-    OTS --> TR
+    PCCM --> TR
+    TR --> ATM
+    ATM --> ATC
+    ATM --> GC
     TR --> DAF
     TR --> PBE
     TR --> PPT
@@ -109,10 +114,14 @@ flowchart TB
 io.github.dlachouette.teamcity.github
 +-- TeamCityGitHubBridgePlugin   (main lifecycle bean)
 +-- api/
-|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, postCheckRun)
+|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, postCheckRun, listInstallations, createInstallationToken)
 |   +-- PrInfo                    (data class)
 |   +-- RepoCoords                (data class + parser)
-|   +-- TokenResolver             (CredentialsManager -> getProjectTokens fallback, opaque tokens)
+|   +-- TokenResolver             (self-mint primary, credentials-manager fallback; returns ResolvedAccess = token + apiBase)
+|   +-- ResolvedAccess            (data class: token + apiBase)
+|   +-- AppTokenMinter            (signs RS256 JWT, lists installations, mints ghs_* token)
+|   +-- AppTokenCache             (per-installation TTL cache for minted tokens)
+|   +-- InstallationInfo / CreatedToken (data classes for the App-level REST API)
 |   +-- CheckRunRequest / CheckRunStatus / CheckRunConclusion
 +-- cache/
 |   +-- PrInfoCache               (TTL-based, ConcurrentHashMap)
@@ -172,9 +181,9 @@ Declared in
 
 `default-autowire="constructor"` makes Spring resolve every
 constructor parameter against the available beans. TC's own beans
-(`OAuthConnectionsManager`, `OAuthTokensStorage`, `ProjectManager`,
-`WebControllerManager`, `SBuildServer`) are exposed by the TC core
-context, which our XML inherits from.
+(`OAuthConnectionsManager`, `ProjectConnectionCredentialsManager`,
+`ProjectManager`, `WebControllerManager`, `SBuildServer`) are
+exposed by the TC core context, which our XML inherits from.
 
 ## Data flow: inbound (GitHub -> TC)
 
@@ -221,22 +230,37 @@ sequenceDiagram
     participant DAF as DraftAwareBuildFilter
     participant TR as TokenResolver
     participant OCM as OAuthConnectionsManager
-    participant OTS as OAuthTokensStorage
+    participant ATM as AppTokenMinter
+    participant ATC as AppTokenCache
     participant PIC as PrInfoCache
     participant GC as GitHubClient
     participant API as GitHub REST
 
     Q->>DAF: canStart(queuedBuild)
-    DAF->>TR: resolveAccessToken(project, connectionId)
+    DAF->>TR: resolveAccessToken(project, connectionId, repo)
     TR->>OCM: findConnectionById(...)
-    OCM-->>TR: OAuthConnectionDescriptor
-    TR->>OTS: getToken(project, storageId, true, true)
-    OTS-->>TR: OAuthToken (accessToken: opaque string)
-    TR-->>DAF: accessToken | null
-    DAF->>PIC: get(repo, prNumber, accessToken)
+    OCM-->>TR: OAuthConnectionDescriptor (params: appId, private key, ownerUrl)
+    TR->>ATM: mint(appId, key, params, repo, apiBase)
+    ATM->>ATC: get(installationId)
+    alt cache hit
+        ATC-->>ATM: cached ghs_* token
+    else cache miss
+        ATM->>GC: listInstallations(JWT, apiBase)
+        GC->>API: GET /app/installations<br/>Authorization: Bearer <JWT>
+        API-->>GC: [InstallationInfo...]
+        GC-->>ATM: matching installation
+        ATM->>GC: createInstallationToken(JWT, installationId, apiBase)
+        GC->>API: POST /app/installations/{id}/access_tokens<br/>Authorization: Bearer <JWT>
+        API-->>GC: { token: "ghs_*", expires_at: ... }
+        GC-->>ATM: CreatedToken
+        ATM->>ATC: put(installationId, token, expiresAt - safety margin)
+    end
+    ATM-->>TR: ghs_* token
+    TR-->>DAF: ResolvedAccess { token, apiBase }
+    DAF->>PIC: get(repo, prNumber, token, apiBase)
     alt cache miss
-        PIC->>GC: getPr(accessToken, repo, prNumber)
-        GC->>API: GET /repos/{owner}/{name}/pulls/{N}<br/>Authorization: Bearer ...<br/>X-GitHub-Api-Version: 2022-11-28
+        PIC->>GC: getPr(token, repo, prNumber, apiBase)
+        GC->>API: GET /repos/{owner}/{name}/pulls/{N}<br/>Authorization: Bearer ghs_*<br/>X-GitHub-Api-Version: 2022-11-28
         API-->>GC: 200 + JSON
         GC-->>PIC: PrInfo
     end
@@ -268,7 +292,8 @@ Where we plug into TC:
 | `StartBuildPrecondition` | `DraftAwareBuildFilter` |
 | `BaseController` + `WebControllerManager.registerController` | `PluginWebhookController`, `WebhookInfoController` |
 | `OAuthConnectionsManager` (read-only) | `TokenResolver` |
-| `OAuthTokensStorage` (read-only) | `TokenResolver` |
+| `ProjectConnectionCredentialsManager` (read-only, forward-compat) | `TokenResolver` |
+| `OAuthConnectionDescriptor.parameters` (App ID + private key + ownerUrl) | `AppTokenMinter` |
 | `ProjectManager.activeBuildTypes` | `ReadyForReviewListener` |
 | `BuildTypeEx.createBuildCustomizer` + `addToQueue` | `ReadyForReviewListener` |
 

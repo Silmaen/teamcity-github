@@ -42,11 +42,16 @@ class PrPromotionTagger(
         if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
+        val repo = try {
+            RepoCoords.parse(repoSlug)
+        } catch (e: IllegalArgumentException) {
+            return
+        }
 
         // TokenResolver already logs the cause (rate-limited).
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
+        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
 
-        val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, token)
+        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
         if (pr == null) {
             LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; skipping promotion tag")
             return

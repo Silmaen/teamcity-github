@@ -30,13 +30,18 @@ class PrParameterProvider(
             val repoSlug = params[DraftAwareBuildFilter.PARAM_REPO_SLUG]
             val connectionId = params[DraftAwareBuildFilter.PARAM_CONNECTION_ID]
             if (repoSlug.isNullOrBlank() || connectionId.isNullOrBlank()) return emptyMap()
+            val repo = try {
+                RepoCoords.parse(repoSlug)
+            } catch (e: IllegalArgumentException) {
+                return emptyMap()
+            }
 
             computeParams(
                 branchName = build.branch?.name,
                 resolver = { number ->
-                    val token = tokenResolver.resolveAccessToken(buildType.project, connectionId)
+                    val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo)
                         ?: return@computeParams null
-                    prInfoCache.get(RepoCoords.parse(repoSlug), number, token)
+                    prInfoCache.get(repo, number, access.token, access.apiBase)
                 },
             )
         } catch (e: Exception) {

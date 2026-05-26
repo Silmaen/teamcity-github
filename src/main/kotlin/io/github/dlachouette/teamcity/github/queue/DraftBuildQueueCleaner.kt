@@ -65,8 +65,13 @@ class DraftBuildQueueCleaner(
         if (!branchName.startsWith("pull/")) return
         val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
 
-        val token = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return
-        val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, token) ?: return
+        val repo = try {
+            RepoCoords.parse(repoSlug)
+        } catch (e: IllegalArgumentException) {
+            return
+        }
+        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
+        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase) ?: return
 
         if (!shouldRemove(pr)) return
 

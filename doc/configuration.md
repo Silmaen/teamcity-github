@@ -154,7 +154,7 @@ types.
 |---|---|---|---|
 | `teamcity.github.bridge.ignoreDrafts` | yes | `true` | Setting to `"true"` enables draft suppression and inclusion in the ready-for-review retrigger. |
 | `teamcity.github.bridge.repo` | yes | `acme/widget` | The `owner/name` slug as GitHub reports it in `repository.full_name`. |
-| `teamcity.github.bridge.connectionId` | yes | `PROJECT_EXT_42` | The TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager`. Visible in the URL of the project's Connections page. |
+| `teamcity.github.bridge.connectionId` | yes | `PROJECT_EXT_42` | The TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager`. Visible in the URL of the project's Connections page. The connection must carry the App ID and private key — the plugin reads them directly to self-mint installation tokens (no need to click "Test connection" first since v1.2.0). |
 
 ### How to set them
 

@@ -13,6 +13,8 @@
     <bean class="io.github.dlachouette.teamcity.github.config.LogPathResolver"/>
 
     <bean class="io.github.dlachouette.teamcity.github.api.GitHubClient"/>
+    <bean class="io.github.dlachouette.teamcity.github.api.AppTokenCache"/>
+    <bean class="io.github.dlachouette.teamcity.github.api.AppTokenMinter"/>
     <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
     <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
 

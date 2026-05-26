@@ -34,12 +34,17 @@ class DraftAwareBuildFilter(
 
         val repoSlug = buildType.parameters[PARAM_REPO_SLUG] ?: return null
         val connectionId = buildType.parameters[PARAM_CONNECTION_ID] ?: return null
+        val repo = try {
+            RepoCoords.parse(repoSlug)
+        } catch (e: IllegalArgumentException) {
+            return null
+        }
 
         // TokenResolver logs the underlying cause (rate-limited); a
         // null return here is silent so we don't double-spam the log.
-        val accessToken = tokenResolver.resolveAccessToken(buildType.project, connectionId) ?: return null
+        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return null
 
-        val pr = prInfoCache.get(RepoCoords.parse(repoSlug), prNumber, accessToken)
+        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
         if (pr == null) {
             LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; allowing build to proceed")
             return null

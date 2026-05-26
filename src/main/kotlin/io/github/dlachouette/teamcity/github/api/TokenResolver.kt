@@ -6,11 +6,19 @@ import jetbrains.buildServer.serverSide.connections.credentials.ConnectionCreden
 import jetbrains.buildServer.serverSide.connections.credentials.ProjectConnectionCredentialsManager
 import jetbrains.buildServer.serverSide.oauth.OAuthConnectionDescriptor
 import jetbrains.buildServer.serverSide.oauth.OAuthConnectionsManager
-import jetbrains.buildServer.serverSide.oauth.OAuthTokensStorage
-import jetbrains.buildServer.serverSide.oauth.TokenIntent
-import jetbrains.buildServer.serverSide.oauth.TokenStoragePageOrder
-import jetbrains.buildServer.serverSide.oauth.TokenStorageQuery
 import java.util.concurrent.ConcurrentHashMap
+
+// Pair of (token, apiBase) returned by TokenResolver. The apiBase
+// matches the GitHub host the token was minted against, so callers
+// must use it on every subsequent REST call (PR queries, Check Runs,
+// /rate_limit selftest). Without this, a token minted against a
+// GitHub Enterprise host (e.g. github.acme.com/api/v3) sent to
+// github.com would 401 - this is exactly the failure mode an
+// earlier dev build hit on a GHE sandbox.
+data class ResolvedAccess(
+    val token: String,
+    val apiBase: String,
+)
 
 // Tokens (PATs, installation tokens, ghs_*, future ~520-char stateless
 // JWTs) are treated as opaque strings end-to-end: no length checks, no
@@ -26,20 +34,29 @@ import java.util.concurrent.ConcurrentHashMap
 // We try both lookups before giving up, with a per-key rate limit on
 // the warning so a misconfigured server does not flood the log.
 //
-// Token retrieval has two paths:
-//   1. `ProjectConnectionCredentialsManager.requestConnectionCredentials`
-//      is the high-level entry point. For GitHub App connections it
-//      triggers JWT signing + installation-token minting through the
-//      bundled github-app plugin and caches the result. This is the
-//      same path the bundled commit-status-publisher uses.
-//   2. Fallback: `OAuthTokensStorage.getProjectTokens(query)`, which
-//      returns any token that has been previously cached. Used only if
-//      step 1 errors out (e.g., a future connection type that doesn't
-//      go through the credentials manager).
+// Token retrieval has two paths, tried in order:
+//   1. `AppTokenMinter.mint(...)` - the plugin signs its own JWT with
+//      the App's private key (read from the connection descriptor),
+//      finds the installation matching the target repo's owner, and
+//      mints a fresh installation token via the GitHub REST API.
+//      This is the authoritative source: tokens are guaranteed
+//      fresh (cached locally with a safety margin under the 60 min
+//      GitHub-side lifetime) and scoped to the right installation.
+//   2. `ProjectConnectionCredentialsManager.requestConnectionCredentials`
+//      is the high-level TC entry point. For GitHub App connections
+//      on TC 2026.1 it raises `Unsupported Connection Provider type`
+//      and never returns a token. Kept as a forward-compat fallback
+//      so a future TC fix is honoured automatically.
+//
+// The `OAuthTokensStorage.getProjectTokens` cache path that earlier
+// versions used as a fallback has been dropped: TC's "refresh if
+// necessary" flag does not refresh GitHub App tokens reliably on
+// 2026.1, so the cache ends up handing out 401-rejected stale tokens
+// that mask the real configuration. Self-mint replaces it cleanly.
 class TokenResolver(
     private val oauthConnectionsManager: OAuthConnectionsManager,
-    private val tokensStorage: OAuthTokensStorage,
     private val credentialsManager: ProjectConnectionCredentialsManager,
+    private val appTokenMinter: AppTokenMinter,
 ) {
 
     private val lastWarnedAtMs = ConcurrentHashMap<String, Long>()
@@ -51,7 +68,7 @@ class TokenResolver(
     // the attempt entirely and go straight to getProjectTokens.
     private val unsupportedProviderTypes = ConcurrentHashMap.newKeySet<String>()
 
-    fun resolveAccessToken(project: SProject, connectionId: String): String? {
+    fun resolveAccessToken(project: SProject, connectionId: String, repo: RepoCoords): ResolvedAccess? {
         val descriptor = findConnection(project, connectionId)
         if (descriptor == null) {
             if (shouldLog("no-conn", project.externalId, connectionId)) {
@@ -64,21 +81,43 @@ class TokenResolver(
             }
             return null
         }
-        val accessToken = fetchViaCredentialsManager(project, descriptor)
-            ?: fetchViaProjectTokens(project, descriptor)
+        val apiBase = apiBaseFromDescriptor(descriptor)
+        val accessToken = fetchViaSelfMint(descriptor, repo, apiBase)
+            ?: fetchViaCredentialsManager(project, descriptor)
         if (accessToken == null) {
             if (shouldLog("no-token", project.externalId, connectionId)) {
                 LOG.warn(
                     "No installation token available for connection ${descriptor.id} (storageId=${descriptor.tokenStorageId}) in project ${project.externalId}. " +
-                        "The connection exists but TeamCity could not produce a token. Most common causes: " +
-                        "the GitHub App is not installed on the target repository, the App has no permission for it, or the connection " +
-                        "has never been used. Try opening Project -> Connections -> Edit and saving once to force token issuance."
+                        "Self-mint and the credentials-manager fallback both returned null. " +
+                        "apiBase used: $apiBase. " +
+                        "Most common causes: the GitHub App is not installed on ${repo.slug}, the App has no permission for it, " +
+                        "the connection descriptor does not expose appId + private key under the expected keys (see AppTokenMinter logs), " +
+                        "or the connection's GitHub URL points at a different host than the App was actually registered on."
                 )
             }
             return null
         }
         clearWarnCooldowns(project.externalId, connectionId)
-        return accessToken
+        return ResolvedAccess(token = accessToken, apiBase = apiBase)
+    }
+
+    // Computes the REST apiBase for the connection. Tries the
+    // candidate descriptor keys first, falls back to api.github.com
+    // if none are present.
+    private fun apiBaseFromDescriptor(descriptor: OAuthConnectionDescriptor): String {
+        val raw = GITHUB_URL_KEYS.firstNotNullOfOrNull {
+            descriptor.parameters[it]?.takeIf { v -> v.isNotBlank() }
+        }
+        return GitHubClient.apiBaseFromGitHubUrl(raw)
+    }
+
+    // Public diagnostic helper - the self-tester uses it to display
+    // which apiBase the plugin would use for a given (project,
+    // connection) pair, even when resolveAccessToken fails. Returns
+    // null only if the connection cannot be found.
+    fun computeApiBase(project: SProject, connectionId: String): String? {
+        val descriptor = findConnection(project, connectionId) ?: return null
+        return apiBaseFromDescriptor(descriptor)
     }
 
     private fun findConnection(project: SProject, id: String): OAuthConnectionDescriptor? {
@@ -146,33 +185,31 @@ class TokenResolver(
         }
     }
 
-    // Fallback: look up tokens that have already been cached for this
-    // connection in TC's project-scoped token storage.
-    private fun fetchViaProjectTokens(
-        project: SProject,
+    // Third path: self-mint the installation token directly from the
+    // App's credentials stored on the connection descriptor. This is
+    // the only path that works on a vanilla TC 2026.1 sandbox where
+    // the OAuthTokensStorage cache has never been populated.
+    private fun fetchViaSelfMint(
         descriptor: OAuthConnectionDescriptor,
+        repo: RepoCoords,
+        apiBase: String,
     ): String? {
-        val builder = ProjectTokenQueryBuilder(project)
-            .withConnectionId(descriptor.id)
-            .withRefreshIfNecessary(true)
-            .withTokenIntent(TokenIntent.ANY)
-        val query = builder.build()
-        // TC's getProjectTokens treats pageNumber as 1-indexed and
-        // computes skip=(pageNumber-1)*pageSize internally. Passing 0
-        // makes it call stream.skip(-pageSize) which throws.
-        val order = TokenStoragePageOrder(
-            1,
-            10,
-            TokenStoragePageOrder.OrderBy.RECORD_CREATION_DATE,
-            TokenStoragePageOrder.Direction.DESC,
-        )
-        val result = try {
-            tokensStorage.getProjectTokens(query, order)
+        return try {
+            appTokenMinter.mint(
+                connectionId = descriptor.id,
+                connectionDisplayName = descriptor.connectionDisplayName,
+                params = descriptor.parameters,
+                repo = repo,
+                apiBase = apiBase,
+            )
         } catch (e: Throwable) {
-            LOG.warn("getProjectTokens threw for connection ${descriptor.id} in project ${project.externalId}: ${e.message}", e)
-            return null
+            LOG.warn(
+                "AppTokenMinter.mint threw unexpectedly for ${descriptor.id} (repo=${repo.slug}): " +
+                    "[${e.javaClass.simpleName}] ${e.message}",
+                e,
+            )
+            null
         }
-        return result.items.firstOrNull()?.token?.accessToken
     }
 
     private fun shouldLog(reason: String, projectId: String, connectionId: String): Boolean =
@@ -200,14 +237,6 @@ class TokenResolver(
     private fun warnKey(reason: String, projectId: String, connectionId: String): String =
         "$reason:$projectId:$connectionId"
 
-    // TokenStorageQuery.Builder is generic on its own subtype with a
-    // protected constructor (self-typed builder pattern). Concrete
-    // subclass so we can instantiate it from Kotlin.
-    private class ProjectTokenQueryBuilder(project: SProject) :
-        TokenStorageQuery.Builder<ProjectTokenQueryBuilder>(project) {
-        override fun self(): ProjectTokenQueryBuilder = this
-    }
-
     companion object {
         private val LOG = Logger.getInstance(TokenResolver::class.java.name)
 
@@ -225,6 +254,20 @@ class TokenResolver(
             "oauth.accessToken",
             "secure:token",
             "token",
+        )
+
+        // Candidate keys for the GitHub host URL on TC connection
+        // descriptors. On TC 2026.1 the bundled github-app provider
+        // exposes `gitHubApp.ownerUrl`, which is the URL of the owner
+        // (org or user) the App was registered against - close enough
+        // to derive the API base (host + /api/v3 on GHE).
+        val GITHUB_URL_KEYS: List<String> = listOf(
+            "gitHubApp.ownerUrl",
+            "gitHubUrl",
+            "githubUrl",
+            "github.url",
+            "serverUrl",
+            "url",
         )
     }
 }

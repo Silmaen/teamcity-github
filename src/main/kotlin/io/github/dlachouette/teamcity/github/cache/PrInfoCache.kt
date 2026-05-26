@@ -16,14 +16,19 @@ class PrInfoCache(
     var ttlMs: Long = DEFAULT_TTL_MS
     var clock: () -> Long = { System.currentTimeMillis() }
 
-    fun get(repo: RepoCoords, number: Int, accessToken: String): PrInfo? {
+    fun get(
+        repo: RepoCoords,
+        number: Int,
+        accessToken: String,
+        apiBase: String = GitHubClient.DEFAULT_API_BASE,
+    ): PrInfo? {
         val key = Key(repo, number)
         val now = clock()
         val cached = store[key]
         if (cached != null && now - cached.fetchedAtMs < ttlMs) {
             return cached.info
         }
-        val fresh = gitHubClient.getPr(accessToken, repo, number) ?: return cached?.info
+        val fresh = gitHubClient.getPr(accessToken, repo, number, apiBase) ?: return cached?.info
         store[key] = Entry(fresh, now)
         return fresh
     }

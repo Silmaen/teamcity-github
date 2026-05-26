@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
 
 private class StubClient(var response: PrInfo?) : GitHubClient() {
     var calls: Int = 0
-    override fun getPr(accessToken: String, repo: RepoCoords, number: Int): PrInfo? {
+    override fun getPr(accessToken: String, repo: RepoCoords, number: Int, apiBase: String): PrInfo? {
         calls++
         return response
     }

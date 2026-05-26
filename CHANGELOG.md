@@ -4,6 +4,96 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-05-26
+
+### Added
+
+- **Self-mint installation tokens.** The plugin now mints its own
+  GitHub App installation tokens from the App's private key
+  (read from the TeamCity connection descriptor) using a signed
+  RS256 JWT against `POST /app/installations/{id}/access_tokens`.
+  Adds `AppTokenMinter` + `AppTokenCache`. The plugin now works
+  on a vanilla TC 2026.1 sandbox with no prior interaction with
+  the connection cache - operators no longer need to click "Test
+  connection" to seed the cache, nor keep a dummy
+  `commitStatusPublisher` build feature alive as a workaround.
+- **GitHub Enterprise support.** Every REST call (self-mint, PR
+  queries, Check Runs, /rate_limit self-test) now targets the
+  apiBase derived from the connection descriptor's GitHub URL
+  parameter (TC 2026.1 stores it under `gitHubApp.ownerUrl`).
+  For GHE hosts the apiBase becomes `<host>/api/v3`; for
+  github.com it stays `api.github.com`. Previously hardcoded to
+  `api.github.com`, which broke self-mint on GHE servers because
+  the installation list lookup hit the wrong host.
+- **Robust PEM parser** for the App's private key:
+  - Accepts both PKCS#1 (`BEGIN RSA PRIVATE KEY`) and PKCS#8
+    (`BEGIN PRIVATE KEY`) headers
+  - Tolerates literal `\n` escape sequences (when the key is
+    pasted into a single-line text field)
+  - Handles PEMs squashed onto a single line with no newlines
+    between BEGIN / body / END (which is exactly how TeamCity
+    stores it in the connection settings)
+  - Falls back to raw base64 PKCS#8 if no PEM markers at all
+  - Three diagnostic categories logged on parse failure
+    (encrypted PEM, OpenSSH PEM, EC/DSA PEM, truncated body...) -
+    the BEGIN line is shown, the key body is never logged
+- **Improved self-tests**: the "Token resolution" detail now
+  reports the apiBase actually used; "GitHub API reachable"
+  uses the apiBase of the first opted-in connection (so it is
+  meaningful on GHE) and treats any HTTP response as
+  reachability success (including 401/403 which GHE returns for
+  the unauthenticated `/zen` probe).
+- New unit tests covering `AppTokenMinter` (13 tests) and
+  `AppTokenCache` (7 tests) including PKCS#1, single-line PEM,
+  and JWT shape verification. Total suite now 104 tests.
+- New dependency: `com.auth0:java-jwt:4.4.0` (~64 KB, no
+  transitive BouncyCastle). PKCS#1 PEMs are converted to PKCS#8
+  in-process via a tiny ASN.1 wrapper rather than a heavier
+  crypto dep.
+
+### Changed
+
+- `TokenResolver.resolveAccessToken(project, connectionId)` now
+  takes a third argument `repo: RepoCoords` and returns a
+  `ResolvedAccess` (token + apiBase) instead of a bare `String?`.
+  The apiBase travels with the token to every downstream caller.
+  All eight call sites in the plugin were updated
+  (`BuildStatusCheckRunPublisher`, `DraftAwareBuildFilter`,
+  `DraftBuildQueueCleaner`, `DraftCheckRunReporter`,
+  `PluginSelfTester`, `PrBuildEnricher`, `PrParameterProvider`,
+  `PrPromotionTagger`). Tokens minted via the self-mint path are
+  scoped to the installation that matches `repo.owner`
+  (case-insensitive), matching how GitHub maps installations to
+  repos.
+- `GitHubClient.getPr`, `GitHubClient.postCheckRun` and
+  `PrInfoCache.get` now accept an `apiBase` parameter (default
+  `api.github.com`).
+- Descriptor candidate keys for the App credentials updated to
+  match what TC 2026.1 actually stores: `gitHubApp.appId`,
+  `secure:gitHubApp.privateKey`, `gitHubApp.ownerUrl` are tried
+  first; the unprefixed historical spellings (`appId`,
+  `secure:privateKey`, `gitHubUrl`) are kept as fallbacks.
+
+### Removed
+
+- The `OAuthTokensStorage.getProjectTokens` cache-only fallback
+  has been removed from the resolution chain. Field-testing
+  showed TC 2026.1 does not refresh GitHub App tokens reliably,
+  so the cache ended up returning 401-rejected stale tokens
+  that masked the real configuration. Self-mint replaces it
+  cleanly.
+
+### Notes
+
+- Resolution order is `AppTokenMinter` first (always tried),
+  `ProjectConnectionCredentialsManager` second (forward-compat
+  hook for a future TC fix). Tokens minted by the plugin are
+  cached against the installation ID with a 10 minute safety
+  margin under the GitHub-side 60 minute lifetime, so the cache
+  never serves a token that is about to expire mid-call.
+
+[1.2.0]: ../../releases/tag/v1.2.0
+
 ## [1.0.0] - 2026-05-26
 
 First public release. The plugin is feature-complete for the

@@ -40,31 +40,45 @@ After clicking **Run self-tests** the rows
 `Token resolution / <project> / <repo>` are all FAIL with detail
 `TC could not produce an installation token.`
 
-### Likely causes
+### Likely causes (in order of frequency on a vanilla TC 2026.1)
 
 | Cause | Fix |
 |---|---|
-| The GitHub App connection has never been "Test connected" in TC | Open `Project -> Connections -> Edit the GitHub App connection -> Test connection`. This triggers the first token mint, which the plugin then reads from TC's cache. |
-| The App is not installed on the target repository | Visit `https://github.com/settings/apps/<your-app>/installations` and add the repo. |
-| The App's permissions do not cover the repo | Add `Pull requests: Read` and `Contents: Read` minimum; accept on the App's installation page. |
-| The `teamcity.github.bridge.connectionId` value points at a project the connection is not visible from | Confirm in TC: `Project -> Connections` should list the connection on the project's own page or one of its parents. |
+| The App is not installed on the target repository's owner (org or user account) | Visit `https://github.com/settings/apps/<your-app>/installations` and install the App on the owner of the repo named in `teamcity.github.bridge.repo`. |
+| The App's permissions do not cover the repo (e.g. `Checks: Write` missing) | Add at minimum `Pull requests: Read`, `Checks: Write`, `Contents: Read`, `Metadata: Read`; accept the permission update on the App's installation page. |
+| The connection's `appId` or `secure:privateKey` parameter is missing or empty (manual edit of the project file?) | Open `Project -> Connections -> Edit`, paste the App ID and private key, save. The self-mint path needs both. The plugin logs `Connection PROJECT_EXT_N does not expose the GitHub App credentials this plugin needs` when this happens. |
+| The private key cannot be parsed (truncated, wrong format, mangled by a copy-paste) | Re-paste the `.pem` file content as-is. The plugin accepts both `-----BEGIN PRIVATE KEY-----` (PKCS#8) and `-----BEGIN RSA PRIVATE KEY-----` (PKCS#1). The log entry is `Could not parse the private key stored on connection PROJECT_EXT_N`. |
+| The `teamcity.github.bridge.connectionId` value points at a project the connection is not visible from | Confirm in TC: `Project -> Connections` should list the connection on the project's own page or on one of its parents. |
 
-The dedicated log file will carry one warning per failed project /
-connection pair, with the exact reason TC reported. Look there
-first if the table message is not enough.
+The dedicated log file carries one warning per failed
+(project, connection, repo) triple, with the exact reason. The
+log entry that confirms the self-mint path worked is:
 
-### Note
+```
+INFO  AppTokenMinter - Minted fresh installation token for App #<id>
+       (installation #<n>, owner=<owner>) via the self-mint path.
+```
 
-On TC 2026.1 the high-level
-`ProjectConnectionCredentialsManager.requestConnectionCredentials`
-call refuses GitHub App connections (`Unsupported Connection Provider
-type: GitHubApp`). This is a TC SDK limitation, **not** an error.
-The plugin falls back to `OAuthTokensStorage.getProjectTokens`,
-which returns the cached token TC stores after the first "Test
-connection" or commit-status-publisher use. The log entry that
-states this is at INFO level (`ConnectionCredentialsFactory does
-not handle provider type 'GitHubApp' on this TC version`) and only
-fires once per provider type per server lifetime.
+### Note on the SDK paths
+
+Since v1.2.0 the plugin tries two token-acquisition paths in
+order, with self-mint as the authoritative source:
+
+1. **`AppTokenMinter.mint(...)` — primary.** Signs an RS256 JWT
+   with the App's private key and calls
+   `POST /app/installations/{id}/access_tokens` directly. Tokens
+   are guaranteed fresh and scoped to the right installation.
+2. `ProjectConnectionCredentialsManager.requestConnectionCredentials` —
+   forward-compat fallback. Refused on TC 2026.1 for the
+   `GitHubApp` provider type (`Unsupported Connection Provider
+   type`). Logged once at INFO per provider type per server
+   lifetime.
+
+The `OAuthTokensStorage.getProjectTokens` cache-only fallback was
+removed in v1.2.0: it used to return stale tokens that GitHub
+then 401-rejected, producing exactly the "Token resolution PASS /
+GitHub API auth FAIL" pattern that motivated this rework. The
+self-mint path always returns a freshly-minted token.
 
 ## Symptom: plugin does not load
 
