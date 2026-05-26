@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="teamcity-github-bridge logo">
+  <title>teamcity-github-bridge</title>
+  <rect width="256" height="256" rx="56" fill="#0D1117"/>
+  <path d="M 56 60 C 56 132, 128 128, 128 172"
+        fill="none" stroke="#FF6F3C" stroke-width="16" stroke-linecap="round"/>
+  <path d="M 200 60 C 200 132, 128 128, 128 172"
+        fill="none" stroke="#C9D1D9" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="56"  cy="60" r="14" fill="#FF6F3C"/>
+  <circle cx="200" cy="60" r="14" fill="#C9D1D9"/>
+  <circle cx="128" cy="194" r="32" fill="#238636" stroke="#0D1117" stroke-width="6"/>
+  <path d="M 113 194 L 124 205 L 144 184"
+        fill="none" stroke="#FFFFFF" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" width="720" height="220" role="img" aria-label="teamcity-github-bridge">
+  <title>teamcity-github-bridge</title>
+  <g transform="translate(20,20)">
+    <rect width="180" height="180" rx="40" fill="#0D1117"/>
+    <g transform="translate(0,0) scale(0.703125)">
+      <path d="M 56 60 C 56 132, 128 128, 128 172"
+            fill="none" stroke="#FF6F3C" stroke-width="16" stroke-linecap="round"/>
+      <path d="M 200 60 C 200 132, 128 128, 128 172"
+            fill="none" stroke="#C9D1D9" stroke-width="16" stroke-linecap="round"/>
+      <circle cx="56"  cy="60" r="14" fill="#FF6F3C"/>
+      <circle cx="200" cy="60" r="14" fill="#C9D1D9"/>
+      <circle cx="128" cy="194" r="32" fill="#238636" stroke="#0D1117" stroke-width="6"/>
+      <path d="M 113 194 L 124 205 L 144 184"
+            fill="none" stroke="#FFFFFF" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <g font-family="'Inter','Segoe UI',system-ui,-apple-system,sans-serif" fill="#0D1117">
+    <text x="230" y="108" font-size="48" font-weight="700" letter-spacing="-1">
+      <tspan fill="#FF6F3C">teamcity</tspan><tspan fill="#0D1117">-</tspan><tspan fill="#24292F">github</tspan>
+    </text>
+    <text x="230" y="160" font-size="36" font-weight="500" fill="#57606A" letter-spacing="2">
+      bridge
+    </text>
+    <rect x="232" y="172" width="48" height="3" fill="#238636"/>
+  </g>
+</svg>

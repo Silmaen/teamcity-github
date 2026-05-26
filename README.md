@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="doc/assets/logo-wordmark.svg" alt="teamcity-github-bridge" width="540"/>
+</p>
+
 # teamcity-github-bridge
 
 > A TeamCity 2026.1+ server-side plugin that closes the gap between
