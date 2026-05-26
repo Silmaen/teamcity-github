@@ -64,6 +64,11 @@ class DraftBuildQueueCleaner(
         val connectionId = params[DraftAwareBuildFilter.PARAM_CONNECTION_ID]?.takeIf { it.isNotBlank() } ?: return
         if (!branchName.startsWith("pull/")) return
         val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
+        // Manual user trigger bypasses the cleaner: see DraftAwareBuildFilter.
+        if (queuedBuild.triggeredBy.isTriggeredByUser) {
+            LOG.info("Keeping manually triggered draft build in queue: ${buildType.externalId} (pull/$prNumber on $repoSlug)")
+            return
+        }
 
         val repo = try {
             RepoCoords.parse(repoSlug)

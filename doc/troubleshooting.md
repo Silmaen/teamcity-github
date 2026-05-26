@@ -191,6 +191,7 @@ TeamCity, not a held one with a wait reason.
 | `teamcity.github.bridge.connectionId` points to a wrong/non-existent connection | The plugin logs `No GitHub App connection found for id=...`. Fix the ID. |
 | GitHub App lacks `Pull requests: read` permission | API returns 403; plugin logs the warning and fails open. Add the permission and accept it on the App page. |
 | Branch does not look like `pull/N` | The filter only acts on branch names matching `pull/<number>`. Check the VCS root's branchSpec. |
+| Build was triggered manually by an operator (since v1.3.0) | This is intentional: a manual "Run" bypasses the draft gate. The log shows `Allowing manual user trigger of <buildType> on draft PR`. To suppress this, ask the operator to wait until the PR is marked ready. |
 
 ### Verify
 
@@ -421,6 +422,24 @@ bundled publisher per-buildType automatically.
 | The webhook URL or secret was wrong; GitHub never delivered | Check `Recent Deliveries` on the App's webhook page. If everything there shows 4xx, fix on the GitHub side and re-deliver. |
 | TC was restarted recently | The in-memory log is cleared on restart. Trigger a `ping` redeliver from GitHub. |
 | The dedicated log file shows entries but the admin page does not | The in-memory log is independent of the file log; only records calls that pass through `PluginWebhookController.doHandle`. If GitHub reaches a reverse proxy and the proxy returns 502 before TC, the plugin never sees the request. Check the proxy access log. |
+
+## Symptom: Check Run on GitHub stays at "Queued" or "In progress"
+
+### What you see
+
+A PR build's Check Run row on GitHub never transitions to a
+terminal state — it sits at `Queued` (clock icon) or `In progress`
+even after the build was stopped, removed from the queue, or
+finished in TC.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| Stale plugin version (pre-1.3.0) | Upgrade to 1.3.0+; the lifecycle coverage of `BuildStatusCheckRunPublisher` was extended to `buildInterrupted` and `buildRemovedFromQueue` so a stopped or queue-removed build always transitions to `completed/cancelled`. |
+| The build's `head_sha` differs between the in-progress and completed posts | GitHub dedups by `(name, head_sha)`. If a VCS root force-pushed mid-build, the SHAs no longer match; both rows appear. Open the Checks tab and confirm; this is rare. |
+| Token expired mid-build | The completed post's `tokenResolver.resolveAccessToken` may return null; check the dedicated log for `Failed publishing completed Check Run`. Self-mint always returns a fresh token, so this usually means the App's permissions changed. |
+| Bundled `commitStatusPublisher` overrode our row | Unlikely — Check Runs and Commit Statuses are separate surfaces — but verify by inspecting `Conclusion / Conclusion source` in GitHub's UI. |
 
 ## Symptom: draft / ready tags are visible but not styled as pills
 

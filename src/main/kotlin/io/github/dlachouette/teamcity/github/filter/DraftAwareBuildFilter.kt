@@ -31,6 +31,13 @@ class DraftAwareBuildFilter(
         val buildType = promotion.buildType ?: return null
 
         if (buildType.parameters[PARAM_IGNORE_DRAFTS] != "true") return null
+        // Manual user trigger bypasses the draft gate: clicking "Run"
+        // in the TC UI on a draft PR is an explicit opt-in that the
+        // user wants the build to run regardless of PR state.
+        if (promotion.queuedBuild?.triggeredBy?.isTriggeredByUser == true) {
+            LOG.info("Allowing manual user trigger of ${buildType.externalId} on draft PR (bypassing draft gate)")
+            return null
+        }
 
         val repoSlug = buildType.parameters[PARAM_REPO_SLUG] ?: return null
         val connectionId = buildType.parameters[PARAM_CONNECTION_ID] ?: return null

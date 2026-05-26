@@ -4,6 +4,48 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-05-26
+
+Operator-feedback release: every PR build lifecycle transition is
+now reflected on GitHub, the "Details" link jumps straight to the
+TC build, and manual triggers always run.
+
+### Added
+
+- **Full Check Run lifecycle.** A Check Run is posted on
+  `buildTypeAddedToQueue` (`queued`), `buildStarted` (`in_progress`),
+  `buildInterrupted` (`cancelled`, early), `buildFinished`
+  (`completed`), and `buildRemovedFromQueue` (`cancelled before
+  start`, only when a user removes it). GitHub dedups by
+  `(name, head_sha)`, so the same row transitions through every
+  state. No more rows stuck at "in_progress" after a manual stop, or
+  at "Queued" after a queue cancellation.
+- **`details_url` on every Check Run** — the "Details" link now
+  jumps to the actual TC build page (`WebLinks.getViewResultsUrl` for
+  running/finished, `getConfigurationHomePageUrl` for skipped/queue-
+  cancelled). Falls back silently to the GitHub-side page when the
+  server's rootUrl is unset.
+- **Manual user triggers bypass draft suppression.** Clicking "Run"
+  on a build for a draft PR now actually runs the build, instead of
+  being silently removed from the queue. VCS / snapshot-dependency
+  triggers still follow the existing draft-suppression behaviour.
+
+### Changed
+
+- **`PrPromotionTagger` no longer requires `ignoreDrafts=true`.**
+  Same opt-in gate as the Check Run publisher (repo + connectionId).
+  ALL-scope PR builds now also carry the `draft` / `ready` tag —
+  previously the guard silently dropped them.
+
+### Fixed
+
+- Draft-suppressed builds no longer race with the `queued` Check Run
+  and stay stuck at "Queued"; `publishQueued` consults `PrInfoCache`
+  and yields the row to `DraftCheckRunReporter` so "Skipped: draft
+  PR" wins uncontested.
+
+[1.3.0]: ../../releases/tag/v1.3.0
+
 ## [1.2.0] - 2026-05-26
 
 ### Added

@@ -100,4 +100,22 @@ class DraftCheckRunReporterTest {
         )
         assertNull(req)
     }
+
+    @Test
+    fun `propagates the build detailsUrl when provided`() {
+        val req = DraftCheckRunReporter.buildRequest(
+            branchName = "pull/42",
+            params = optInParams,
+            isDraft = true,
+            headSha = "abc123",
+            buildTypeFullName = "Build / X",
+            prNumber = 42,
+            detailsUrl = "https://tc.example.com/buildQueue/CI_Build/queued?buildId=123",
+        )
+        assertNotNull(req)
+        assertEquals(
+            "https://tc.example.com/buildQueue/CI_Build/queued?buildId=123",
+            req!!.detailsUrl,
+        )
+    }
 }

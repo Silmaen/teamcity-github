@@ -10,6 +10,16 @@ The architectural baseline these items extend is documented in
 described in [README.md](../README.md) and detailed in
 [configuration.md](configuration.md).
 
+## Shipped since 1.0
+
+- v1.2.0 — self-mint installation tokens (Item 9 below) + GitHub
+  Enterprise support across every REST endpoint.
+- v1.3.0 — full Check Run lifecycle (queued / in_progress /
+  interrupted / finished / queue-cancelled), `details_url` on every
+  Check Run pointing at the TC build, tag-all-opted-in-PR-builds
+  (no longer gated on `ignoreDrafts=true`), and manual user triggers
+  bypass the draft-PR suppression flow.
+
 ## Item 1 - Build feature for one-click opt-in
 
 ### Problem statement

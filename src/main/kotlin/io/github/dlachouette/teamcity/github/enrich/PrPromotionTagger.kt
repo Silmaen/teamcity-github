@@ -39,7 +39,7 @@ class PrPromotionTagger(
         val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
         val buildType = promotion.buildType ?: return
 
-        if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
+        if (!isOptedIn(buildType.parameters)) return
         val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
         val repo = try {
@@ -64,6 +64,20 @@ class PrPromotionTagger(
 
     companion object {
         private val LOG = Logger.getInstance(PrPromotionTagger::class.java.name)
+
+        // Single opt-in for the promotion tagger since v1.2.1: a
+        // buildType participates as soon as it carries both the
+        // repo slug and the connection ID — the same gate as
+        // BuildStatusCheckRunPublisher. The previous version
+        // additionally required `teamcity.github.bridge.ignoreDrafts=true`,
+        // which silently dropped the draft/ready visual signal on
+        // ALL-scope (draft-friendly) builds — exactly the case
+        // operators expect to see tagged.
+        fun isOptedIn(parameters: Map<String, String>): Boolean {
+            val repo = parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG]
+            val conn = parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID]
+            return !repo.isNullOrBlank() && !conn.isNullOrBlank()
+        }
 
         // Pure helper - testable without TC SDK mocks.
         // Returns null when the existing tags already carry the desired state tag

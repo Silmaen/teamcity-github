@@ -19,7 +19,7 @@ GitHub App, continue with [github-app-setup.md](github-app-setup.md).
  |  <TC_DATA_DIR>/               |
  |  |- plugins/                  |
  |  |    teamcity-github-bridge- |
- |  |    1.2.0.zip                |  <-- drop the archive here
+ |  |    1.3.0.zip                |  <-- drop the archive here
  |  |- config/                   |
  |  |    internal.properties     |  <-- teamcity.github.bridge.webhook.secret goes here
  |  |    teamcity-server-log4j.xml   <-- optional log tuning
@@ -114,7 +114,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 ```
 +----------------------------------------------------+
-| TeamCity GitHub Bridge                  v1.2.0     |
+| TeamCity GitHub Bridge                  v1.3.0     |
 |  by Damien Lachouette                   enabled  ON|
 |  Min API: 222521                                   |
 +----------------------------------------------------+

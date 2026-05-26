@@ -218,6 +218,14 @@ serves as a safety net: the build is held with the wait reason
 `PR #N is draft and ...ignoreDrafts is enabled` until the next
 attempt resolves the PR state.
 
+**Manual user triggers always run.** Since v1.3.0, the entire
+draft-suppression path (filter, cleaner, skipped-Check-Run reporter,
+and the queued Check Run gate) checks
+`SQueuedBuild.triggeredBy.isTriggeredByUser` and yields when an
+operator clicks "Run" in the TC UI on a draft PR. VCS-driven
+triggers and snapshot-dependency triggers still follow the
+suppression flow.
+
 ### Enable on a build configuration
 
 1. Pick a build configuration that runs on PR refs (`+:refs/pull/*/head`
@@ -368,19 +376,39 @@ description) unless you disable it.
 
 ### What the plugin emits
 
+Since v1.3.0 every lifecycle transition is mapped to a Check Run.
+GitHub dedups by `(name, head_sha)` so the same row transitions
+through every state.
+
 | Event | Check Run `status` | Check Run `conclusion` | `output.title` |
 |---|---|---|---|
+| Build added to queue | `queued` | (none) | `Queued` |
 | Held in draft queue | `completed` | `skipped` | `Skipped: draft PR` |
 | Build starts | `in_progress` | (none) | `Building` |
+| Build interrupted (early stop signal) | `completed` | `cancelled` | `Build cancelled` |
+| Build removed from queue by a user | `completed` | `cancelled` | `Cancelled before start` |
 | Build finishes (success / warning) | `completed` | `success` | `Build passed` |
 | Build finishes (failure / error) | `completed` | `failure` | `Build failed` |
-| Build cancelled | `completed` | `cancelled` | `Build cancelled` |
+| Build finishes (cancelled) | `completed` | `cancelled` | `Build cancelled` |
 | Build status `UNKNOWN` | `completed` | `neutral` | `Build status: ...` |
 
 `output.summary` carries the build's `statusDescriptor.text` (i.e.
 whatever the agent set via
 `##teamcity[buildStatus text='...']`). Truncated at 60 000
 characters with a `(truncated)` marker if longer.
+
+Every Check Run carries a `details_url` so the "Details" link from
+the GitHub Checks tab jumps directly to the build page in TC
+(`WebLinks.getViewResultsUrl` for running/finished builds, the
+buildType's home page for skipped / queue-cancelled rows since the
+queue item is gone within milliseconds). If TC's server rootUrl is
+unset the URL is silently dropped and GitHub falls back to its own
+Check Run page.
+
+The publisher dedups against `DraftCheckRunReporter` so a
+draft-suppressed build receives a single `skipped` row instead of a
+`queued`/`skipped` flicker: `publishQueued` consults `PrInfoCache`
+and yields when `ignoreDrafts=true` + `pull/N` branch + PR is draft.
 
 ### Choosing the right setup
 

@@ -13,6 +13,7 @@ import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SQueuedBuild
+import jetbrains.buildServer.serverSide.WebLinks
 import java.util.concurrent.ConcurrentHashMap
 
 // When a draft PR build hits the queue on an opt-in buildType, publish a
@@ -28,6 +29,7 @@ class DraftCheckRunReporter(
     private val tokenResolver: TokenResolver,
     private val prInfoCache: PrInfoCache,
     private val gitHubClient: GitHubClient,
+    private val webLinks: WebLinks,
 ) : BuildServerAdapter() {
 
     // Dedup key: (commitSha, buildTypeExternalId). Bounded but not LRU; for
@@ -59,6 +61,9 @@ class DraftCheckRunReporter(
         val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
 
         if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
+        // Manual user trigger bypasses suppression (the build will run),
+        // so don't pre-emptively post a "Skipped" Check Run for it.
+        if (queuedBuild.triggeredBy.isTriggeredByUser) return
 
         val repo = try {
             RepoCoords.parse(repoSlug)
@@ -79,6 +84,18 @@ class DraftCheckRunReporter(
             ?: promotion.revisions.firstOrNull()?.revision
             ?: return
 
+        // The build is about to be removed from the queue by
+        // DraftBuildQueueCleaner, so getQueuedBuildUrl points at a
+        // queue item that will be gone in milliseconds. Use the
+        // BuildType's home page instead — durable, and the user can
+        // see the buildType's recent runs on the PR's other commits.
+        val detailsUrl = try {
+            webLinks.getConfigurationHomePageUrl(buildType)?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            LOG.debug("WebLinks URL build failed for ${buildType.externalId}: ${e.message}")
+            null
+        }
+
         val request = buildRequest(
             branchName = branchName,
             params = buildType.parameters,
@@ -86,6 +103,7 @@ class DraftCheckRunReporter(
             headSha = sha,
             buildTypeFullName = buildType.fullName,
             prNumber = prNumber,
+            detailsUrl = detailsUrl,
         ) ?: return
 
         val dedupKey = sha to buildType.externalId
@@ -117,6 +135,7 @@ class DraftCheckRunReporter(
             headSha: String,
             buildTypeFullName: String,
             prNumber: Int,
+            detailsUrl: String? = null,
         ): CheckRunRequest? {
             if (branchName == null || !branchName.startsWith("pull/")) return null
             if (params[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return null
@@ -131,6 +150,7 @@ class DraftCheckRunReporter(
                 conclusion = CheckRunConclusion.SKIPPED,
                 outputTitle = "Skipped: draft PR",
                 outputSummary = "PR #$prNumber is in draft state; this build will run automatically when the PR is marked ready for review.",
+                detailsUrl = detailsUrl,
             )
         }
     }

@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -61,16 +61,21 @@ flowchart LR
 Concretely:
 
 - **Suppresses builds for draft PRs** via a `StartBuildPrecondition`
-  (per-buildType opt-in - paused configs are untouched).
-- **Tags held PRs with `draft` / `ready`** the moment they hit the
-  queue (`PrPromotionTagger`) so the queue UI shows at a glance
-  which builds are deliberately held versus agent-starved.
-- **Publishes a GitHub Check Run** at every lifecycle event:
-  `skipped` for held drafts (`DraftCheckRunReporter`), `in_progress`
-  on start and `success`/`failure`/`cancelled` on finish
-  (`BuildStatusCheckRunPublisher`) - propagating the build's
-  `statusDescriptor.text` into GitHub's PR UI instead of the
-  hard-coded `"TeamCity build finished"` from the bundled publisher.
+  (per-buildType opt-in - paused configs are untouched). Manual
+  user triggers ("Run" from the TC UI) bypass the gate so an
+  operator can always force a build to run on a draft PR.
+- **Tags every opted-in PR build with `draft` / `ready`** the moment
+  it hits the queue (`PrPromotionTagger`) so the queue UI shows at a
+  glance which builds are deliberately held versus agent-starved.
+- **Publishes a GitHub Check Run at every lifecycle transition** —
+  `queued` when the build enters the TC queue, `in_progress` on
+  start, `cancelled` on `buildInterrupted` /
+  `buildRemovedFromQueue`, `success`/`failure`/`cancelled` on
+  `buildFinished`, and `skipped` for draft-held builds. Each Check
+  Run carries a `details_url` that jumps directly to the build page
+  in TC. Propagates the build's `statusDescriptor.text` into
+  GitHub's PR UI instead of the hard-coded
+  `"TeamCity build finished"` from the bundled publisher.
 - **Listens for `pull_request.ready_for_review`** and enqueues every
   matching build configuration. No more "merged with stale green
   checks".
@@ -100,7 +105,7 @@ Everything runs in Docker - nothing is installed on the host.
 ```bash
 # Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-1.2.0.zip
+# -> target/teamcity-github-bridge-1.3.0.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
@@ -202,7 +207,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-**Stable**. Current version is **1.2.0**. 104 unit tests pass.
+**Stable**. Current version is **1.3.0**. 110 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery
@@ -217,7 +222,7 @@ may add fields and endpoints; they will not rename or remove what
 already exists.
 
 See [CHANGELOG.md](CHANGELOG.md) for the per-version change log.
-See [doc/roadmap.md](doc/roadmap.md) for what comes after 1.0.
+See [doc/roadmap.md](doc/roadmap.md) for what comes after 1.3.
 
 ## License
 

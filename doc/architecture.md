@@ -42,7 +42,7 @@ flowchart TB
         PBE[PrBuildEnricher<br/>buildStarted]:::logic
         PPT[PrPromotionTagger<br/>queue tag]:::logic
         DCR[DraftCheckRunReporter<br/>skipped Check Run]:::logic
-        BSCRP[BuildStatusCheckRunPublisher<br/>in_progress / completed]:::logic
+        BSCRP[BuildStatusCheckRunPublisher<br/>queued / in_progress / cancelled / completed]:::logic
 
         PWC[PluginWebhookController]:::io
         WIC[WebhookInfoController]:::io
@@ -139,7 +139,9 @@ io.github.dlachouette.teamcity.github
 |   +-- PrParameterProvider  (publishes teamcity.github.bridge.isdraft)
 +-- report/
 |   +-- DraftCheckRunReporter         (queued draft -> skipped Check Run)
-|   +-- BuildStatusCheckRunPublisher  (start/finish -> in_progress / completed Check Run)
+|   +-- BuildStatusCheckRunPublisher  (queued/started/interrupted/finished/queue-removed -> Check Run lifecycle)
++-- queue/
+|   +-- DraftBuildQueueCleaner    (removes queued draft PR builds; bypassed for manual user triggers)
 +-- retrigger/
 |   +-- ReadyForReviewListener    (enqueues via BuildTypeEx.addToQueue)
 +-- selftest/

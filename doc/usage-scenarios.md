@@ -257,26 +257,37 @@ flowchart TD
 
 **Actor**: a build configuration opted into the bridge finishes (success or failure).
 
-**Expected outcome**: a GitHub Check Run is posted carrying the
-build's actual status text, replacing the bundled
-`commitStatusPublisher`'s hard-coded
-`"TeamCity build finished"` description for that build.
+**Expected outcome**: a GitHub Check Run is posted at every
+lifecycle transition (queued / running / interrupted / finished /
+queue-cancelled), carrying the build's actual status text. GitHub
+dedups by `(name, head_sha)` so the same row transitions through
+every state.
 
 ```mermaid
 sequenceDiagram
-    participant Build as Running build
+    participant Build as Build
     participant Pub as BuildStatusCheckRunPublisher
     participant TR as TokenResolver
     participant GC as GitHubClient
     participant GH as GitHub API
 
-    Build->>Pub: buildStarted
+    Build->>Pub: buildTypeAddedToQueue
     Pub->>TR: resolveAccessToken
-    Pub->>GC: postCheckRun(status=in_progress)
+    Pub->>GC: postCheckRun(status=queued, details_url=<queue page>)
+    GC->>GH: POST /repos/.../check-runs
+    GH-->>GC: 201
+
+    Build->>Pub: buildStarted
+    Pub->>GC: postCheckRun(status=in_progress, details_url=<build page>)
     GC->>GH: POST /repos/.../check-runs
     GH-->>GC: 201
 
     Note over Build: build runs, agent emits<br/>##teamcity[buildStatus text='3 warnings; 0 errors']
+
+    alt user stops the build
+        Build->>Pub: buildInterrupted
+        Pub->>GC: postCheckRun(status=completed, conclusion=cancelled)
+    end
 
     Build->>Pub: buildFinished
     Pub->>Pub: mapBuildOutcome(status, isInterrupted)
@@ -289,10 +300,17 @@ What appears on the PR:
 
 | State | GitHub UI shows |
 |---|---|
-| In progress | `TeamCity / <buildType full name>` with status "Expected" -> "In progress" |
+| Queued | `TeamCity / <buildType full name>` with status "Expected" + clock icon, title "Queued". `details_url` points at the TC queue. |
+| In progress | Same row transitions to "In progress", title "Building". `details_url` points at the TC build page. |
+| Interrupted (user stops it) | Check Run "Build cancelled", conclusion `cancelled`. Posted early so the row never gets stuck at "In progress" if `buildFinished` doesn't enchain. |
+| Cancelled in queue (user removes it) | Check Run "Cancelled before start", conclusion `cancelled`. Only fires for user-initiated removals (the draft-suppression cleaner is silent so its `Skipped` row stays). |
 | Success | Check Run "Build passed", `output.summary` = the build's `statusDescriptor.text` (e.g. "3 warnings; 0 errors") |
 | Failure | Check Run "Build failed", same summary source |
-| Cancelled | Check Run "Build cancelled" (any underlying status, when the build was interrupted) |
+| Cancelled (finished) | Check Run "Build cancelled" (any underlying status, when `isInterrupted` is true) |
+
+Every Check Run carries a `details_url` so the "Details" link from
+the GitHub Checks tab jumps directly to the relevant TC page
+instead of the server root.
 
 > **Coexistence with the bundled `commitStatusPublisher`**: until
 > you disable the bundled publisher on the opted-in build types,
@@ -451,13 +469,17 @@ That decision lives in TC core.
 
 | Trigger | Plugin action | Build / GitHub outcome |
 |---|---|---|
-| Draft PR opened | Promotion tagged `draft` + skipped Check Run posted + filter holds | Held in queue with wait reason, pill visible, GitHub PR shows "Skipped: draft PR" |
+| Draft PR opened | Promotion tagged `draft` + skipped Check Run posted + cleaner removes from queue | Queue stays clean, pill visible, GitHub PR shows "Skipped: draft PR" |
 | Push to draft | Same path again on new revision | Same |
-| Marked ready for review | Listener enqueues + promotion tagged `ready` + filter allows | Builds run, ready pill visible, in-progress Check Run posted |
-| Build starts | `BuildStatusCheckRunPublisher.buildStarted` | GitHub Check Run status = `in_progress`, title "Building" |
-| Build finishes (success) | `BuildStatusCheckRunPublisher.buildFinished` | GitHub Check Run status = `completed`, conclusion `success`, summary = build's `statusDescriptor.text` |
+| Marked ready for review | Listener enqueues + promotion tagged `ready` + filter allows | Builds run, ready pill visible, queued / in_progress Check Run posted |
+| Build added to queue | `BuildStatusCheckRunPublisher.buildTypeAddedToQueue` | Check Run `status=queued`, title "Queued" (skipped for draft-suppressed builds so they don't race with the skipped row) |
+| Build starts | `BuildStatusCheckRunPublisher.buildStarted` | Check Run `status=in_progress`, title "Building" |
+| Build stopped manually (mid-run) | `BuildStatusCheckRunPublisher.buildInterrupted` (early) + `buildFinished` (final) | Check Run `status=completed, conclusion=cancelled` |
+| Build cancelled while still in queue | `BuildStatusCheckRunPublisher.buildRemovedFromQueue` (only when removed by a user) | Check Run "Cancelled before start", conclusion `cancelled` |
+| Build finishes (success) | `BuildStatusCheckRunPublisher.buildFinished` | Check Run `status=completed`, conclusion `success`, summary = build's `statusDescriptor.text` |
 | Build finishes (failure) | Same hook, different mapping | conclusion `failure` |
-| Build cancelled | Same hook, `isInterrupted` short-circuits | conclusion `cancelled` |
+| Build cancelled (final) | Same hook, `isInterrupted` short-circuits | conclusion `cancelled` |
+| User clicks "Run" on draft PR | Manual trigger bypasses suppression (filter, cleaner, skipped-reporter, queued-gate all yield) | Build actually runs |
 | Reverted to draft | None | In-flight builds continue, new ones held |
 | API error during draft check | Logged warning | Build allowed (fail-open) |
 | Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
