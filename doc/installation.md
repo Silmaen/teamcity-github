@@ -114,7 +114,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 ```
 +----------------------------------------------------+
-| TeamCity GitHub Bridge                  v0.9.3     |
+| TeamCity GitHub Bridge                  v1.0.0     |
 |  by Damien Lachouette                   enabled  ON|
 |  Min API: 222521                                   |
 +----------------------------------------------------+
