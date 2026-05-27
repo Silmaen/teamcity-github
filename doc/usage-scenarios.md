@@ -86,7 +86,7 @@ sequenceDiagram
     participant GH as GitHub
     participant TC as TeamCity
     participant W as PluginWebhookController
-    participant L as ReadyForReviewListener
+    participant L as PullRequestEventListener
     participant Cache as PrInfoCache
     participant Q as Build queue
     participant F as DraftAwareBuildFilter
@@ -223,7 +223,7 @@ maintenance window is non-fatal.
   if (buildType.parameters[PARAM_IGNORE_DRAFTS] != "true") return null
   ```
   -> filter returns `null` (allow), the build proceeds as usual.
-- `ReadyForReviewListener` filters by the same parameter, so the
+- `PullRequestEventListener` filters by the same parameter, so the
   build type is never enqueued by the retrigger flow.
 
 This isolation guarantees the plugin is **safe to deploy** to a
@@ -241,7 +241,7 @@ untouched.
 
 ```mermaid
 flowchart TD
-    A[Webhook: action=ready_for_review<br/>repository=acme/api #42] --> B[ReadyForReviewListener]
+    A[Webhook: action=ready_for_review<br/>repository=acme/api #42] --> B[PullRequestEventListener]
     B --> C[scan all activeBuildTypes]
     C --> D{teamcity.github.bridge.repo<br/>== acme/api?}
     D -->|yes| E[enqueue]

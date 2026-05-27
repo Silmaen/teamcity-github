@@ -18,8 +18,9 @@ import jetbrains.buildServer.serverSide.SQueuedBuild
 // same `buildTypeAddedToQueue` event.
 //
 // The build will be re-enqueued automatically by
-// `ReadyForReviewListener` when the PR transitions to "ready for
-// review" via the App-level webhook.
+// `PullRequestEventListener` when the PR transitions to "ready for
+// review", is pushed to as a ready PR, or is opened directly as
+// ready — via the App-level webhook.
 //
 // Why remove instead of hold:
 //   - Held builds accumulate in the queue and clutter the UI. With

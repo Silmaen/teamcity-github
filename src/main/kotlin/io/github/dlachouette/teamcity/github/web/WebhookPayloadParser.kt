@@ -3,7 +3,8 @@ package io.github.dlachouette.teamcity.github.web
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.RepoCoords
-import io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewPayload
+import io.github.dlachouette.teamcity.github.retrigger.PrAction
+import io.github.dlachouette.teamcity.github.retrigger.PrEventPayload
 
 object WebhookPayloadParser {
     private val LOG = Logger.getInstance(WebhookPayloadParser::class.java.name)
@@ -23,10 +24,16 @@ object WebhookPayloadParser {
         }
     }
 
-    fun parseReadyForReview(payload: String): ReadyForReviewPayload? {
+    // Parses `pull_request` events whose action is one of the three we
+    // act on (opened, ready_for_review, synchronize). Returns null for
+    // any other action or for malformed payloads. The `draft` flag is
+    // read directly from the payload — authoritative at the moment of
+    // the event, no cache lookup or API call required.
+    fun parsePullRequestEvent(payload: String): PrEventPayload? {
         return try {
             val node = MAPPER.readTree(payload)
-            if (node.path("action").asText() != "ready_for_review") return null
+            val actionStr = node.path("action").asText("")
+            val action = PrAction.fromString(actionStr) ?: return null
 
             val pr = node.path("pull_request")
             val number = pr.path("number").asInt(-1)
@@ -39,13 +46,16 @@ object WebhookPayloadParser {
             val headSha = head.path("sha").asText("")
             val headRef = head.path("ref").asText("")
             val baseRef = pr.path("base").path("ref").asText("")
+            val draft = pr.path("draft").asBoolean(false)
 
-            ReadyForReviewPayload(
+            PrEventPayload(
+                action = action,
                 repo = RepoCoords.parse(repoSlug),
                 prNumber = number,
                 headSha = headSha,
                 baseRef = baseRef,
                 headRef = headRef,
+                draft = draft,
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request payload: ${e.message}")

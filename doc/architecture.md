@@ -37,7 +37,7 @@ flowchart TB
         PIC[PrInfoCache<br/>TTL 60s]:::cache
         REL[RecentEventsLog<br/>ring buffer N=100]:::cache
 
-        RFR[ReadyForReviewListener]:::logic
+        RFR[PullRequestEventListener]:::logic
         DAF[DraftAwareBuildFilter]:::logic
         PBE[PrBuildEnricher<br/>buildStarted]:::logic
         PPT[PrPromotionTagger<br/>queue tag]:::logic
@@ -143,7 +143,7 @@ io.github.dlachouette.teamcity.github
 +-- queue/
 |   +-- DraftBuildQueueCleaner    (removes queued draft PR builds; bypassed for manual user triggers)
 +-- retrigger/
-|   +-- ReadyForReviewListener    (enqueues via BuildTypeEx.addToQueue)
+|   +-- PullRequestEventListener  (opened/ready_for_review/synchronize -> BuildTypeEx.addToQueue)
 +-- selftest/
 |   +-- PluginSelfTester          (7 end-to-end checks driven by the admin button)
 +-- web/
@@ -173,7 +173,7 @@ Declared in
     <bean class="...api.TokenResolver"/>
     <bean class="...cache.PrInfoCache"/>
 
-    <bean class="...retrigger.ReadyForReviewListener"/>
+    <bean class="...retrigger.PullRequestEventListener"/>
     <bean class="...filter.DraftAwareBuildFilter"/>
 
     <bean class="...web.PluginWebhookController"/>
@@ -197,7 +197,7 @@ sequenceDiagram
     participant SV as SignatureVerifier
     participant WC as WebhookConfig
     participant WPP as WebhookPayloadParser
-    participant RFR as ReadyForReviewListener
+    participant RFR as PullRequestEventListener
     participant PM as ProjectManager
     participant Q as BuildQueue
 
@@ -209,10 +209,11 @@ sequenceDiagram
     alt false
         PWC-->>GH: 401 Invalid signature
     else true and event=pull_request
-        PWC->>WPP: parseReadyForReview(payload)
-        WPP-->>PWC: ReadyForReviewPayload | null
+        PWC->>WPP: parsePullRequestEvent(payload)
+        WPP-->>PWC: PrEventPayload | null<br/>(opened, ready_for_review, synchronize)
         alt payload != null
             PWC->>RFR: handle(payload)
+            Note over RFR: skip if draft<br/>(opened/synchronize only)
             RFR->>PM: activeBuildTypes
             PM-->>RFR: List<SBuildType>
             loop matching build types
@@ -296,8 +297,8 @@ Where we plug into TC:
 | `OAuthConnectionsManager` (read-only) | `TokenResolver` |
 | `ProjectConnectionCredentialsManager` (read-only, forward-compat) | `TokenResolver` |
 | `OAuthConnectionDescriptor.parameters` (App ID + private key + ownerUrl) | `AppTokenMinter` |
-| `ProjectManager.activeBuildTypes` | `ReadyForReviewListener` |
-| `BuildTypeEx.createBuildCustomizer` + `addToQueue` | `ReadyForReviewListener` |
+| `ProjectManager.activeBuildTypes` | `PullRequestEventListener` |
+| `BuildTypeEx.createBuildCustomizer` + `addToQueue` | `PullRequestEventListener` |
 
 No `BuildServerAdapter`, no `BuildFeature`, no custom UI yet. These
 are tracked in [development.md#roadmap](development.md#roadmap).

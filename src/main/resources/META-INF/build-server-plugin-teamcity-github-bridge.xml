@@ -18,7 +18,7 @@
     <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
     <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
 
-    <bean class="io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener"/>
+    <bean class="io.github.dlachouette.teamcity.github.retrigger.PullRequestEventListener"/>
     <bean class="io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter"/>
     <bean class="io.github.dlachouette.teamcity.github.parameters.PrParameterProvider"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher"/>

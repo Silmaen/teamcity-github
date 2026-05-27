@@ -128,10 +128,11 @@ Then follow the three setup pages:
 |          |                          |              v              |
 |          |                          |  WebhookPayloadParser       |
 |          |                          |              |              |
+|          |                          |   opened/synchronize/       |
 |          |                          |   ready_for_review?         |
 |          |                          |              |              |
 |          |                          |              v              |
-|          |                          |  ReadyForReviewListener     |
+|          |                          |  PullRequestEventListener   |
 |          |                          |    scan ProjectManager      |
 |          |                          |    -> enqueue matching      |
 |          |                          |       BuildTypes            |

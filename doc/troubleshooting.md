@@ -229,14 +229,14 @@ queue.
 ### Verify
 
 ```bash
-grep ReadyForReviewListener <TC_DATA_DIR>/logs/teamcity-server.log | tail -20
+grep PullRequestEventListener <TC_DATA_DIR>/logs/teamcity-server.log | tail -20
 ```
 
 You should see, on each event:
 
 ```
-INFO  - Handling ready_for_review for <repo>#<n>
-INFO  - Retriggering N build type(s) for <repo>#<n>
+INFO  - Handling pull_request.<action> for <repo>#<n> (draft=<bool>)
+INFO  - Retriggering N build type(s) for <repo>#<n> on pull_request.<action>
 ```
 
 If `N=0`, the filter found no matching configurations; verify the

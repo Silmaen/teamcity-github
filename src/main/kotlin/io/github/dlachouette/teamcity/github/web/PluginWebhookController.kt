@@ -2,7 +2,7 @@ package io.github.dlachouette.teamcity.github.web
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
-import io.github.dlachouette.teamcity.github.retrigger.ReadyForReviewListener
+import io.github.dlachouette.teamcity.github.retrigger.PullRequestEventListener
 import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.web.openapi.WebControllerManager
@@ -14,7 +14,7 @@ class PluginWebhookController(
     webManager: WebControllerManager,
     authInterceptor: AuthorizationInterceptor,
     private val webhookConfig: WebhookConfig,
-    private val readyForReviewListener: ReadyForReviewListener,
+    private val pullRequestEventListener: PullRequestEventListener,
     private val recentEventsLog: RecentEventsLog,
 ) : BaseController() {
 
@@ -66,7 +66,7 @@ class PluginWebhookController(
                     action = result.action,
                     httpStatus = HttpServletResponse.SC_OK,
                     outcome = if (result.handled) Outcome.ACCEPTED else Outcome.SKIPPED,
-                    detail = if (result.handled) "ready_for_review handled" else "action ignored",
+                    detail = if (result.handled) "pull_request.${result.action} handled" else "action ignored",
                 )
             }
             else -> {
@@ -89,10 +89,10 @@ class PluginWebhookController(
 
     private fun handlePullRequest(payload: String): HandledResult {
         val (action, repo) = WebhookPayloadParser.peekActionAndRepo(payload)
-        val parsed = WebhookPayloadParser.parseReadyForReview(payload)
+        val parsed = WebhookPayloadParser.parsePullRequestEvent(payload)
         return if (parsed != null) {
-            readyForReviewListener.handle(parsed)
-            HandledResult(handled = true, action = action ?: "ready_for_review", repo = repo ?: parsed.repo.slug)
+            pullRequestEventListener.handle(parsed)
+            HandledResult(handled = true, action = action ?: parsed.action.value, repo = repo ?: parsed.repo.slug)
         } else {
             HandledResult(handled = false, action = action, repo = repo)
         }

@@ -49,7 +49,7 @@ teamcity-github/
     |       +-- enrich/     # PrBuildEnricher (buildStarted), PrPromotionTagger (queue tag)
     |       +-- filter/     # DraftAwareBuildFilter (StartBuildPrecondition)
     |       +-- report/     # DraftCheckRunReporter, BuildStatusCheckRunPublisher
-    |       +-- retrigger/  # ReadyForReviewListener
+    |       +-- retrigger/  # PullRequestEventListener (opened/ready_for_review/synchronize)
     |       +-- web/        # 2 controllers + AdminConsolePage + page extension + signature verifier + payload parser + events log
     +-- test/kotlin/io/github/dlachouette/teamcity/github/
         +-- api/  cache/  config/  enrich/

@@ -208,8 +208,9 @@ with a wait reason; the queue stays clean.
 The user still sees the deliberate skip on GitHub through the
 `skipped` Check Run posted by `DraftCheckRunReporter` (visible in
 the PR's "Checks" tab as `TeamCity / <buildType> -> Skipped:
-draft PR`). When the PR is marked ready for review, the App-level
-webhook fires and `ReadyForReviewListener` re-enqueues a fresh
+draft PR`). When the PR is marked ready for review, opened
+directly as ready, or pushed to as a ready PR, the App-level
+webhook fires and `PullRequestEventListener` re-enqueues a fresh
 build on the latest revision.
 
 If the cleaner fails (typically because the GitHub API was
