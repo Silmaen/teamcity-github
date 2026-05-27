@@ -2,10 +2,9 @@ package io.github.dlachouette.teamcity.github.parameters
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
-import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvider
 
@@ -26,22 +25,14 @@ class PrParameterProvider(
     override fun getParameters(build: SBuild, emulationMode: Boolean): Map<String, String> {
         return try {
             val buildType = build.buildType ?: return emptyMap()
-            val params = buildType.parameters
-            val repoSlug = params[DraftAwareBuildFilter.PARAM_REPO_SLUG]
-            val connectionId = params[DraftAwareBuildFilter.PARAM_CONNECTION_ID]
-            if (repoSlug.isNullOrBlank() || connectionId.isNullOrBlank()) return emptyMap()
-            val repo = try {
-                RepoCoords.parse(repoSlug)
-            } catch (e: IllegalArgumentException) {
-                return emptyMap()
-            }
+            val config = BridgeFeatureReader.read(buildType) ?: return emptyMap()
 
             computeParams(
                 branchName = build.branch?.name,
                 resolver = { number ->
-                    val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo)
+                    val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
                         ?: return@computeParams null
-                    prInfoCache.get(repo, number, access.token, access.apiBase)
+                    prInfoCache.get(config.repo, number, access.token, access.apiBase)
                 },
             )
         } catch (e: Exception) {
@@ -51,10 +42,8 @@ class PrParameterProvider(
     }
 
     override fun getParametersAvailableOnAgent(build: SBuild): Collection<String> {
-        val params = build.buildType?.parameters ?: return emptyList()
-        return if (params.containsKey(DraftAwareBuildFilter.PARAM_REPO_SLUG) &&
-            params.containsKey(DraftAwareBuildFilter.PARAM_CONNECTION_ID)
-        ) ALL_KEYS else emptyList()
+        val buildType = build.buildType ?: return emptyList()
+        return if (BridgeFeatureReader.read(buildType) != null) ALL_KEYS else emptyList()
     }
 
     override fun getPrefix(): String = "teamcity.github.bridge"

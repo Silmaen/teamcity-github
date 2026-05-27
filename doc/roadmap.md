@@ -19,45 +19,43 @@ described in [README.md](../README.md) and detailed in
   Check Run pointing at the TC build, tag-all-opted-in-PR-builds
   (no longer gated on `ignoreDrafts=true`), and manual user triggers
   bypass the draft-PR suppression flow.
+- v1.4.0 — react to `pull_request.opened` and
+  `pull_request.synchronize` in addition to `ready_for_review`,
+  unblocking the "drop VCS triggers on opt-in BuildTypes" pattern.
+  `ReadyForReviewListener` is now `PullRequestEventListener`. The
+  draft flag is read from the webhook payload (no token cost), and
+  `PrInfoCache` is invalidated before enqueue to keep
+  `DraftBuildQueueCleaner` from dropping fresh builds against
+  stale cache entries.
+- v1.5.0 — **Breaking.** Operator-feedback overhaul. Opt-in is
+  now a Build Feature on each BT plus four project-level
+  parameters (`branchTrigger.enabled` / `branches`,
+  `prTrigger.enabled` / `branches`). Per-BT trigger flags
+  (`triggerOnBranch` / `triggerOnPrReady` / `triggerOnPrDraft`)
+  with HARD semantics — manual triggers cannot bypass.
+  Per-BT branch list overrides. Centralized gating in
+  `BridgeGate.decide` shared by listener / filter / cleaner /
+  publisher. Skipped Check Runs on GitHub for the two PR-context
+  suppression reasons. Listener runs as system user via
+  `SecurityContextEx.runAsSystemUnchecked`; smart-skip on
+  existing builds at `(pull/N, head SHA)`; case-insensitive
+  repo slug compare. See CHANGELOG for the migration matrix.
 
-## Item 1 - Build feature for one-click opt-in
+## Item 1 - Build feature for one-click opt-in — **SHIPPED in 1.5.0**
 
-### Problem statement
-
-Opt-in today requires setting three build parameters on every
-participating build configuration (or on a shared template):
-
-```
-teamcity.github.bridge.ignoreDrafts
-teamcity.github.bridge.repo
-teamcity.github.bridge.connectionId
-```
-
-This works but has no UI affordance. The buildType editor shows
-the parameters as generic key-value pairs, with no hint that the
-plugin uses them.
-
-### Proposed design
-
-Provide a custom `BuildFeature` (subclass of
-`jetbrains.buildServer.serverSide.BuildFeature`) titled "GitHub
-Bridge integration" with a dedicated edit form that exposes the
-three parameters as named fields plus a "connection" dropdown
-populated from the project's `OAuthConnectionsManager`. Saving the
-feature writes the same three parameters underneath, so the rest
-of the plugin keeps working unchanged.
-
-Benefits:
-- Discoverable in the buildType editor.
-- The connection dropdown removes the need to look up
-  `PROJECT_EXT_<N>` / `CID_<hash>` by hand.
-- A future "Disable bundled `commitStatusPublisher`" checkbox can
-  live in the same form.
-
-### Effort
-
-Medium. Mostly UI work (JSP form + parameter mapping). The wiring
-to the existing parameter conventions is mechanical.
+Shipped as `GitHubBridgeBuildFeature` (Spring bean) backed by the
+`bridgeFeatureEdit.jsp` edit form. The feature carries five
+fields: `triggerOnBranch` / `triggerOnPrReady` / `triggerOnPrDraft`
+(HARD trigger gates) + `branchTriggerBranchesOverride` /
+`prTriggerBranchesOverride` (BT-level branch list overrides
+that REPLACE the project defaults when set). Mandatory project
+config (`repo`, `connectionId`, the two `xxxTrigger.enabled`
+toggles, the two `xxxTrigger.branches` lists) lives at the
+project level as standard TC parameters. The OAuth connection
+dropdown sketched in the original design is deferred (the
+project param is a plain text input; surfacing live connections
+via `OAuthConnectionsManager` is the natural follow-up if
+operators ask for it).
 
 ## Item 2 - Branch column customisation (server-side)
 

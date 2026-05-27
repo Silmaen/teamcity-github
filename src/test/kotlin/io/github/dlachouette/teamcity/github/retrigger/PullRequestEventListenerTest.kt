@@ -10,34 +10,13 @@ class PullRequestEventListenerTest {
 
     init { LoggerBootstrap.install() }
 
-    @Test
-    fun `shouldEnqueue accepts ready_for_review regardless of draft flag`() {
-        // ready_for_review fires only on the draft->ready transition,
-        // so by GitHub's contract draft is always false here. We accept
-        // unconditionally — defensive against malformed payloads.
-        assertTrue(PullRequestEventListener.shouldEnqueue(payload(PrAction.READY_FOR_REVIEW, draft = false)))
-        assertTrue(PullRequestEventListener.shouldEnqueue(payload(PrAction.READY_FOR_REVIEW, draft = true)))
-    }
-
-    @Test
-    fun `shouldEnqueue accepts opened when not draft`() {
-        assertTrue(PullRequestEventListener.shouldEnqueue(payload(PrAction.OPENED, draft = false)))
-    }
-
-    @Test
-    fun `shouldEnqueue rejects opened when draft`() {
-        assertFalse(PullRequestEventListener.shouldEnqueue(payload(PrAction.OPENED, draft = true)))
-    }
-
-    @Test
-    fun `shouldEnqueue accepts synchronize when not draft`() {
-        assertTrue(PullRequestEventListener.shouldEnqueue(payload(PrAction.SYNCHRONIZE, draft = false)))
-    }
-
-    @Test
-    fun `shouldEnqueue rejects synchronize when draft`() {
-        assertFalse(PullRequestEventListener.shouldEnqueue(payload(PrAction.SYNCHRONIZE, draft = true)))
-    }
+    // The per-BT gating decision moved to `BridgeGate.decide` in
+    // v1.5.0. See BridgeGateTest for the full action × draft ×
+    // trigger-flag × branch-filter matrix.
+    //
+    // The tests below only cover the action parser + the static
+    // helpers exposed on the listener (matchesRepo,
+    // matchesBranchAndSha).
 
     @Test
     fun `PrAction fromString maps the three supported actions`() {
@@ -54,13 +33,75 @@ class PullRequestEventListenerTest {
         assertTrue(PrAction.fromString("") == null)
     }
 
-    private fun payload(action: PrAction, draft: Boolean) = PrEventPayload(
-        action = action,
-        repo = RepoCoords.parse("acme/widget"),
-        prNumber = 1,
-        headSha = "abc123",
-        baseRef = "main",
-        headRef = "feature/x",
-        draft = draft,
-    )
+    @Test
+    fun `matchesRepo accepts exact slug`() {
+        val repo = RepoCoords.parse("acme/widget")
+        assertTrue(PullRequestEventListener.matchesRepo(RepoCoords.parse("acme/widget"), repo))
+    }
+
+    @Test
+    fun `matchesRepo accepts slug with different casing`() {
+        val repo = RepoCoords.parse("acme/widget")
+        assertTrue(PullRequestEventListener.matchesRepo(RepoCoords.parse("Acme/Widget"), repo))
+        assertTrue(PullRequestEventListener.matchesRepo(RepoCoords.parse("ACME/WIDGET"), repo))
+    }
+
+    @Test
+    fun `matchesRepo rejects different repo`() {
+        val repo = RepoCoords.parse("acme/widget")
+        assertFalse(PullRequestEventListener.matchesRepo(RepoCoords.parse("acme/gadget"), repo))
+        assertFalse(PullRequestEventListener.matchesRepo(RepoCoords.parse("other/widget"), repo))
+    }
+
+    @Test
+    fun `matchesBranchAndSha returns true when branch and sha match`() {
+        assertTrue(
+            PullRequestEventListener.matchesBranchAndSha(
+                buildBranch = "pull/42",
+                buildRevisions = listOf("deadbeef"),
+                targetBranch = "pull/42",
+                targetSha = "deadbeef",
+            )
+        )
+    }
+
+    @Test
+    fun `matchesBranchAndSha returns false on different branch or sha`() {
+        assertFalse(
+            PullRequestEventListener.matchesBranchAndSha(
+                buildBranch = "pull/43",
+                buildRevisions = listOf("deadbeef"),
+                targetBranch = "pull/42",
+                targetSha = "deadbeef",
+            )
+        )
+        assertFalse(
+            PullRequestEventListener.matchesBranchAndSha(
+                buildBranch = "pull/42",
+                buildRevisions = listOf("cafebabe"),
+                targetBranch = "pull/42",
+                targetSha = "deadbeef",
+            )
+        )
+    }
+
+    @Test
+    fun `matchesBranchAndSha returns false on empty revisions or null branch`() {
+        assertFalse(
+            PullRequestEventListener.matchesBranchAndSha(
+                buildBranch = "pull/42",
+                buildRevisions = emptyList(),
+                targetBranch = "pull/42",
+                targetSha = "deadbeef",
+            )
+        )
+        assertFalse(
+            PullRequestEventListener.matchesBranchAndSha(
+                buildBranch = null,
+                buildRevisions = listOf("deadbeef"),
+                targetBranch = "pull/42",
+                targetSha = "deadbeef",
+            )
+        )
+    }
 }

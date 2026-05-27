@@ -1,28 +1,10 @@
 package io.github.dlachouette.teamcity.github.queue
 
-import io.github.dlachouette.teamcity.github.api.PrInfo
-import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
-
-class DraftBuildQueueCleanerTest {
-
-    init { LoggerBootstrap.install() }
-
-    @Test
-    fun `shouldRemove returns true for draft PR`() {
-        assertTrue(DraftBuildQueueCleaner.shouldRemove(pr(draft = true)))
-    }
-
-    @Test
-    fun `shouldRemove returns false for ready PR`() {
-        assertFalse(DraftBuildQueueCleaner.shouldRemove(pr(draft = false)))
-    }
-
-    private fun pr(draft: Boolean) = PrInfo(
-        number = 1, title = "x", author = "alice",
-        headRef = "feature/x", baseRef = "main", headSha = "abc",
-        draft = draft, state = "open",
-    )
-}
+// The cleaner's decision is delegated to BridgeGate in v1.5.0+; see
+// BridgeGateTest for the per-branch / per-trigger matrix. The old
+// `shouldRemove(pr)` helper is gone (the gate now decides based on
+// the full BridgeFeatureConfig instead of just the PR's draft flag).
+//
+// Integration-level behaviour (queue removal + Skipped Check Run
+// posting) requires TC SDK fixtures and is currently exercised
+// manually on the Test_CI sandbox per CHANGELOG.

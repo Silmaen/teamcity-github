@@ -372,7 +372,8 @@ Useful log lines:
 | `Registered webhook controller at /app/teamcity-github-bridge/webhook` | Endpoint live. |
 | `Webhook secret is not configured (...)` | Set `teamcity.github.bridge.webhook.secret` immediately. |
 | `Webhook with invalid or missing signature rejected (event=X)` | Signature mismatch; check both sides. |
-| `Handling ready_for_review for <repo>#<n>` | Webhook received and verified. |
+| `Handling pull_request.<action> for <repo>#<n>` | Webhook received and verified. Action is one of `opened`, `ready_for_review`, `synchronize`. |
+| `Skipping <buildType> for <repo>#<n>: already running/queued/finished ...` | Smart-skip kicked in — a build already exists at the same head SHA, no fresh enqueue. |
 | `No build types found for <repo>` | None of the active build types have `teamcity.github.bridge.repo=<repo>` + `teamcity.github.bridge.ignoreDrafts=true`. |
 | `Suppressing build of <buildType> for draft PR <repo>#<n>` | Draft filter applied. |
 | `Cannot resolve token for <buildType>` | The connection ID is wrong or the App is uninstalled. |

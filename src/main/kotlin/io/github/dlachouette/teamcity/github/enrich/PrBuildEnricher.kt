@@ -2,10 +2,9 @@ package io.github.dlachouette.teamcity.github.enrich
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
-import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SRunningBuild
@@ -35,20 +34,14 @@ class PrBuildEnricher(
         val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
         val buildType = build.buildType ?: return
 
-        val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
-        val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
-        val repo = try {
-            RepoCoords.parse(repoSlug)
-        } catch (e: IllegalArgumentException) {
-            return
-        }
+        val config = BridgeFeatureReader.read(buildType) ?: return
 
         // TokenResolver already logs the cause (rate-limited).
-        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
+        val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
 
-        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
+        val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase)
         if (pr == null) {
-            LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; skipping enrichment")
+            LOG.warn("Cannot fetch PR info for ${config.repo.slug}#$prNumber; skipping enrichment")
             return
         }
 
@@ -57,7 +50,7 @@ class PrBuildEnricher(
         if (plan.tagsToAdd.isNotEmpty()) {
             build.setTags(build.tags + plan.tagsToAdd)
         }
-        LOG.info("Enriched build ${buildType.externalId} #${build.buildId} for $repoSlug#$prNumber (draft=${pr.draft})")
+        LOG.info("Enriched build ${buildType.externalId} #${build.buildId} for ${config.repo.slug}#$prNumber (draft=${pr.draft})")
     }
 
     companion object {

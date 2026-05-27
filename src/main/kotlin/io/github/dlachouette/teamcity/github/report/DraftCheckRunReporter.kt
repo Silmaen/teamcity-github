@@ -5,90 +5,42 @@ import io.github.dlachouette.teamcity.github.api.CheckRunConclusion
 import io.github.dlachouette.teamcity.github.api.CheckRunRequest
 import io.github.dlachouette.teamcity.github.api.CheckRunStatus
 import io.github.dlachouette.teamcity.github.api.GitHubClient
-import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
-import jetbrains.buildServer.serverSide.BuildPromotion
-import jetbrains.buildServer.serverSide.BuildServerAdapter
-import jetbrains.buildServer.serverSide.SBuildServer
-import jetbrains.buildServer.serverSide.SQueuedBuild
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
+import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.WebLinks
 import java.util.concurrent.ConcurrentHashMap
 
-// When a draft PR build hits the queue on an opt-in buildType, publish a
-// Check Run with conclusion=skipped to GitHub so the PR shows ⏭️ visibly
-// instead of "Expected — Waiting for status to be reported" (which would
-// otherwise block the PR).
+// Posts "Skipped: …" Check Runs to GitHub. No longer a build-server
+// listener: the call sites (PullRequestEventListener,
+// DraftBuildQueueCleaner) explicitly invoke postSkippedCheckRun when
+// the centralized gate says SUPPRESS_DRAFT or SUPPRESS_BRANCH_PR.
 //
-// We do NOT release the StartBuildPrecondition hold — the build stays in
-// queue, no agent time is consumed. The Check Run is the user-facing
-// signal that the build was deliberately skipped.
+// Idempotent via a per-(sha, BT) dedup set, so multiple webhook
+// retries or the cleaner+listener firing for the same SHA emit at
+// most one Check Run per BT.
 class DraftCheckRunReporter(
-    buildServer: SBuildServer,
     private val tokenResolver: TokenResolver,
-    private val prInfoCache: PrInfoCache,
     private val gitHubClient: GitHubClient,
     private val webLinks: WebLinks,
-) : BuildServerAdapter() {
+) {
 
-    // Dedup key: (commitSha, buildTypeExternalId). Bounded but not LRU; for
-    // a typical TC server the working set is small (open PRs × opted-in
-    // build types) and the cache survives only until server restart.
     private val published = ConcurrentHashMap.newKeySet<Pair<String, String>>()
 
-    init {
-        buildServer.addListener(this)
-    }
+    fun postSkippedCheckRun(
+        buildType: SBuildType,
+        config: BridgeFeatureConfig,
+        prNumber: Int,
+        headSha: String,
+        reason: SkipReason,
+        headRef: String? = null,
+    ): Boolean {
+        if (config.repo.slug.isBlank()) return false
+        if (!config.prTriggerEnabled) return false
+        if (headSha.isBlank()) return false
 
-    override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
-        try {
-            report(queuedBuild)
-        } catch (e: Exception) {
-            LOG.warn("Failed reporting draft check run for ${queuedBuild.buildType.externalId}: ${e.message}", e)
-        }
-    }
+        val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return false
 
-    private fun report(queuedBuild: SQueuedBuild) {
-        val promotion = queuedBuild.buildPromotion
-        val branchName = promotion.branch?.name ?: return
-        if (!branchName.startsWith("pull/")) return
-
-        val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
-        val buildType = promotion.buildType ?: return
-
-        val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
-        val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
-
-        if (buildType.parameters[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
-        // Manual user trigger bypasses suppression (the build will run),
-        // so don't pre-emptively post a "Skipped" Check Run for it.
-        if (queuedBuild.triggeredBy.isTriggeredByUser) return
-
-        val repo = try {
-            RepoCoords.parse(repoSlug)
-        } catch (e: IllegalArgumentException) {
-            return
-        }
-
-        // TokenResolver already logs the cause (rate-limited).
-        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
-
-        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
-        if (pr == null) {
-            LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; skipping check run report")
-            return
-        }
-
-        val sha = pr.headSha.takeIf { it.isNotBlank() }
-            ?: promotion.revisions.firstOrNull()?.revision
-            ?: return
-
-        // The build is about to be removed from the queue by
-        // DraftBuildQueueCleaner, so getQueuedBuildUrl points at a
-        // queue item that will be gone in milliseconds. Use the
-        // BuildType's home page instead — durable, and the user can
-        // see the buildType's recent runs on the PR's other commits.
         val detailsUrl = try {
             webLinks.getConfigurationHomePageUrl(buildType)?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
@@ -96,26 +48,28 @@ class DraftCheckRunReporter(
             null
         }
 
-        val request = buildRequest(
-            branchName = branchName,
-            params = buildType.parameters,
-            isDraft = pr.draft,
-            headSha = sha,
-            buildTypeFullName = buildType.fullName,
-            prNumber = prNumber,
+        val (title, summary) = reason.titleAndSummary(prNumber, headRef)
+        val request = CheckRunRequest(
+            name = "TeamCity / ${buildType.fullName}",
+            headSha = headSha,
+            status = CheckRunStatus.COMPLETED,
+            conclusion = CheckRunConclusion.SKIPPED,
+            outputTitle = title,
+            outputSummary = summary,
             detailsUrl = detailsUrl,
-        ) ?: return
+        )
 
-        val dedupKey = sha to buildType.externalId
-        if (!published.add(dedupKey)) return
+        val dedupKey = headSha to buildType.externalId
+        if (!published.add(dedupKey)) return false
 
-        val ok = gitHubClient.postCheckRun(access.token, repo, request, access.apiBase)
+        val ok = gitHubClient.postCheckRun(access.token, config.repo, request, access.apiBase)
         if (!ok) {
             published.remove(dedupKey)
-            LOG.warn("Check Run POST failed for $repoSlug@$sha (${buildType.externalId})")
+            LOG.warn("Skipped Check Run POST failed for ${config.repo.slug}@$headSha (${buildType.externalId})")
         } else {
-            LOG.info("Published skipped Check Run for $repoSlug@$sha (${buildType.externalId})")
+            LOG.info("Posted Skipped Check Run for ${config.repo.slug}@$headSha (${buildType.externalId}) — reason=${reason.name}")
         }
+        return ok
     }
 
     fun invalidateDedupForSha(sha: String) {
@@ -124,34 +78,26 @@ class DraftCheckRunReporter(
 
     companion object {
         private val LOG = Logger.getInstance(DraftCheckRunReporter::class.java.name)
+    }
+}
 
-        // Pure helper — split out so it can be tested without TC SDK mocks.
-        // Returns the request to POST, or null if the build should not be
-        // reported (non-PR build, not draft, missing params, etc).
-        fun buildRequest(
-            branchName: String?,
-            params: Map<String, String>,
-            isDraft: Boolean,
-            headSha: String,
-            buildTypeFullName: String,
-            prNumber: Int,
-            detailsUrl: String? = null,
-        ): CheckRunRequest? {
-            if (branchName == null || !branchName.startsWith("pull/")) return null
-            if (params[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return null
-            if (!params.containsKey(DraftAwareBuildFilter.PARAM_REPO_SLUG)) return null
-            if (!params.containsKey(DraftAwareBuildFilter.PARAM_CONNECTION_ID)) return null
-            if (!isDraft) return null
-            if (headSha.isBlank()) return null
-            return CheckRunRequest(
-                name = "TeamCity / $buildTypeFullName",
-                headSha = headSha,
-                status = CheckRunStatus.COMPLETED,
-                conclusion = CheckRunConclusion.SKIPPED,
-                outputTitle = "Skipped: draft PR",
-                outputSummary = "PR #$prNumber is in draft state; this build will run automatically when the PR is marked ready for review.",
-                detailsUrl = detailsUrl,
-            )
+// Reasons surfaced by `postSkippedCheckRun`. Each maps to a fixed
+// title + summary template so the GitHub UI's "Checks" panel shows
+// a consistent message and the user can tell apart draft-deferred
+// skips from branch-out-of-scope skips at a glance.
+enum class SkipReason {
+    DRAFT_PR,
+    BRANCH_FILTER;
+
+    fun titleAndSummary(prNumber: Int, headRef: String?): Pair<String, String> = when (this) {
+        DRAFT_PR -> "Skipped: draft PR" to
+            "PR #$prNumber is in draft state and this BuildType is configured to skip drafts. " +
+                "It will run automatically once the PR is marked ready for review."
+        BRANCH_FILTER -> {
+            val branch = headRef?.takeIf { it.isNotBlank() } ?: "(unknown)"
+            "Skipped: branch out of scope" to
+                "PR source branch '$branch' does not match this BuildType's branch filter; " +
+                    "no build was triggered for this revision."
         }
     }
 }

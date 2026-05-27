@@ -4,6 +4,316 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-05-27
+
+Operator-feedback release. Three themes:
+
+1. **UI-driven, per-task configuration.** The legacy
+   `teamcity.github.bridge.repo` / `connectionId` / `ignoreDrafts`
+   BuildType parameters are gone. Opt-in is now a "GitHub Bridge
+   integration" Build Feature on each participating BT, backed by
+   four project-level parameters for the mandatory config. The
+   feature exposes per-task trigger flags and branch-list
+   overrides with a dedicated edit form.
+
+2. **Two independent trigger paths per project.** The plugin
+   separates *branch trigger* (builds on non-PR branches) from
+   *PR trigger* (builds on PR events). Each has its own enable
+   toggle and its own branch list, both individually overridable
+   per BT.
+
+3. **HARD vs SOFT gating, with predictable manual triggers.**
+   Per-BT trigger flags are HARD: even a manual operator click is
+   blocked when the flag is off. Branch lists are SOFT: manual
+   triggers bypass them. The decision is centralized in
+   `BridgeGate.decide`, used by the listener, the queue cleaner,
+   the start-build filter, and the publisher's draft-suppression
+   heuristic — provably consistent across all four sites.
+
+**Breaking change.** All configuration keys are renamed; setups
+built against v1.4.0 require manual migration. See below.
+
+### Configuration model
+
+**Project-level parameters** (4 keys, in addition to the already-existing
+`teamcity.github.bridge.repo` + `connectionId`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `teamcity.github.bridge.branchTrigger.enabled` | `true` | Plugin participates on non-PR branch builds (main, Release/*, …) |
+| `teamcity.github.bridge.branchTrigger.branches` | empty=all | TC branch spec (`+:`/`-:` per line) for non-PR branches |
+| `teamcity.github.bridge.prTrigger.enabled` | `true` | Plugin participates on PR events |
+| `teamcity.github.bridge.prTrigger.branches` | empty=all | TC branch spec matched against PR source branch (headRef) |
+
+**BuildType build feature** `github-bridge` (5 fields):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `triggerOnBranch` | `true` | HARD: this BT runs on non-PR branches |
+| `triggerOnPrReady` | `true` | HARD: this BT runs on ready PRs |
+| `triggerOnPrDraft` | `true` | HARD: this BT also runs on draft PRs. Requires `triggerOnPrReady=true`. |
+| `branchTriggerBranchesOverride` | empty | REPLACES project's non-PR branch list |
+| `prTriggerBranchesOverride` | empty | REPLACES project's PR source-branch list |
+
+### HARD vs SOFT semantics
+
+- **HARD blocks** (the three `triggerOnXxx` flags + project
+  `xxxTrigger.enabled` toggles): even manual operator triggers
+  cannot bypass. The build is suppressed silently — no GitHub
+  Check Run.
+- **SOFT blocks** (the branch lists, project or BT override):
+  manual triggers bypass them. Auto builds for excluded PRs post
+  a "Skipped: branch out of scope" Check Run; auto builds for
+  excluded non-PR branches are suppressed silently (no Check Run
+  on non-PR contexts).
+
+### Gating decision matrix
+
+| Context | Flag (HARD) | Branch list (SOFT) | Trigger | Outcome |
+|---|---|---|---|---|
+| Non-PR branch | ON | match | any | RUN |
+| Non-PR branch | ON | no match | auto | suppress silent |
+| Non-PR branch | ON | no match | manual | RUN (SOFT bypass) |
+| Non-PR branch | OFF | — | any | suppress silent (HARD) |
+| PR ready | ON | match | any | RUN |
+| PR ready | ON | no match | auto | suppress + **Skipped: branch out of scope** |
+| PR ready | ON | no match | manual | RUN (SOFT bypass) |
+| PR ready | OFF | — | any | suppress silent (HARD) |
+| PR draft | `triggerOnPrDraft=ON` | match | any | RUN |
+| PR draft | `triggerOnPrDraft=ON` | no match | auto | suppress + **Skipped: branch out of scope** |
+| PR draft | `triggerOnPrDraft=ON` | no match | manual | RUN (SOFT bypass) |
+| PR draft | `triggerOnPrDraft=OFF`, Ready=ON | — | auto | suppress + **Skipped: draft PR** |
+| PR draft | `triggerOnPrDraft=OFF`, Ready=ON | — | manual | suppress silent (HARD on draft) |
+| PR draft | Ready=OFF | — | any | suppress silent (HARD, not for PRs) |
+
+### Added
+
+- **`PullRequestEventListener`** (renamed from
+  `ReadyForReviewListener`) reacts to `pull_request.opened`,
+  `ready_for_review`, AND `synchronize` in a unified handler. A
+  PR opened directly as ready gets builds on its initial SHA;
+  every subsequent push to a ready PR refreshes Check Runs on
+  the new head.
+- **"GitHub Bridge integration" Build Feature**
+  (`GitHubBridgeBuildFeature`) with edit form
+  (`bridgeFeatureEdit.jsp`) under the BuildType editor's *Build
+  Features* tab. Form validates the branch-spec syntax and the
+  `triggerOnPrDraft=true` ⇒ `triggerOnPrReady=true` constraint.
+- **`BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManualTrigger): GateDecision`**
+  — centralized gating helper. The listener, the queue cleaner,
+  the start-build filter and the publisher's
+  draft-suppression check all delegate to it.
+- **`BridgeFeatureReader.read(buildType)`** /
+  **`fromInputs(projectParams, featureParams)`** — single source
+  of truth for the resolved per-BT config. Reads via
+  `buildType.project.parameters` (the documented
+  `InheritableUserParametersHolder.getParameters()` inheritance
+  path), since `buildType.parameters` /
+  `buildType.parametersProvider.all` don't include project-chain
+  inherited params on TC 2026.1.
+- **`BranchSpecMatcher`** — pure parser + matcher for TC-style
+  branch specs (`+:`/`-:` per line, glob-by-default, explicit
+  `/regex/` form). Used in both project lists and BT overrides.
+- **Smart-skip on existing builds.** Before enqueueing, the
+  listener checks each candidate BT for an already running,
+  queued, or recently finished (non-canceled) build at the same
+  `(pull/N, head SHA)` coordinate. Same-SHA duplicates from
+  rapid webhook retries are skipped with a log line. Bounded
+  history scan (50 most recent finished builds).
+- **`SecurityContextEx.runAsSystemUnchecked { … }`** wrapper
+  around the listener body. `ProjectManager`'s collection
+  accessors filter by current user; a webhook delivery has no
+  authenticated user, so the listener saw zero BuildTypes
+  without this. Other adapter-based listeners
+  (`BuildStatusCheckRunPublisher`, `PrPromotionTagger`, …) get a
+  security context from TC and don't need the wrapper.
+- **Case-insensitive repo slug matching** —
+  `PullRequestEventListener.findCandidateBuildTypes` compares
+  slugs with `equals(ignoreCase = true)`. GitHub echoes the
+  canonical casing in webhook payloads; the DSL author's value
+  may differ.
+- **Skipped Check Runs from the listener path.** Two `SkipReason`
+  values are surfaced on GitHub: `DRAFT_PR` ("Skipped: draft PR")
+  when an opt-in BT skips drafts and the PR is draft;
+  `BRANCH_FILTER` ("Skipped: branch out of scope") when a BT's
+  PR branch list excludes the PR's source. Idempotent via a
+  per-(sha, BT) dedup set. Non-PR contexts post no Check Run on
+  suppression (silent).
+- **Verbose diagnostic on empty candidate lists.** When the
+  listener finds zero matching BuildTypes it logs counts from
+  every BT-collection accessor (`allBuildTypes`,
+  `activeBuildTypes`, `rootProject.buildTypes`,
+  `projects.flatMap(ownBuildTypes)`, `numberOfBuildTypes`) plus
+  one INFO line per BT carrying the feature, showing whether
+  the config resolved and why each candidate was rejected.
+
+### Changed
+
+- All nine BT-parameter consumers refactored to read via
+  `BridgeFeatureReader.read`: `PullRequestEventListener`,
+  `DraftAwareBuildFilter`, `DraftBuildQueueCleaner`,
+  `PrPromotionTagger`, `BuildStatusCheckRunPublisher`,
+  `DraftCheckRunReporter`, `PrBuildEnricher`,
+  `PrParameterProvider`, `PluginSelfTester`.
+- `DraftAwareBuildFilter`, `DraftBuildQueueCleaner`,
+  `PullRequestEventListener`, and
+  `BuildStatusCheckRunPublisher.willBeSuppressed` all delegate
+  to `BridgeGate.decide`. Provably consistent across the four
+  sites — the gate's return value drives both the listener's
+  bucket selection and the filter/cleaner's suppression.
+- `DraftCheckRunReporter` is no longer a `BuildServerAdapter`
+  listener; it became a pure service. The
+  `buildTypeAddedToQueue` path is owned by
+  `DraftBuildQueueCleaner` now (which suppresses and posts the
+  Skipped Check Run in one place).
+- Enqueue path drops `BuildCustomizer.setBuildComment(...)` —
+  it throws on TC 2026.1 when the customizer was created with a
+  null user. The comment moved into the `addToQueue(promotion,
+  triggerSource)` second argument, surfaced in the build's
+  "Triggered by" field as
+  `teamcity-github-bridge: pull_request.<action> on PR #<n>`.
+- Project tree walk for the listener uses
+  `projectManager.rootProject.buildTypes` (recursive) with a
+  fallback to `projectManager.projects.flatMap { it.ownBuildTypes }`.
+  `projectManager.allBuildTypes` returned empty even under
+  `runAsSystem` on the user's TC 2026.1 sandbox in some
+  conditions; the manual walk is defence in depth.
+
+### Fixed
+
+- Project-chain `teamcity.github.bridge.*` parameters resolve
+  correctly (the v1.4.x model attempted to read them via
+  `buildType.parameters`, which doesn't include project
+  inheritance on TC 2026.1).
+- `ProjectManager` collection accessors no longer return empty
+  in the listener context (security-context fix via
+  `runAsSystemUnchecked`).
+- `setBuildComment` no longer fails the enqueue on TC 2026.1.
+- The "PRs opened directly as ready trigger 0 builds for the
+  READY_ONLY cohort" symptom (case-sensitive slug compare in
+  `findCandidateBuildTypes`).
+- `PullRequestEventListener` invalidates `PrInfoCache` before
+  enqueueing; without this,
+  `DraftBuildQueueCleaner.buildTypeAddedToQueue` could refetch
+  a stale entry showing `draft: true` and drop the build we just
+  enqueued on a freshly ready PR.
+
+### Removed
+
+- The whole BT-parameter opt-in path: there is no
+  `teamcity.github.bridge.repo` / `connectionId` /
+  `ignoreDrafts` read on individual BuildTypes anymore. The
+  matching project-level keys are read instead.
+- `teamcity.github.bridge.prScanEnabled` (project) → replaced by
+  `prTrigger.enabled`.
+- `teamcity.github.bridge.branchFilter` (project) → split into
+  `branchTrigger.branches` and `prTrigger.branches`.
+- The per-BT `ignoreDrafts` toggle → replaced by inverted
+  `triggerOnPrDraft` (default `true`; check off to skip drafts).
+- The per-BT `branchFilterOverride` → split into
+  `branchTriggerBranchesOverride` and
+  `prTriggerBranchesOverride`.
+- `WebhookPayloadParser.parseReadyForReview` → replaced by
+  `parsePullRequestEvent` (action + draft + the existing
+  fields). Callers route on the action.
+- `isOptedIn(parameters)` helpers on
+  `BuildStatusCheckRunPublisher` and `PrPromotionTagger` — the
+  feature presence is the opt-in.
+- `DraftBuildQueueCleaner.shouldRemove(pr)` — the gate now
+  decides on the full `BridgeFeatureConfig`, not just the PR's
+  draft flag.
+
+### Migration from v1.4.0
+
+DSL — replace the legacy BT-level params with project-level
+params plus a Build Feature on each opt-in BuildType:
+
+```kotlin
+project {
+    params {
+        param("teamcity.github.bridge.repo", "owner/name")
+        param("teamcity.github.bridge.connectionId", "PROJECT_EXT_42")
+        // optional toggles:
+        // param("teamcity.github.bridge.branchTrigger.enabled", "false")
+        // param("teamcity.github.bridge.prTrigger.enabled", "false")
+        // optional branch lists:
+        // param("teamcity.github.bridge.branchTrigger.branches", "+:main\n+:Release/*")
+        // param("teamcity.github.bridge.prTrigger.branches", "+:Feature/*")
+    }
+}
+
+buildType {
+    features {
+        feature {
+            type = "github-bridge"
+            // all three default to "true"; set "false" to opt out HARD:
+            // param("triggerOnBranch", "false")     // manual-on-main only
+            // param("triggerOnPrReady", "false")    // never run on PRs
+            // param("triggerOnPrDraft", "false")    // ready PRs only
+            // BT-level branch list overrides:
+            // param("branchTriggerBranchesOverride", "+:hotfix/*")
+            // param("prTriggerBranchesOverride", "-:*-experimental")
+        }
+    }
+}
+```
+
+UI — set the four `teamcity.github.bridge.*` params on the
+project under *Parameters*; on each opt-in BuildType under
+*Build Features &rarr; Add*, pick *GitHub Bridge integration*
+and tick the desired trigger flags.
+
+After upgrade, BuildTypes that still rely on the legacy
+per-BuildType `teamcity.github.bridge.*` parameters are silently
+ignored. The admin self-test ("Token resolution") now reports
+"No buildType has the 'GitHub Bridge integration' build feature
+configured" instead of the old parameter-shaped message.
+
+[1.5.0]: ../../releases/tag/1.5.0
+
+## [1.4.0] - 2026-05-27
+
+DSL-author-feedback release: the plugin now reacts to every
+non-draft `pull_request` action that should refresh builds on the
+PR's head SHA, unblocking the "drop VCS triggers" pattern that
+eliminates the "cancelled" traces operators complained about.
+
+### Added
+
+- **React to `pull_request.opened` and `pull_request.synchronize`
+  in addition to `ready_for_review`.** A PR opened directly as
+  ready now gets builds on its initial SHA; subsequent pushes to a
+  ready PR refresh Check Runs on every new head. DSL authors can
+  drop VCS triggers on opt-in BuildTypes (Owl pattern:
+  `disableSettings("TRIGGER_2")`; Test_CI: omit triggers on
+  NON_DRAFT-scoped builds) without losing status freshness. The
+  draft flag is read directly from the webhook payload, so the
+  no-op path for drafts costs zero installation tokens.
+
+### Changed
+
+- **`ReadyForReviewListener` renamed to `PullRequestEventListener`**
+  and now dispatches on the action. The Spring bean class name,
+  log prefix (`Handling pull_request.<action> for ...`), and the
+  `grep` recipe in `doc/troubleshooting.md` change accordingly.
+  The on-the-wire contract (POST `/webhook`, HMAC, `pull_request`
+  event) is unchanged.
+- **`WebhookPayloadParser.parseReadyForReview` →
+  `parsePullRequestEvent`.** Returns a `PrEventPayload` carrying
+  `action` + `draft` in addition to the previous fields. Callers
+  route on the action.
+
+### Fixed
+
+- `PullRequestEventListener` now invalidates `PrInfoCache` *before*
+  enqueueing on every action it handles. Without this,
+  `DraftBuildQueueCleaner` could refetch a stale entry showing
+  `draft: true` and drop the build we just enqueued on a freshly
+  ready PR — possible whenever the cache TTL had not yet expired
+  since the last "is draft?" lookup.
+
+[1.4.0]: ../../releases/tag/1.4.0
+
 ## [1.3.0] - 2026-05-26
 
 Operator-feedback release: every PR build lifecycle transition is
@@ -44,7 +354,7 @@ TC build, and manual triggers always run.
   and yields the row to `DraftCheckRunReporter` so "Skipped: draft
   PR" wins uncontested.
 
-[1.3.0]: ../../releases/tag/v1.3.0
+[1.3.0]: ../../releases/tag/1.3.0
 
 ## [1.2.0] - 2026-05-26
 
@@ -134,7 +444,7 @@ TC build, and manual triggers always run.
   margin under the GitHub-side 60 minute lifetime, so the cache
   never serves a token that is about to expire mid-call.
 
-[1.2.0]: ../../releases/tag/v1.2.0
+[1.2.0]: ../../releases/tag/1.2.0
 
 ## [1.0.0] - 2026-05-26
 
@@ -267,4 +577,4 @@ strings on non-PR branches), so DSL conditions never raise
   [doc/configuration.md#check-run-publisher-coexistence-with-the-bundled-commitstatuspublisher](doc/configuration.md#check-run-publisher-coexistence-with-the-bundled-commitstatuspublisher)
   for the operating models.
 
-[1.0.0]: ../../releases/tag/v1.0.0
+[1.0.0]: ../../releases/tag/1.0.0

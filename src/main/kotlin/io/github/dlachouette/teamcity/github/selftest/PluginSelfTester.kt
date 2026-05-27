@@ -6,7 +6,7 @@ import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.config.LogPathResolver
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.web.SignatureVerifier
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SProject
@@ -174,11 +174,9 @@ class PluginSelfTester(
         val seen = mutableSetOf<Triple<String, String, String>>()
         return projectManager.activeBuildTypes.asSequence()
             .mapNotNull { bt ->
-                val params = bt.parameters
-                val repo = params[DraftAwareBuildFilter.PARAM_REPO_SLUG]?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val conn = params[DraftAwareBuildFilter.PARAM_CONNECTION_ID]?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                if (!seen.add(Triple(bt.project.externalId, conn, repo))) return@mapNotNull null
-                OptedInTarget(bt.project, repo, conn)
+                val config = BridgeFeatureReader.read(bt) ?: return@mapNotNull null
+                if (!seen.add(Triple(bt.project.externalId, config.connectionId, config.repo.slug))) return@mapNotNull null
+                OptedInTarget(bt.project, config.repo.slug, config.connectionId)
             }
             .toList()
     }
@@ -190,7 +188,7 @@ class PluginSelfTester(
         tokenResults: MutableMap<String, ResolvedAccessForTest?>,
     ): List<TestResult> {
         if (targets.isEmpty()) {
-            return listOf(TestResult("Token resolution", Status.SKIP, "No buildType has the two opt-in parameters (teamcity.github.bridge.repo + teamcity.github.bridge.connectionId)."))
+            return listOf(TestResult("Token resolution", Status.SKIP, "No buildType has the 'GitHub Bridge integration' build feature configured."))
         }
         return targets.map { target ->
             val name = "Token resolution / ${target.project.externalId} / ${target.repo}"
@@ -200,7 +198,7 @@ class PluginSelfTester(
                 tokenResults[target.key()] = null
                 return@map TestResult(
                     name, Status.FAIL,
-                    "teamcity.github.bridge.repo='${target.repo}' is not a valid owner/name slug.",
+                    "Feature 'repo' field='${target.repo}' is not a valid owner/name slug.",
                 )
             }
             val access = try {

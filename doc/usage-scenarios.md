@@ -8,6 +8,21 @@ configuration has the three opt-in parameters
 (`teamcity.github.bridge.ignoreDrafts`, `teamcity.github.bridge.repo`, `teamcity.github.bridge.connectionId`)
 set as described in [configuration.md](configuration.md).
 
+> The scenarios below split the PR lifecycle into draft-opened,
+> push-to-draft, ready transition, etc. Two ways of getting builds
+> enqueued exist in parallel:
+>
+> - **VCS-trigger path** (legacy default): TC's own VCS trigger on
+>   `+:pull/*` enqueues a build on every push. Drafts are then held
+>   or removed by `DraftAwareBuildFilter` / `DraftBuildQueueCleaner`.
+>   Used in Scenarios 1, 2.
+> - **Plugin-event path** (v1.4.0+, the "drop VCS triggers" pattern):
+>   `PullRequestEventListener` reacts to `pull_request.opened`,
+>   `ready_for_review`, and `synchronize` and enqueues directly. No
+>   VCS trigger needed; no draft cancellations to clutter the queue.
+>   See Scenario 3 — the sequence diagram covers all three trigger
+>   actions. A PR opened **directly as ready** is the `opened` row.
+
 ## Scenario 1: a draft PR is opened
 
 **Actor**: a developer pushes a branch and opens a draft PR.
@@ -70,15 +85,24 @@ is reused. If 60 seconds have elapsed since the previous check, the
 plugin re-queries GitHub. Either way, no extra compute is spent on
 the build itself.
 
-## Scenario 3: developer marks the PR ready for review
+## Scenario 3: any non-draft `pull_request` event fires
 
-**Actor**: same developer clicks "Ready for review" in the GitHub
-UI.
+**Actor**: developer either clicks "Ready for review", opens a PR
+directly as ready, or pushes a new commit to an already-ready PR.
 
-**Expected outcome**: every matching build configuration is
-enqueued with a fresh build for `pull/189`. Each then passes the
+**Expected outcome**: for every matching build configuration that
+does **not** already have a build on this `pull/N` ref at the same
+head SHA, a fresh build is enqueued. Each then passes the
 `DraftAwareBuildFilter` because the cache is invalidated and the PR
 is no longer draft.
+
+The three trigger actions map to:
+
+| GitHub action | Trigger | Skip path |
+|---|---|---|
+| `opened` (`draft: false`) | PR opened directly as ready. | Each matching BT — fresh PR has no history, so smart-skip never matches. |
+| `ready_for_review` | Draft → ready transition. | Smart-skip catches builds that already ran during draft (e.g. via manual trigger) at the same SHA. |
+| `synchronize` (`draft: false`) | Push to a ready PR. | Smart-skip catches duplicate deliveries on the same SHA. |
 
 ```mermaid
 sequenceDiagram
@@ -91,17 +115,18 @@ sequenceDiagram
     participant Q as Build queue
     participant F as DraftAwareBuildFilter
 
-    Dev->>GH: Click "Ready for review"
-    GH->>W: POST /webhook<br/>action=ready_for_review<br/>X-Hub-Signature-256: sha256=...
+    Dev->>GH: open ready / mark ready / push to ready PR
+    GH->>W: POST /webhook<br/>action=opened | ready_for_review | synchronize<br/>X-Hub-Signature-256: sha256=...
     W->>W: HMAC-SHA256 verify
     W->>L: handle(payload)
+    L->>L: shouldEnqueue (skip if draft=true on opened/synchronize)
     L->>Cache: invalidate(repo, 189)
     L->>L: scan ProjectManager.activeBuildTypes
-    Note over L: filter by teamcity.github.bridge.repo<br/>and teamcity.github.bridge.ignoreDrafts="true"
+    Note over L: filter by teamcity.github.bridge.repo<br/>(case-insensitive) and<br/>teamcity.github.bridge.ignoreDrafts="true"
     loop for each matched buildType
+        L->>L: smart-skip if running / queued / finished<br/>build already exists at (pull/189, head SHA)
         L->>Q: addToQueue(promotion, "teamcity-github-bridge")
     end
-    Note over Q: queue optimizer dedupes against<br/>any pending build on same revision
     Q->>F: canStart for each
     F-->>Q: null (PR is no longer draft)
     Q->>Q: start the builds
@@ -115,8 +140,8 @@ comment:
 |  o  pull/189  Build_LinuxX64_Clang   10:31        |
 |     Triggered by: teamcity-github-bridge          |
 |     Comment: Retriggered by teamcity-github-      |
-|              bridge after PR #189 became ready    |
-|              for review                           |
+|              bridge after pull_request.opened on  |
+|              PR #189                              |
 +----------------------------------------------------+
 ```
 

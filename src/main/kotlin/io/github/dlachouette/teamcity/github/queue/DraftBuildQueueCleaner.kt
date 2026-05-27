@@ -1,45 +1,25 @@
 package io.github.dlachouette.teamcity.github.queue
 
 import com.intellij.openapi.diagnostic.Logger
-import io.github.dlachouette.teamcity.github.api.PrInfo
-import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.BridgeGate
+import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter
+import io.github.dlachouette.teamcity.github.report.SkipReason
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SQueuedBuild
 
-// When a build for an opted-in PR buildType lands in the queue and
-// the PR is in draft state, remove the build from the queue
-// immediately. The "skipped" Check Run is still posted to GitHub by
-// `DraftCheckRunReporter` and the draft/ready tag still ends up on
-// the promotion via `PrPromotionTagger`; both listeners run on the
-// same `buildTypeAddedToQueue` event.
-//
-// The build will be re-enqueued automatically by
-// `PullRequestEventListener` when the PR transitions to "ready for
-// review", is pushed to as a ready PR, or is opened directly as
-// ready — via the App-level webhook.
-//
-// Why remove instead of hold:
-//   - Held builds accumulate in the queue and clutter the UI. With
-//     5 opted-in build types and 3 draft PRs open you immediately
-//     have 15 "held" entries; with the queue scheduler hitting
-//     `canStart` each cycle the noise compounds.
-//   - GitHub already surfaces the deliberate skip via the Check Run
-//     ("Skipped: draft PR") so visibility is preserved.
-//   - The retrigger flow is unchanged, so the user experience on
-//     "ready for review" stays identical.
-//
-// `DraftAwareBuildFilter` remains in place as a safety net: if the
-// cleaner fails (token outage, PR info unresolvable), the filter
-// holds the build with a wait reason instead of letting a draft
-// slip through to an agent.
+// Removes queued builds that the gate says should be suppressed.
+// Posts Skipped Check Runs for PR contexts (DRAFT_PR / BRANCH_FILTER).
+// Stays silent for non-PR branch contexts (no Check Run there).
 class DraftBuildQueueCleaner(
     buildServer: SBuildServer,
     private val tokenResolver: TokenResolver,
     private val prInfoCache: PrInfoCache,
+    private val draftCheckRunReporter: DraftCheckRunReporter,
 ) : BuildServerAdapter() {
 
     init {
@@ -50,7 +30,7 @@ class DraftBuildQueueCleaner(
         try {
             maybeRemove(queuedBuild)
         } catch (e: Exception) {
-            LOG.warn("Draft queue cleanup failed for ${queuedBuild.buildType.externalId}: ${e.message}", e)
+            LOG.warn("Queue cleanup failed for ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
     }
 
@@ -58,46 +38,77 @@ class DraftBuildQueueCleaner(
         val promotion = queuedBuild.buildPromotion
         val branchName = promotion.branch?.name ?: return
         val buildType = promotion.buildType ?: return
-        val params = buildType.parameters
+        val config = BridgeFeatureReader.read(buildType) ?: return
 
-        if (params[DraftAwareBuildFilter.PARAM_IGNORE_DRAFTS] != "true") return
-        val repoSlug = params[DraftAwareBuildFilter.PARAM_REPO_SLUG]?.takeIf { it.isNotBlank() } ?: return
-        val connectionId = params[DraftAwareBuildFilter.PARAM_CONNECTION_ID]?.takeIf { it.isNotBlank() } ?: return
-        if (!branchName.startsWith("pull/")) return
-        val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
-        // Manual user trigger bypasses the cleaner: see DraftAwareBuildFilter.
-        if (queuedBuild.triggeredBy.isTriggeredByUser) {
-            LOG.info("Keeping manually triggered draft build in queue: ${buildType.externalId} (pull/$prNumber on $repoSlug)")
-            return
+        val isManual = queuedBuild.triggeredBy.isTriggeredByUser
+        val isPr = branchName.startsWith("pull/")
+
+        // Fetch PR info up-front if PR; the gate needs draft + headRef.
+        val prDraft: Boolean?
+        val prHeadRef: String?
+        val prNumber: Int?
+        if (isPr) {
+            prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
+            val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
+            val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase) ?: return
+            prDraft = pr.draft
+            prHeadRef = pr.headRef
+        } else {
+            prNumber = null
+            prDraft = null
+            prHeadRef = null
         }
 
-        val repo = try {
-            RepoCoords.parse(repoSlug)
-        } catch (e: IllegalArgumentException) {
-            return
+        val decision = BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManual)
+        if (decision == GateDecision.ALLOW) return
+
+        val reason = when (decision) {
+            GateDecision.SUPPRESS_HARD -> "BT excluded by GitHub Bridge feature (HARD)"
+            GateDecision.SUPPRESS_DRAFT -> "PR is draft; this BuildType has triggerOnPrDraft=false"
+            GateDecision.SUPPRESS_BRANCH_PR -> "PR source branch '$prHeadRef' is excluded by the BT's PR branch filter"
+            GateDecision.SUPPRESS_BRANCH_NON_PR -> "Branch '$branchName' is excluded by the BT's branch filter"
+            GateDecision.ALLOW -> error("unreachable")
         }
-        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
-        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase) ?: return
 
-        if (!shouldRemove(pr)) return
-
-        val reason = "PR #$prNumber on $repoSlug is in draft state. " +
-            "It will be re-enqueued automatically when marked ready for review."
         try {
             queuedBuild.removeFromQueue(null, reason)
-            LOG.info("Removed draft build from queue: ${buildType.externalId} (pull/$prNumber on $repoSlug)")
+            LOG.info("Removed ${buildType.externalId} from queue ($branchName): $reason")
         } catch (e: Exception) {
-            LOG.warn("removeFromQueue threw for ${buildType.externalId} (pull/$prNumber): ${e.message}. The DraftAwareBuildFilter safety net will hold the build instead.", e)
+            LOG.warn("removeFromQueue threw for ${buildType.externalId} ($branchName): ${e.message}. " +
+                "The DraftAwareBuildFilter safety net will hold the build instead.", e)
+            return
+        }
+
+        // Post the user-visible Skipped Check Run for PR contexts only.
+        // SUPPRESS_HARD on PR is silent by design (the BT just doesn't
+        // participate in PRs at all; a CR would be noise).
+        if (prNumber != null) {
+            val skipReason = when (decision) {
+                GateDecision.SUPPRESS_DRAFT -> SkipReason.DRAFT_PR
+                GateDecision.SUPPRESS_BRANCH_PR -> SkipReason.BRANCH_FILTER
+                else -> null
+            }
+            if (skipReason != null) {
+                val headSha = promotion.revisions.firstOrNull()?.revision.orEmpty()
+                if (headSha.isNotBlank()) {
+                    try {
+                        draftCheckRunReporter.postSkippedCheckRun(
+                            buildType = buildType,
+                            config = config,
+                            prNumber = prNumber,
+                            headSha = headSha,
+                            reason = skipReason,
+                            headRef = prHeadRef,
+                        )
+                    } catch (e: Exception) {
+                        LOG.warn("Failed posting Skipped (${skipReason.name}) for ${buildType.externalId}: ${e.message}")
+                    }
+                }
+            }
         }
     }
 
     companion object {
         private val LOG = Logger.getInstance(DraftBuildQueueCleaner::class.java.name)
-
-        // Pure helper, testable without TC SDK fixtures.
-        // Returns true exactly when the resolved PR is draft, false
-        // otherwise. Lifted to a function so the same decision logic
-        // can be exercised by unit tests.
-        fun shouldRemove(pr: PrInfo): Boolean = pr.draft
     }
 }

@@ -1,10 +1,9 @@
 package io.github.dlachouette.teamcity.github.enrich
 
 import com.intellij.openapi.diagnostic.Logger
-import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
-import io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
@@ -39,45 +38,26 @@ class PrPromotionTagger(
         val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
         val buildType = promotion.buildType ?: return
 
-        if (!isOptedIn(buildType.parameters)) return
-        val repoSlug = buildType.parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG] ?: return
-        val connectionId = buildType.parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID] ?: return
-        val repo = try {
-            RepoCoords.parse(repoSlug)
-        } catch (e: IllegalArgumentException) {
-            return
-        }
+        // Opt-in = presence of the GitHub Bridge feature on the BT
+        // (independent of ignoreDrafts: ALL-scope, draft-friendly
+        // builds still get the visual draft/ready tag).
+        val config = BridgeFeatureReader.read(buildType) ?: return
 
-        // TokenResolver already logs the cause (rate-limited).
-        val access = tokenResolver.resolveAccessToken(buildType.project, connectionId, repo) ?: return
+        val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
 
-        val pr = prInfoCache.get(repo, prNumber, access.token, access.apiBase)
+        val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase)
         if (pr == null) {
-            LOG.warn("Cannot fetch PR info for $repoSlug#$prNumber; skipping promotion tag")
+            LOG.warn("Cannot fetch PR info for ${config.repo.slug}#$prNumber; skipping promotion tag")
             return
         }
 
         val plan = computePlan(promotion.tags, pr.draft) ?: return
         promotion.setTags(plan.newTags)
-        LOG.info("Tagged promotion for $repoSlug#$prNumber as ${plan.appliedTag} (buildType=${buildType.externalId})")
+        LOG.info("Tagged promotion for ${config.repo.slug}#$prNumber as ${plan.appliedTag} (buildType=${buildType.externalId})")
     }
 
     companion object {
         private val LOG = Logger.getInstance(PrPromotionTagger::class.java.name)
-
-        // Single opt-in for the promotion tagger since v1.2.1: a
-        // buildType participates as soon as it carries both the
-        // repo slug and the connection ID — the same gate as
-        // BuildStatusCheckRunPublisher. The previous version
-        // additionally required `teamcity.github.bridge.ignoreDrafts=true`,
-        // which silently dropped the draft/ready visual signal on
-        // ALL-scope (draft-friendly) builds — exactly the case
-        // operators expect to see tagged.
-        fun isOptedIn(parameters: Map<String, String>): Boolean {
-            val repo = parameters[DraftAwareBuildFilter.PARAM_REPO_SLUG]
-            val conn = parameters[DraftAwareBuildFilter.PARAM_CONNECTION_ID]
-            return !repo.isNullOrBlank() && !conn.isNullOrBlank()
-        }
 
         // Pure helper - testable without TC SDK mocks.
         // Returns null when the existing tags already carry the desired state tag

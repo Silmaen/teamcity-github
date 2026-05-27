@@ -216,8 +216,11 @@ If you see `404 Not Found`:
 | Event | Action | Acknowledged with |
 |---|---|---|
 | `ping` | Nothing; health check. | `200 pong` |
-| `pull_request` with `action: ready_for_review` | Look up matching build configs, enqueue a build for `pull/N` on each. | `200 OK` |
-| `pull_request` (other actions) | Ignored. | `200 OK` |
+| `pull_request` with `action: opened` (and `draft: false`) | Look up matching build configs, enqueue a build for `pull/N` on each (skipping any that already have a running / queued / finished build at the same head SHA). | `200 OK` |
+| `pull_request` with `action: ready_for_review` | Same as above. Draft → ready transition; payload's `draft` is false by GitHub's contract. | `200 OK` |
+| `pull_request` with `action: synchronize` (and `draft: false`) | Same as above. Push to a ready PR. | `200 OK` |
+| `pull_request` with `action: opened` or `synchronize`, `draft: true` | No enqueue — drafts intentionally suppressed. | `200 OK` |
+| `pull_request` (other actions: `closed`, `labeled`, `edited`, ...) | Ignored. | `200 OK` |
 | Any other event | Ignored. | `204 No Content` |
 
 See [usage-scenarios.md](usage-scenarios.md) for end-to-end flows.

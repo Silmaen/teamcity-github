@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -105,7 +105,7 @@ Everything runs in Docker - nothing is installed on the host.
 ```bash
 # Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-1.3.0.zip
+# -> target/teamcity-github-bridge-1.5.0.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
@@ -208,7 +208,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-**Stable**. Current version is **1.3.0**. 110 unit tests pass.
+**Stable**. Current version is **1.5.0**. 152 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery
