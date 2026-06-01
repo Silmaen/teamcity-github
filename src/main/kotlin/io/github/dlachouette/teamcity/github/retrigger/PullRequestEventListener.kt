@@ -190,7 +190,9 @@ class PullRequestEventListener(
         var seenWithFeature = 0
         LOG.info("Iterating ${active.size} BT(s) for the feature scan")
         active.forEach { bt ->
-            val features = bt.getBuildFeaturesOfType(GitHubBridgeBuildFeature.FEATURE_TYPE)
+            // Mirror BridgeFeatureReader: resolve through the template
+            // chain so template-inherited features are counted too.
+            val features = bt.resolvedSettings.getBuildFeaturesOfType(GitHubBridgeBuildFeature.FEATURE_TYPE)
             if (features.isEmpty()) return@forEach
             seenWithFeature++
             val projParams = bt.project.parameters

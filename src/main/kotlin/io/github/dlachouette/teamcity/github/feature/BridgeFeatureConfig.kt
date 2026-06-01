@@ -60,7 +60,17 @@ object BridgeFeatureReader {
     // both proved unreliable on TC 2026.1 for inherited project
     // params — they return own + template-inherited only.)
     fun read(buildType: SBuildType): BridgeFeatureConfig? {
-        val feature = buildType.getBuildFeaturesOfType(GitHubBridgeBuildFeature.FEATURE_TYPE)
+        // Read through `resolvedSettings`, NOT `buildType.getBuildFeaturesOfType`.
+        // The latter returns only features attached DIRECTLY to the BT
+        // ("features added to this settings object"), so a BT that
+        // inherits the GitHub Bridge feature from a BuildType template
+        // without re-attaching it locally was invisible to the plugin —
+        // it never got enqueued and never got a Check Run. `resolvedSettings`
+        // is the effective configuration with templates applied and
+        // disabled features removed ("enabled and resolved" per the SDK),
+        // which is exactly the set of features that govern this BT.
+        val feature = buildType.resolvedSettings
+            .getBuildFeaturesOfType(GitHubBridgeBuildFeature.FEATURE_TYPE)
             .firstOrNull() ?: return null
         return fromInputs(
             projectParams = buildType.project.parameters,

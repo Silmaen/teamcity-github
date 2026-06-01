@@ -40,6 +40,14 @@ described in [README.md](../README.md) and detailed in
   `SecurityContextEx.runAsSystemUnchecked`; smart-skip on
   existing builds at `(pull/N, head SHA)`; case-insensitive
   repo slug compare. See CHANGELOG for the migration matrix.
+- v1.6.0 — correctness fixes. The opt-in feature is now honoured
+  when inherited from a BuildType template (`BridgeFeatureReader`
+  reads `resolvedSettings`, not own-features-only). PR builds that
+  leave the queue without running — chiefly "failed to start" on a
+  failed snapshot dependency — now reach a terminal `Build failed`
+  Check Run instead of staying stuck at "Queued"; duplicate
+  build-chain promotions torn down without a record are ignored so
+  they cannot overwrite the real result.
 
 ## Item 1 - Build feature for one-click opt-in — **SHIPPED in 1.5.0**
 

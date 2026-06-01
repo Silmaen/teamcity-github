@@ -4,6 +4,55 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-06-02
+
+Two operator-reported correctness fixes: opt-in BuildTypes that
+inherit the feature from a template were invisible, and PR builds that
+never produced a result stayed stuck at "Queued" on GitHub.
+
+### Fixed
+
+- **Template-inherited "GitHub Bridge integration" feature is now
+  recognised.** `BridgeFeatureReader` resolved the feature via
+  `buildType.getBuildFeaturesOfType(...)`, which returns only the
+  features attached *directly* to a BuildType. A BuildType that
+  inherits the `github-bridge` feature from a BuildType template
+  (without re-declaring it locally) was therefore never seen by the
+  plugin: it was not enqueued on PR events and never received a Check
+  Run — the symptom being PR-normal BuildTypes that "did not show up at
+  all" when a PR was opened directly as ready. The reader (and the
+  listener's diagnostic scan) now read through
+  `buildType.resolvedSettings` — the *enabled and resolved* feature
+  set, with templates applied and disabled features removed — so
+  template-only opt-ins are honoured exactly like locally-attached
+  ones.
+
+- **PR builds that left the queue without running no longer stay stuck
+  at "Queued".** A build that "failed to start" — most commonly because
+  a snapshot dependency failed — used to keep its "Queued" Check Run
+  forever, because the publisher's `buildRemovedFromQueue` handler
+  returned early on a null user (`buildRemovedFromQueue` fires for every
+  queue exit, including the build *starting*, so a null user does not
+  mean "cancelled"). The handler now drives the Check Run to a terminal
+  state for every relevant case:
+  - the build started running → left to `buildStarted` / `buildFinished`;
+  - it has its own finished record (failed to start) → reported with its
+    real outcome, i.e. **"Build failed"** (red, blocks the merge);
+  - it was optimised into an equivalent build → left to that build;
+  - a user removed it → **"Cancelled before start"**;
+  - a system removal with no record (a duplicate/optimised promotion of
+    a shared dependency in a build-chain fan-out being torn down) →
+    silent, so it cannot overwrite the real build's result.
+
+  `buildFinished` also now falls back to the promotion's revisions when
+  a failed-to-start build carries none of its own, so its head SHA still
+  resolves. Net effect in a fan-out where every BuildType depends on one
+  build that fails: that build and all of its dependents reach
+  **"Build failed"**, nothing stays stuck, and no lifecycle event
+  overwrites another's result.
+
+[1.6.0]: ../../releases/tag/1.6.0
+
 ## [1.5.0] - 2026-05-27
 
 Operator-feedback release. Three themes:

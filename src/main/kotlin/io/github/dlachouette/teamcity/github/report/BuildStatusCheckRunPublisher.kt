@@ -78,12 +78,23 @@ class BuildStatusCheckRunPublisher(
         }
     }
 
+    // `buildRemovedFromQueue` fires for EVERY exit from the queue —
+    // the SDK documents it as "started, deleted, optimized, etc.", so
+    // a null user does NOT mean "cancelled", and a non-null associated
+    // build does NOT always mean the build is running (a build that
+    // "failed to start" on a failed snapshot dependency also leaves a
+    // finished record). `publishQueueRemoved` sorts the cases out so the
+    // "Queued" row always reaches a terminal state.
+    //
+    // The previous `if (user == null) return` guard was meant to skip
+    // the build-started case, but it also swallowed system removals
+    // such as a failed snapshot dependency — leaving their "Queued"
+    // Check Run stuck forever on GitHub.
     override fun buildRemovedFromQueue(queuedBuild: SQueuedBuild, user: User?, comment: String) {
-        if (user == null) return
         try {
-            publishQueueCancelled(queuedBuild, comment)
+            publishQueueRemoved(queuedBuild, user, comment)
         } catch (e: Exception) {
-            LOG.warn("Failed publishing cancelled Check Run for queue removal of ${queuedBuild.buildType.externalId}: ${e.message}", e)
+            LOG.warn("Failed publishing Check Run for queue removal of ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
     }
 
@@ -143,7 +154,12 @@ class BuildStatusCheckRunPublisher(
     }
 
     private fun publishCompleted(build: SRunningBuild) {
-        val ctx = resolveContext(build.buildType, build.revisions) ?: return
+        // A build that "failed to start" (e.g. a failed snapshot
+        // dependency) may carry no revisions of its own; fall back to the
+        // promotion's revisions (resolved at enqueue) so we still resolve
+        // the head SHA and report it instead of leaving the row stuck.
+        val revisions = build.revisions.ifEmpty { build.buildPromotion.revisions }
+        val ctx = resolveContext(build.buildType, revisions) ?: return
         val mapping = mapBuildOutcome(build.buildStatus, build.isInterrupted)
         val summary = build.statusDescriptor.text.orEmpty()
             .takeIf { it.isNotBlank() }
@@ -161,21 +177,79 @@ class BuildStatusCheckRunPublisher(
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
     }
 
-    private fun publishQueueCancelled(queuedBuild: SQueuedBuild, comment: String) {
+    private fun publishQueueRemoved(queuedBuild: SQueuedBuild, user: User?, comment: String) {
         val promotion = queuedBuild.buildPromotion
+        val associated = promotion.associatedBuild
+
+        // The build left the queue to actually RUN: a running SBuild
+        // exists and buildStarted / buildFinished own the Check Run row.
+        if (associated != null && !associated.isFinished) return
+
         val ctx = resolveContext(promotion.buildType, promotion.revisions) ?: return
-        val summary = comment.takeIf { it.isNotBlank() }
-            ?: "Build was removed from the queue before it started."
-        val request = CheckRunRequest(
-            name = "TeamCity / ${ctx.buildType.fullName}",
-            headSha = ctx.headSha,
-            status = CheckRunStatus.COMPLETED,
-            conclusion = CheckRunConclusion.CANCELLED,
-            outputTitle = "Cancelled before start",
-            outputSummary = truncateSummary(summary),
-            detailsUrl = safeUrl { webLinks.getConfigurationHomePageUrl(ctx.buildType) },
-        )
-        post(ctx, request, "cancelled (queue removed)")
+
+        if (associated != null) {
+            // A FINISHED build is attached to this promotion.
+            if (associated.buildPromotion.id != promotion.id) {
+                // Queue optimization: this promotion was satisfied by an
+                // EQUIVALENT build (different promotion) that owns its own
+                // Check Run row. Nothing to post.
+                return
+            }
+            // This promotion's OWN build is finished although it never ran
+            // to completion normally (it left the queue): it "failed to
+            // start", typically because a snapshot dependency failed.
+            // Report its real outcome — the same conclusion buildFinished
+            // reports — so the row reaches a terminal state (a failed
+            // dependency => "Build failed", red, blocks the merge).
+            // `isInterrupted` is SRunningBuild-only; on a finished SBuild
+            // a non-null canceledInfo is the equivalent signal.
+            val mapping = mapBuildOutcome(associated.buildStatus, associated.canceledInfo != null)
+            val summary = associated.statusDescriptor.text.orEmpty().takeIf { it.isNotBlank() }
+                ?: comment.takeIf { it.isNotBlank() }
+                ?: "Build did not run to completion (a snapshot dependency likely failed)."
+            val request = CheckRunRequest(
+                name = "TeamCity / ${ctx.buildType.fullName}",
+                headSha = ctx.headSha,
+                status = CheckRunStatus.COMPLETED,
+                conclusion = mapping.conclusion,
+                outputTitle = mapping.title,
+                outputSummary = truncateSummary(summary),
+                detailsUrl = safeUrl { webLinks.getViewResultsUrl(associated) },
+            )
+            post(ctx, request, "queue-removed/finished (${mapping.conclusion.apiValue})")
+            return
+        }
+
+        // No associated build at all. A user removing a queued build is a
+        // genuine cancellation — report it so the row does not stay stuck.
+        if (user != null) {
+            val summary = comment.takeIf { it.isNotBlank() }
+                ?: "Build was cancelled before it started."
+            val request = CheckRunRequest(
+                name = "TeamCity / ${ctx.buildType.fullName}",
+                headSha = ctx.headSha,
+                status = CheckRunStatus.COMPLETED,
+                conclusion = CheckRunConclusion.CANCELLED,
+                outputTitle = "Cancelled before start",
+                outputSummary = truncateSummary(summary),
+                detailsUrl = safeUrl { webLinks.getConfigurationHomePageUrl(ctx.buildType) },
+            )
+            post(ctx, request, "queue-removed/cancelled")
+            return
+        }
+
+        // System removal with no associated build. In a dependency fan-out
+        // the plugin (and TeamCity's chain optimization) create duplicate
+        // queued promotions of the shared dependency; tearing those down
+        // fires this event with no record — and the REAL build already
+        // reported via buildFinished or its own finished record above.
+        // Posting a generic status here would clobber that real result
+        // under the same Check Run name (this is what flipped a
+        // genuinely-failed build to "Build could not start"). The same is
+        // true for gate-suppressed builds our queue cleaner removed (it
+        // owns their Skipped row). So stay silent: a build that genuinely
+        // failed to start keeps its own finished record, handled above.
+        LOG.debug("Ignoring system queue removal with no associated build for ${ctx.buildType.externalId} (${promotion.branch?.name})")
     }
 
     private fun safeUrl(block: () -> String?): String? {

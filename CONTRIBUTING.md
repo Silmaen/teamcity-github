@@ -9,7 +9,7 @@ The whole toolchain runs in Docker; nothing is installed on the
 host other than `docker` and `git`.
 
 ```bash
-./dev test       # JUnit 5 suite (152 tests at v1.5.0)
+./dev test       # JUnit 5 suite (152 tests at v1.6.0)
 ./dev compile    # mvn compile, no tests
 ./dev package    # mvn clean package -> target/teamcity-github-bridge-x.y.z.zip
 ./dev shell      # interactive bash in the maven container

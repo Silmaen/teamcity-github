@@ -326,6 +326,69 @@ class MyTest {
 
 See `src/test/kotlin/.../testsupport/LoggerBootstrap.kt`.
 
+## Symptom: a PR BuildType never shows up and gets no Check Run
+
+### What you see
+
+On a PR, some BuildTypes participate (queued / built / "Skipped")
+but others — typically the ones that should run only on ready PRs —
+produce no Check Run at all and are never enqueued, even though they
+carry the "GitHub Bridge integration" feature.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The feature is **inherited from a BuildType template** and you are on a plugin older than 1.6.0 | Before 1.6.0 the plugin only read features attached *directly* to a BuildType, so a template-only opt-in was invisible. **Upgrade to 1.6.0+** (it reads `resolvedSettings`, which applies templates), or, as a workaround on older versions, re-declare the feature on each BuildType. |
+| The feature is disabled on the BuildType (overriding the template) | `Build Features` tab shows it greyed out. Re-enable it. |
+| The surrounding project does not provide `teamcity.github.bridge.repo` / `connectionId` | Set them on the project; the slug must match `repository.full_name`. |
+
+### Verify
+
+```bash
+grep PullRequestEventListener <TC_DATA_DIR>/logs/teamcity-server.log | tail -20
+```
+
+On 1.6.0+ the listener counts template-inherited features. If a
+BuildType is still missing, the diagnostic scan (logged when no
+candidate is found) reports whether each BuildType carries the
+feature and whether its repo matches the event.
+
+## Symptom: a PR Check Run is stuck at "Queued" forever
+
+### What you see
+
+A build never starts — most often because a **snapshot dependency
+failed** (TeamCity shows it as "failed to start") — and its GitHub
+Check Run stays "Queued" indefinitely instead of turning red.
+
+### Cause
+
+`buildRemovedFromQueue` fires for *every* exit from the queue
+(including the build starting), so before 1.6.0 the publisher
+returned early on a null user and never drove these rows to a
+terminal state.
+
+### Fix
+
+**Upgrade to 1.6.0+.** The publisher now reports a build's own
+finished record (failed to start) as **"Build failed"** (red), so a
+failed dependency reaches a terminal state and can block the merge.
+In a fan-out where every BuildType depends on one build that fails,
+that build and all of its dependents end up "Build failed"; duplicate
+chain promotions that are torn down without a record are ignored so
+they cannot overwrite the real result.
+
+### Verify
+
+```bash
+grep BuildStatusCheckRunPublisher <TC_DATA_DIR>/logs/teamcity-server.log | tail -20
+```
+
+You should see a `Published queue-removed/finished (failure) Check
+Run ...` (or `completed (failure)`) line for the affected build
+instead of only a `queued` one.
+
 ## Symptom: build container fails on first run
 
 ### What you see
