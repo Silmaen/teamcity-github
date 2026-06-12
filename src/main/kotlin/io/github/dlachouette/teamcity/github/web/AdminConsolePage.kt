@@ -1,8 +1,12 @@
 package io.github.dlachouette.teamcity.github.web
 
+import io.github.dlachouette.teamcity.github.api.AppManager
+import io.github.dlachouette.teamcity.github.api.AppVerification
+import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.config.LogPathResolver
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
 import io.github.dlachouette.teamcity.github.selftest.TestResult
+import java.util.UUID
 import jetbrains.buildServer.controllers.admin.AdminPage
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.web.CSRFFilter
@@ -20,6 +24,8 @@ class AdminConsolePage(
     private val webhookConfig: WebhookConfig,
     private val logPathResolver: LogPathResolver,
     private val recentEventsLog: RecentEventsLog,
+    private val serverSettings: BridgeServerSettings,
+    private val appManager: AppManager,
 ) : AdminPage(
     pagePlaces,
     PAGE_ID,
@@ -34,14 +40,12 @@ class AdminConsolePage(
     override fun getGroup(): String = SERVER_RELATED_GROUP
 
     override fun fillModel(model: MutableMap<String, Any>, request: HttpServletRequest) {
-        val scheme = resolvedScheme(request)
-        val webhookUrl = absoluteWebhookUrl(request, scheme)
-
+        val webhookUrl = RequestUrlBuilder.absoluteUrl(request, PluginWebhookController.WEBHOOK_PATH)
         model["pluginVersion"] = pluginDescriptor.pluginVersion ?: "unknown"
         model["tcVersion"] = buildServer.fullServerVersion
         model["webhookUrl"] = webhookUrl
-        model["infoUrl"] = absoluteUrl(request, scheme, WebhookInfoController.INFO_PATH)
-        model["infoMarkdownUrl"] = absoluteUrl(request, scheme, WebhookInfoController.INFO_PATH_MARKDOWN)
+        model["infoUrl"] = RequestUrlBuilder.absoluteUrl(request, WebhookInfoController.INFO_PATH)
+        model["infoMarkdownUrl"] = RequestUrlBuilder.absoluteUrl(request, WebhookInfoController.INFO_PATH_MARKDOWN)
         model["secretConfigured"] = webhookConfig.isSecretConfigured()
         model["secretSource"] = webhookConfig.source().name
         model["logFile"] = logPathResolver.expectedFile().absolutePath
@@ -51,7 +55,60 @@ class AdminConsolePage(
         model["recommendedEvents"] = WebhookEvents.RECOMMENDED
         model["snippetResourceName"] = "teamcity-github-bridge-log4j-snippet.xml"
         model["saveSecretUrl"] = request.contextPath.trimEnd('/') + AdminSettingsController.PATH
+        model["saveSettingsUrl"] = request.contextPath.trimEnd('/') + AdminSettingsController.PATH
         model["runTestsUrl"] = request.contextPath.trimEnd('/') + AdminTestController.PATH
+
+        // Current server-tuning / feature-flag values for the settings form.
+        model["set_apiBase"] = serverSettings.apiBaseOverride().orEmpty()
+        model["set_apiVersion"] = serverSettings.apiVersion()
+        model["set_ttlSeconds"] = serverSettings.prInfoCacheTtlSeconds()
+        model["set_staleGraceSeconds"] = serverSettings.prInfoStaleGraceSeconds()
+        model["set_httpMaxAttempts"] = serverSettings.httpMaxAttempts()
+        model["set_httpBaseDelayMs"] = serverSettings.httpBaseDelayMs()
+        model["set_replayEnabled"] = serverSettings.replayProtectionEnabled()
+        model["set_dryRun"] = serverSettings.dryRun()
+        model["set_metricsEnabled"] = serverSettings.metricsEnabled()
+        model["set_legacyAliases"] = serverSettings.legacyAliasesEnabled()
+        model["set_prComment"] = serverSettings.prCommentEnabled()
+        model["set_commentAssociations"] = serverSettings.commentTriggerAllowedAssociations().joinToString(",")
+        model["apiTokenConfigured"] = serverSettings.isApiEnabled()
+
+        // Managed GitHub App card.
+        model["managedConnectionId"] = BridgeServerSettings.MANAGED_CONNECTION_ID
+        model["managedAppConfigured"] = serverSettings.hasManagedApp()
+        val slug = serverSettings.managedAppSlug().orEmpty()
+        model["managedAppSlug"] = slug
+        if (slug.isNotBlank()) {
+            model["appSettingsUrl"] = "https://github.com/settings/apps/$slug"
+            model["appInstallUrl"] = "https://github.com/apps/$slug/installations/new"
+        }
+        // App-manifest creation form: a fresh state (seeded into the session
+        // for the callback to validate) and the manifest JSON.
+        val callbackUrl = RequestUrlBuilder.absoluteUrl(request, AppManifestController.PATH)
+        val state = UUID.randomUUID().toString()
+        request.getSession(true).setAttribute(AppManifestController.STATE_SESSION_ATTR, state)
+        model["appState"] = state
+        model["appCallbackUrl"] = callbackUrl
+        model["appManifestJson"] = appManager.buildManifest(
+            name = "TeamCity GitHub Bridge (${request.serverName})",
+            webhookUrl = webhookUrl,
+            redirectUrl = callbackUrl,
+        )
+
+        // Verification result stashed by AdminSettingsController (PRG).
+        val verifySession = request.getSession(false)
+        (verifySession?.getAttribute(AdminSettingsController.VERIFY_SESSION_ATTR) as? AppVerification)?.let { v ->
+            model["appVerification"] = mapOf(
+                "ok" to v.ok,
+                "reachable" to v.reachable,
+                "slug" to (v.slug ?: ""),
+                "missingPermissions" to v.missingPermissions,
+                "missingEvents" to v.missingEvents,
+                "detail" to v.detail,
+            )
+            verifySession.removeAttribute(AdminSettingsController.VERIFY_SESSION_ATTR)
+        }
+        model["set_repoAllowlist"] = serverSettings.repoAllowlist().joinToString("\n")
         model["csrfToken"] = CSRFFilter.setSessionAttribute(request.getSession(true))
         model["csrfTokenName"] = CSRFFilter.ATTRIBUTE
         resultBannerFor(request.getParameter("bridgeResult"))?.let { model["resultBanner"] = it }
@@ -80,34 +137,12 @@ class AdminConsolePage(
         "cleared" -> mapOf("level" to "ok", "text" to "Webhook secret cleared. Until a new secret is set, every webhook delivery will be rejected with 401.")
         "blank" -> mapOf("level" to "warn", "text" to "Submitted secret was blank; nothing changed.")
         "tested" -> mapOf("level" to "ok", "text" to "Self-tests finished; results below.")
+        "settingsSaved" -> mapOf("level" to "ok", "text" to "Server settings saved and applied (no restart needed).")
+        "appCreated" -> mapOf("level" to "ok", "text" to "GitHub App created and its credentials stored. Install it on your org/repos, then set connectionId=managed on your build configurations.")
+        "appVerified" -> mapOf("level" to "ok", "text" to "GitHub App verification finished; see the GitHub App card below.")
+        "appError" -> mapOf("level" to "bad", "text" to "GitHub App operation failed. Check the dedicated log for details.")
         "error" -> mapOf("level" to "bad", "text" to "Could not complete the operation. Check the dedicated log for details.")
         else -> null
-    }
-
-    private fun resolvedScheme(request: HttpServletRequest): String {
-        val forwarded = request.getHeader("X-Forwarded-Proto")?.substringBefore(',')?.trim()
-        return forwarded?.lowercase()?.takeIf { it.isNotBlank() } ?: request.scheme
-    }
-
-    private fun absoluteWebhookUrl(request: HttpServletRequest, scheme: String): String =
-        absoluteUrl(request, scheme, PluginWebhookController.WEBHOOK_PATH)
-
-    private fun absoluteUrl(request: HttpServletRequest, scheme: String, path: String): String {
-        val ctx = request.contextPath.trimEnd('/')
-        val hostHeader = request.getHeader("X-Forwarded-Host")?.substringBefore(',')?.trim()
-        val authority = if (!hostHeader.isNullOrBlank()) {
-            hostHeader
-        } else {
-            val name = request.serverName
-            val port = request.getHeader("X-Forwarded-Port")?.toIntOrNull() ?: request.serverPort
-            val portPart = when {
-                scheme == "http" && port == 80 -> ""
-                scheme == "https" && port == 443 -> ""
-                else -> ":$port"
-            }
-            "$name$portPart"
-        }
-        return "$scheme://$authority$ctx$path"
     }
 
     private fun RecentEvent.toView(): Map<String, String> = mapOf(

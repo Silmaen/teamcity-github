@@ -90,6 +90,27 @@ class PrInfoCacheTest {
     }
 
     @Test
+    fun `stops serving stale once past the grace window`() {
+        val client = StubClient(sample)
+        var now = 1000L
+        val cache = PrInfoCache(client).apply {
+            clock = { now }
+            ttlMs = 100L
+            staleGraceMs = 500L
+        }
+        cache.get(repo, 7, "tok") // populate at t=1000
+        client.response = null
+
+        // Within ttl+grace (1000 + 100 + 500 = 1600): stale still served.
+        now = 1500L
+        assertNotNull(cache.get(repo, 7, "tok"))
+
+        // Past ttl+grace: stale dropped, returns null.
+        now = 5000L
+        assertNull(cache.get(repo, 7, "tok"))
+    }
+
+    @Test
     fun `returns null when no fetch ever succeeded`() {
         val client = StubClient(null)
         val cache = PrInfoCache(client)

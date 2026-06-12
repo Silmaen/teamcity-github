@@ -11,11 +11,13 @@
     <bean class="io.github.dlachouette.teamcity.github.config.PluginLogConfigurator"/>
     <bean class="io.github.dlachouette.teamcity.github.config.WebhookConfig"/>
     <bean class="io.github.dlachouette.teamcity.github.config.LogPathResolver"/>
+    <bean class="io.github.dlachouette.teamcity.github.config.BridgeServerSettings"/>
 
     <bean class="io.github.dlachouette.teamcity.github.api.GitHubClient"/>
     <bean class="io.github.dlachouette.teamcity.github.api.AppTokenCache"/>
     <bean class="io.github.dlachouette.teamcity.github.api.AppTokenMinter"/>
     <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
+    <bean class="io.github.dlachouette.teamcity.github.api.AppManager"/>
     <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
 
     <bean class="io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature"/>
@@ -25,16 +27,25 @@
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrPromotionTagger"/>
     <bean class="io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter"/>
+    <bean class="io.github.dlachouette.teamcity.github.report.PrSummaryCommenter"/>
     <bean class="io.github.dlachouette.teamcity.github.report.BuildStatusCheckRunPublisher"/>
     <bean class="io.github.dlachouette.teamcity.github.queue.DraftBuildQueueCleaner"/>
 
     <bean class="io.github.dlachouette.teamcity.github.web.RecentEventsLog"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.DeliveryReplayGuard"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.BridgeMetrics"/>
 
     <bean class="io.github.dlachouette.teamcity.github.web.PluginWebhookController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.WebhookInfoController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.HealthController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.MetricsController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.ApiController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminConsolePage"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminSettingsController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminTestController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.BridgeProjectSettingsTab"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.BridgeProjectSettingsController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.AppManifestController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BranchEnrichmentPageExtension"/>
 
     <bean class="io.github.dlachouette.teamcity.github.selftest.PluginSelfTester"/>

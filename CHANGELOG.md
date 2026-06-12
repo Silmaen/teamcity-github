@@ -4,6 +4,172 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-06-12
+
+First public release of the operator-surface + provisioning work. It
+promotes and consolidates the `1.6.1`–`1.6.4` staging builds (kept below
+as development history). Highlights:
+
+- **One-click managed GitHub App** — create a pre-configured App from the
+  admin page (manifest flow), `Verify` its live config, and use it with
+  `connectionId=managed` (no TeamCity connection or `.pem` handling).
+- **In-product configuration** — a per-project *GitHub Bridge* tab and a
+  guided admin page that edits server settings + feature flags live.
+- **Reliability** — HTTP retry + GitHub rate-limit handling, webhook
+  replay protection, `/health` and `/metrics` endpoints.
+- **More triggers** — run-on-approval, re-run from the GitHub Checks UI,
+  PR-comment commands (collaborators only), monorepo path filtering;
+  cancels still-queued builds on PR close/merge.
+- **Controls & integration** — repo allowlist, dry-run mode, optional
+  sticky PR summary comment, legacy `teamcity.pullRequest.*` aliases, and
+  an authenticated external HTTP API.
+- **Fixes** — bounded stale PR-info serving, strict token-expiry parsing,
+  webhook payload size bound, token-cache-before-network, serialized
+  settings writes.
+
+See the staged entries below for the full per-change detail.
+
+---
+
+## [1.6.4] - 2026-06-12
+
+User-experience and documentation polish. No behavioural changes.
+
+### Changed
+
+- **Admin page is now a guided flow.** A "Getting started" numbered
+  checklist leads the page; the GitHub App card is the primary action;
+  self-tests moved below configuration and are relabelled "run after
+  setting the secret and creating the App".
+- **Project settings page** now documents `connectionId=managed`
+  (placeholder and help text), marks repository + connection as required
+  (client- and server-side validation, with a clear error), and explains
+  that per-build-configuration options live on the build feature.
+- **Build feature form** explains the hard/soft gate distinction up front
+  and points to the project's GitHub Bridge tab for repo/connection.
+- **Documentation overhaul**: added a 5-minute [Quickstart](doc/quickstart.md)
+  and a [doc index](doc/README.md); rewrote `usage-scenarios.md` and
+  `troubleshooting.md` off the long-removed `ignoreDrafts` model onto the
+  current build-feature opt-in; led webhook/installation docs with the
+  managed-App path; reconciled the GitHub App permissions/events into one
+  canonical set; and swept version/test-count drift across the docs.
+
+## [1.6.3] - 2026-06-12
+
+Adds self-service GitHub App provisioning + verification. Still a 1.6.x
+staging patch ahead of 1.7.0.
+
+### Added
+
+- **Create a GitHub App from the admin page** via GitHub's App-manifest
+  flow. The plugin builds a manifest pre-filled with this server's
+  webhook URL and the exact permissions/events it needs; GitHub shows a
+  confirmation screen; on creation the App's id, private key, slug and
+  webhook secret are captured automatically (callback at
+  `/app/teamcity-github-bridge/app-callback`, `state`-validated) and
+  stored in the plugin settings — no TeamCity OAuth connection required.
+- **Plugin-managed App as a token source.** Set a build configuration's
+  `connectionId` to the sentinel `managed` to mint installation tokens
+  from the created App instead of a TeamCity connection.
+- **Verify GitHub App configuration.** A button on the admin page calls
+  `GET /app` with the App JWT and diffs the App's live permissions and
+  subscribed events against what the plugin requires, listing anything
+  missing. Deep-links to the App's settings and installation pages are
+  shown too.
+
+### Changed
+
+- Extracted `AppJwt` (App-JWT signing) shared by the token minter and
+  the new App-management path.
+
+## [1.6.2] - 2026-06-12
+
+Adds two capabilities on top of 1.6.1, plus a full documentation pass.
+Still a 1.6.x staging patch ahead of the 1.7.0 release.
+
+### Added
+
+- **Comment-triggered builds.** A per-BuildType `commentTrigger` phrase;
+  when a PR comment contains it and the commenter is trusted (GitHub
+  `author_association` on the server allowlist — `OWNER,MEMBER,
+  COLLABORATOR` by default), the BuildType is enqueued. Handles the
+  `issue_comment` webhook event.
+- **External authenticated API** under
+  `/app/teamcity-github-bridge/api/` (bearer token set on the admin
+  page, compared constant-time; no token = API disabled): `GET status`,
+  `GET events`, `GET metrics`, and `POST trigger` (`{buildTypeId,
+  branch}`) to enqueue a build.
+
+### Changed
+
+- Documentation refreshed across `README.md` and all `doc/*.md`
+  (API reference, configuration, security, webhook setup, usage
+  scenarios, troubleshooting, architecture, roadmap) for the 1.6.x
+  feature set.
+
+## [1.6.1] - 2026-06-12
+
+Staging patch ahead of the 1.7.0 release: in-product configuration
+pages, HTTP resilience, more webhook events, and operability endpoints,
+plus several correctness fixes surfaced by a code review. Shipped as a
+1.6.x patch first so it can be validated on a real server before being
+promoted to 1.7.0.
+
+### Added
+
+- **Project settings page.** A new *GitHub Bridge* tab under
+  Administration → <project> (Integrations group) edits the six
+  project-level parameters (repo, connection ID, the two trigger-path
+  toggles + branch lists) with a real form instead of hand-edited
+  configuration parameters.
+- **Editable server settings.** The admin page now edits the global
+  tuning (API base override, API version, PR-info cache TTL + stale
+  grace, HTTP retry attempts/delay) and feature flags, applied live
+  without a restart via `BridgeServerSettings.applyTo`.
+- **HTTP retry + rate-limit handling.** Every GitHub call now retries
+  transient failures, 5xx, and rate-limit exhaustion with exponential
+  backoff that honours `Retry-After` (capped at 30 s).
+- **Webhook replay protection.** Redelivered payloads (same
+  `X-GitHub-Delivery`) are acknowledged but not re-processed
+  (`DeliveryReplayGuard`, LRU + 24 h TTL).
+- **`/health` and `/metrics` endpoints.** A JSON liveness snapshot and
+  a Prometheus-format counter set (webhooks, check runs, enqueues).
+- **`pull_request.closed`/merged handling.** Cancels builds still
+  queued for the PR's head.
+- **Monorepo path filtering.** A per-BuildType changed-path filter
+  (`pathFilter`); the listener only enqueues a BT when the PR's changed
+  files match.
+- **Run on PR approval.** A per-BuildType `runOnApproval` flag enqueues
+  the BT on `pull_request_review` (approved) — for suites gated behind
+  review.
+- **Re-run from GitHub.** Handles `check_run` `rerequested` to
+  re-enqueue the matching BuildType from the Checks UI.
+- **Repo allowlist and dry-run mode** (server settings).
+- **Build-failure details** in the Check Run body (`output.text`).
+- **Optional sticky PR summary comment** (off by default; needs the
+  App's pull-requests write permission).
+- **Legacy `teamcity.pullRequest.*` parameter aliases** (opt-in) to
+  ease migration off the bundled `pullRequests` feature.
+
+### Fixed
+
+- `PrInfoCache` no longer serves a stale PR indefinitely after a fetch
+  failure — stale entries are bounded by a grace window then dropped.
+- Installation-token expiry is parsed strictly; a missing `expires_at`
+  no longer fabricates an hour off the wall clock (the minter applies a
+  conservative fallback against its injected clock).
+- The webhook endpoint bounds the request body it reads (25 MB / 413)
+  before verifying the signature.
+- `AppTokenMinter` consults the token cache before signing a JWT and
+  listing installations (owner → installation-id mapping).
+- `PluginSettingsStorage` writes are serialised, fixing a
+  concurrent-write race on the temp file.
+
+### Changed
+
+- Internal refactors: a single HTTP helper in `GitHubClient`, extracted
+  `RsaKeyParser`, shared `RequestUrlBuilder` and Check Run naming.
+
 ## [1.6.0] - 2026-06-02
 
 Two operator-reported correctness fixes: opt-in BuildTypes that

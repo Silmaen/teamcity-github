@@ -81,6 +81,9 @@ class GitHubBridgeBuildFeature(
         BranchSpecMatcher.validate(input[PARAM_PR_TRIGGER_OVERRIDE])?.let {
             invalid += InvalidProperty(PARAM_PR_TRIGGER_OVERRIDE, it)
         }
+        BranchSpecMatcher.validate(input[PARAM_PATH_FILTER])?.let {
+            invalid += InvalidProperty(PARAM_PATH_FILTER, it)
+        }
 
         invalid
     }
@@ -95,5 +98,18 @@ class GitHubBridgeBuildFeature(
         const val PARAM_TRIGGER_ON_PR_DRAFT: String = "triggerOnPrDraft"
         const val PARAM_BRANCH_TRIGGER_OVERRIDE: String = "branchTriggerBranchesOverride"
         const val PARAM_PR_TRIGGER_OVERRIDE: String = "prTriggerBranchesOverride"
+
+        // Optional monorepo path filter (VCS-filter syntax over changed
+        // file paths). When non-empty, the listener only enqueues this BT
+        // for a PR if the PR's changed files match the filter.
+        const val PARAM_PATH_FILTER: String = "pathFilter"
+
+        // When checked, the BT is enqueued on PR approval
+        // (pull_request_review submitted=approved).
+        const val PARAM_RUN_ON_APPROVAL: String = "runOnApproval"
+
+        // Optional trigger phrase: when a PR comment contains it (and the
+        // commenter is trusted), this BT is enqueued. Empty = disabled.
+        const val PARAM_COMMENT_TRIGGER: String = "commentTrigger"
     }
 }

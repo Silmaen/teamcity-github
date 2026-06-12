@@ -1,5 +1,7 @@
 package io.github.dlachouette.teamcity.github.web
 
+import com.fasterxml.jackson.databind.ObjectMapper
+
 data class WebhookInfo(
     val payloadUrl: String,
     val contentType: String,
@@ -10,20 +12,10 @@ data class WebhookInfo(
     val logConfigured: Boolean,
     val pluginVersion: String,
 ) {
-    fun toJson(): String = buildString {
-        append('{')
-        append("\"payloadUrl\":${quote(payloadUrl)},")
-        append("\"contentType\":${quote(contentType)},")
-        append("\"sslVerification\":$sslVerification,")
-        append("\"recommendedEvents\":[")
-        append(recommendedEvents.joinToString(",") { quote(it) })
-        append("],")
-        append("\"secretConfigured\":$secretConfigured,")
-        append("\"logFile\":${quote(logFile)},")
-        append("\"logConfigured\":$logConfigured,")
-        append("\"pluginVersion\":${quote(pluginVersion)}")
-        append('}')
-    }
+    // Jackson handles escaping; the hand-rolled serializer it replaced
+    // was an avoidable correctness liability when Jackson is already a
+    // dependency used everywhere else in the plugin.
+    fun toJson(): String = MAPPER.writeValueAsString(this)
 
     fun toMarkdown(): String = """
         |# GitHub App Webhook Configuration
@@ -50,14 +42,17 @@ data class WebhookInfo(
         |Plugin version: $pluginVersion
         |""".trimMargin()
 
-    private fun quote(s: String): String =
-        '"' + s.replace("\\", "\\\\").replace("\"", "\\\"") + '"'
+    companion object {
+        private val MAPPER = ObjectMapper()
+    }
 }
 
 object WebhookEvents {
     val RECOMMENDED: List<String> = listOf(
         "pull_request",
         "pull_request_review",
+        "issue_comment",
+        "check_run",
         "push",
         "check_suite",
         "ping",

@@ -1,7 +1,15 @@
 # Webhook setup
 
+> **Using the managed App (recommended)?** If you set the App up via
+> `Administration -> GitHub Bridge -> Create GitHub App` (the
+> managed-App flow, see [quickstart.md](quickstart.md)), the webhook
+> **URL and secret are configured automatically** — you can skip this
+> page entirely.
+
 Once a [GitHub App](github-app-setup.md) is wired to TeamCity, the
 remaining piece is making GitHub deliver events back to the plugin.
+This page covers the **manual** path for Apps that were not created
+through the managed flow.
 
 This plugin uses a **single App-level webhook** per GitHub App. No
 per-repo webhooks to maintain.
@@ -42,7 +50,7 @@ sequenceDiagram
     participant TC as TeamCity
     participant GH as GitHub App settings
 
-    Admin->>TC: 1. set teamcity.github.bridge.webhook.secret<br/>in internal.properties
+    Admin->>TC: 1. set HMAC secret via<br/>Administration -> GitHub Bridge
     Admin->>TC: 2. GET /app/teamcity-github-bridge/info
     TC-->>Admin: payloadUrl, recommendedEvents,<br/>contentType, secretConfigured: true
     Admin->>GH: 3. paste payloadUrl + secret<br/>+ tick events
@@ -59,21 +67,34 @@ openssl rand -hex 48
 # 0a4f0c9b5e8e3c1d2a4b...
 ```
 
-Three ways to install it, in order of preference:
-
-**Via the plugin's admin page (recommended since v0.6.0)**
+**Via the plugin's admin page (recommended)**
 
 Open `Administration -> Server Administration -> GitHub Bridge`.
 Under `HMAC secret` paste the random string into the form and
-click **Save**. The plugin writes the value to
-`<TC_DATA_DIR>/config/teamcity-github-bridge.properties` and the
-next webhook delivery uses the new secret immediately.
+click **Save**. The plugin writes the value to its own file,
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties` (key
+`webhook.secret`), and the next webhook delivery uses the new secret
+immediately.
 
 You can also **Clear secret** from the same form, which removes the
 key and re-enables fail-closed mode (every delivery rejected with
 401 until a new secret is set).
 
-**Via the TC internal-properties UI (legacy, still supported)**
+The plugin-owned file is also writable directly if you prefer the
+filesystem:
+
+```properties
+webhook.secret=<paste the string here>
+```
+
+It is hot-reloaded; no restart needed.
+
+**Via `internal.properties` (legacy fallback, still supported)**
+
+The plugin also reads the legacy key from TC's
+`internal.properties`, kept for operators who configured the secret
+manually before the admin page existed. Prefer the admin form above;
+use this only when you cannot reach the admin page.
 
 Go to `Administration -> Server Administration -> Diagnostics ->
 Internal Properties` (direct URL:
@@ -84,26 +105,10 @@ and add:
 teamcity.github.bridge.webhook.secret=<paste the string here>
 ```
 
-If both sources are populated, the plugin's own file takes
+or edit `<TC_DATA_DIR>/config/internal.properties` directly with the
+same key. If both sources are populated, the plugin's own file takes
 precedence (visible in the admin page as "via this page" vs "via
 internal.properties - legacy").
-
-**Via the filesystem**
-
-Either edit `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`
-directly:
-
-```properties
-webhook.secret=<paste the string here>
-```
-
-or `<TC_DATA_DIR>/config/internal.properties`:
-
-```properties
-teamcity.github.bridge.webhook.secret=<paste the string here>
-```
-
-Both are hot-reloaded; no restart needed.
 
 > **Important**: do **not** confuse this secret with the "Webhook
 > secret" field inside the GitHub App connection form (`Project ->
@@ -128,9 +133,11 @@ Example output:
   "payloadUrl": "https://teamcity.example.com/app/teamcity-github-bridge/webhook",
   "contentType": "application/json",
   "sslVerification": true,
-  "recommendedEvents": ["pull_request", "pull_request_review", "push", "check_suite", "ping"],
+  "recommendedEvents": ["pull_request", "pull_request_review", "issue_comment", "check_run", "push", "check_suite", "ping"],
   "secretConfigured": true,
-  "pluginVersion": "TeamCity 2026.1 (build 222521)"
+  "logFile": "<TC_DATA_DIR>/logs/teamcity-github-bridge.log",
+  "logConfigured": true,
+  "pluginVersion": "<version>"
 }
 ```
 
@@ -174,16 +181,39 @@ GitHub App > Webhook
 +------------------------------------------------+
 ```
 
-Then scroll to **Subscribe to events** and tick at least:
+Then scroll to **Subscribe to events** and tick the following. These
+match `recommendedEvents` from `/info`. Most are actively consumed by
+the plugin today; **push** and **check_suite** are recommended for
+coexistence / future use but are **not** consumed by the plugin
+today (subscribing now means no resubscription later):
 
-- [x] **Pull request** - required for draft/ready-for-review detection.
+- [x] **Pull request** - required for draft / ready-for-review
+  detection, synchronize (push to PR), and PR close/merge handling
+  (closing or merging a PR cancels its still-queued builds).
+- [x] **Pull request review** - powers **run-on-approval**: a build
+  can be gated until a reviewer approves, at which point the review
+  event enqueues it.
+- [x] **Issue comment** - powers **comment triggers**: posting the
+  configured phrase on a PR (an `issue_comment`) enqueues builds,
+  restricted to trusted commenters (collaborators by default).
+- [x] **Check run** - powers the **Re-run** button in GitHub's
+  Checks UI: a `check_run` `rerequested` event re-enqueues the build
+  straight from the PR's checks tab.
+- [x] **Push** - branch pushes outside the PR flow. *Recommended for
+  coexistence / future use; not consumed by the plugin today.*
+- [x] **Check suite** - companion to the Check Run lifecycle.
+  *Recommended for coexistence / future use; not consumed by the
+  plugin today.*
+- [x] **Ping** - delivered once on save; used for the health-check
+  round-trip below.
 
-Optional (forward-compatible, the plugin will use them in future
-versions):
-
-- [x] Pull request review
-- [x] Push
-- [x] Check suite
+> **Permission note**: the **sticky PR summary comment** feature
+> (a single maintained comment on the PR summarising build status)
+> requires the GitHub App to have **pull requests / issues** set to
+> **Read & write**. Without write permission the plugin still runs,
+> but it cannot post or update the comment. See
+> [github-app-setup.md](github-app-setup.md) for granting
+> permissions.
 
 Click `Save changes`.
 
@@ -202,7 +232,8 @@ Recent Deliveries
 If you see `200 pong`, the round-trip is complete.
 
 If you see `401 Invalid signature`:
-- The secret on GitHub and the one in `teamcity.github.bridge.webhook.secret` differ.
+- The secret on GitHub and the one configured server-side (admin
+  page, or the legacy `teamcity.github.bridge.webhook.secret`) differ.
 - Or a reverse proxy is rewriting the request body. Check your
   ingress config; the plugin signs over the raw body bytes.
 
@@ -220,8 +251,16 @@ If you see `404 Not Found`:
 | `pull_request` with `action: ready_for_review` | Same as above. Draft → ready transition; payload's `draft` is false by GitHub's contract. | `200 OK` |
 | `pull_request` with `action: synchronize` (and `draft: false`) | Same as above. Push to a ready PR. | `200 OK` |
 | `pull_request` with `action: opened` or `synchronize`, `draft: true` | No enqueue — drafts intentionally suppressed. | `200 OK` |
-| `pull_request` (other actions: `closed`, `labeled`, `edited`, ...) | Ignored. | `200 OK` |
+| `pull_request` with `action: closed` (incl. merged) | Cancel any of the PR's builds still sitting in the queue. | `200 OK` |
+| `pull_request` (other actions: `labeled`, `edited`, ...) | Ignored. | `200 OK` |
+| `pull_request_review` with `action: submitted`, approved | Run-on-approval: enqueue matching builds gated on review approval. | `200 OK` |
+| `issue_comment` with `action: created` on a PR | If the body matches the configured trigger phrase and the commenter is trusted (collaborator by default), enqueue matching builds. | `200 OK` |
+| `check_run` with `action: rerequested` | Re-enqueue the build behind the Check Run (the **Re-run** button in GitHub's Checks UI). | `200 OK` |
 | Any other event | Ignored. | `204 No Content` |
+
+Duplicate deliveries (same `X-GitHub-Delivery` id) are detected and
+dropped when replay protection is enabled, so GitHub re-sends do not
+double-enqueue.
 
 See [usage-scenarios.md](usage-scenarios.md) for end-to-end flows.
 
@@ -231,9 +270,11 @@ Eventually you'll want to rotate. The plugin does not support
 overlapping secrets, so coordinate the rotation:
 
 1. Generate a new secret.
-2. Update `teamcity.github.bridge.webhook.secret` in TeamCity's `internal.properties`.
-   TeamCity hot-reloads the file - the new secret is live within a
-   second.
+2. Paste it into the admin form (`Administration -> Server
+   Administration -> GitHub Bridge -> HMAC secret`) and **Save**. The
+   new secret is live on the next delivery. (Legacy fallback: update
+   `teamcity.github.bridge.webhook.secret` in TeamCity's
+   `internal.properties`, which TeamCity hot-reloads within a second.)
 3. Update the secret on the GitHub App webhook page and save.
 4. There is a small window (sub-second) where one delivery may be
    rejected. GitHub auto-retries failed deliveries, so this is

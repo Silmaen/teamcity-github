@@ -43,18 +43,29 @@ teamcity-github/
     |   |       +-- display/bridgeBranchEnrichment.jsp      # draft/ready pill CSS+JS
     |   +-- kotlin/io/github/dlachouette/teamcity/github/
     |       +-- TeamCityGitHubBridgePlugin.kt
-    |       +-- api/        # HTTP client, token resolver, DTOs (PrInfo, CheckRunRequest, etc.)
+    |       +-- api/        # GitHubClient, TokenResolver, AppTokenMinter, RsaKeyParser, AppTokenCache, DTOs (PrInfo, RepoCoords, CheckRunRequest, etc.)
     |       +-- cache/      # PrInfoCache (TTL-based)
-    |       +-- config/     # WebhookConfig, LogPathResolver
+    |       +-- config/     # WebhookConfig, PluginSettingsStorage, PluginLogConfigurator, LogPathResolver, BridgeServerSettings
     |       +-- enrich/     # PrBuildEnricher (buildStarted), PrPromotionTagger (queue tag)
+    |       +-- feature/    # GitHubBridgeBuildFeature (opt-in Build Feature)
     |       +-- filter/     # DraftAwareBuildFilter (StartBuildPrecondition)
-    |       +-- report/     # DraftCheckRunReporter, BuildStatusCheckRunPublisher
-    |       +-- retrigger/  # PullRequestEventListener (opened/ready_for_review/synchronize)
-    |       +-- web/        # 2 controllers + AdminConsolePage + page extension + signature verifier + payload parser + events log
+    |       +-- parameters/ # PrParameterProvider (publishes teamcity.github.bridge.isdraft)
+    |       +-- queue/      # DraftBuildQueueCleaner (drops queued draft PR builds)
+    |       +-- report/     # DraftCheckRunReporter, BuildStatusCheckRunPublisher, PrSummaryCommenter
+    |       +-- retrigger/  # PullRequestEventListener (opened/ready_for_review/synchronize/closed + review/comment/re-run)
+    |       +-- selftest/   # PluginSelfTester (admin self-test battery)
+    |       +-- web/        # ~12 controllers/pages: PluginWebhookController, WebhookInfoController, HealthController,
+    |                       #   MetricsController, ApiController, AdminConsolePage, AdminSettingsController, AdminTestController,
+    |                       #   BridgeProjectSettingsTab/Controller, BranchEnrichmentPageExtension, plus SignatureVerifier,
+    |                       #   WebhookPayloadParser, DeliveryReplayGuard, RecentEventsLog, BridgeMetrics, RequestUrlBuilder
     +-- test/kotlin/io/github/dlachouette/teamcity/github/
-        +-- api/  cache/  config/  enrich/
-        +-- parameters/  report/  web/  testsupport/             # 13 test classes, 81 tests
+        +-- api/  cache/  config/  enrich/  feature/  filter/
+        +-- parameters/  queue/  report/  retrigger/  selftest/  web/  testsupport/
 ```
+
+For the per-class breakdown and the Spring DI wiring, see
+[architecture.md](architecture.md) - it is the current source of truth
+for the package layout.
 
 ## The Docker-only workflow
 
@@ -111,7 +122,8 @@ Expected entries: `teamcity-plugin.xml` at the root and
 ./dev test
 ```
 
-Surefire 3.x picks up JUnit 5 automatically. 81 tests covering:
+Surefire 3.x picks up JUnit 5 automatically. 180+ unit tests
+covering the pure logic; a representative sample:
 
 | Class | What it tests |
 |---|---|
@@ -253,26 +265,7 @@ A CI workflow that does this on tag push is planned (see roadmap).
 
 ## Roadmap
 
-What's planned, roughly in priority order.
-
-| #  | Item | Status |
-|----|------|--------|
-| 1  | End-to-end validation on a real TeamCity 2026.1 staging instance | not started |
-| 2  | A custom `BuildFeature` to expose the parameters in the UI rather than as raw config params | not started |
-| 3  | Replace the bundled `commitStatusPublisher` for opted-in build types to propagate the `buildStatus text='...'` service message to the GitHub commit status description | **partial** — `BuildStatusCheckRunPublisher` covers opted-in PR builds; main + opt-out PR coverage tracked as #10 |
-| 4  | Use the GitHub Check Runs API instead of Commit Statuses to support `skipped`/`neutral`/`cancelled` conclusions | **done** — `DraftCheckRunReporter` + `BuildStatusCheckRunPublisher` cover the relevant conclusions |
-| 5  | Reject duplicate webhook deliveries (replay protection) via `X-GitHub-Delivery` deduplication | not started |
-| 6  | Wire `pull_request_review` events to surface review state on the TC build | not started |
-| 7  | Branch display customisation (replaces the dead `Nicologies/PrExtras` plugin) | **done** — `BranchEnrichmentPageExtension` + `bridgeBranchEnrichment.jsp` ship a draft/ready pill |
-| 8  | CI workflow building + releasing on tag | not started |
-| 9  | Tag held-in-queue draft builds (was: `PrBuildEnricher` only tags on `buildStarted`) | **done** — `PrPromotionTagger` tags at `buildTypeAddedToQueue` |
-| 10 | Extend `BuildStatusCheckRunPublisher` to also cover main branch and opt-out (`ignoreDrafts=false`) PR builds, so the bundled publisher can be retired by consumers without losing coverage | **done** — `isOptedIn` check in v0.7.0 dropped both the `pull/` and `ignoreDrafts` guards |
-| 11 | Let manual `Run` / `Re-run` and Custom Build param overrides bypass the draft hold in `DraftAwareBuildFilter` (today a user click on an opt-in buildType for a draft PR is silently swallowed) | not started |
-
-Detailed designs for the open items that touch the SDK — including
-code sketches, alternatives, and test plans — live in
-[roadmap.md](roadmap.md). Pick that up first if you're starting work on
-any of them.
+See [roadmap.md](roadmap.md) for the current roadmap.
 
 ## Conventions for contributors
 

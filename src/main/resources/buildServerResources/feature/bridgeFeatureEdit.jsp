@@ -31,14 +31,16 @@
     <th colspan="2" style="background:#f5f5f5; padding:8px 12px;">
         <strong>GitHub Bridge integration</strong>
         <div class="bridge-feature-help" style="font-weight:normal; margin-top:4px;">
-            Opts this BuildType into the plugin's trigger paths, draft
-            suppression, and Check Run lifecycle. Mandatory project-level
-            config lives under
-            <em>Administration &rarr; &lt;project&gt; &rarr; Parameters</em>
-            (<code>teamcity.github.bridge.repo</code>,
-            <code>connectionId</code>,
-            <code>branchTrigger.enabled / branches</code>,
-            <code>prTrigger.enabled / branches</code>).
+            Opts this build configuration into the plugin's trigger paths,
+            draft suppression, and Check Run lifecycle. The repository,
+            connection, and default branch filters are set on the project's
+            <em>GitHub Bridge</em> tab
+            (<em>Administration &rarr; &lt;project&gt; &rarr; GitHub Bridge</em>);
+            the fields below are per-build-configuration options.
+            <br/><br/>
+            <strong>Hard</strong> gates block even a manual &ldquo;Run&rdquo;
+            click; <strong>soft</strong> branch/path filters are bypassed by a
+            manual operator trigger.
         </div>
     </th>
 </tr>
@@ -132,5 +134,60 @@
             <em>"Skipped: branch out of scope"</em> Check Run on GitHub.
         </div>
         <span class="error" id="error_prTriggerBranchesOverride"></span>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="pathFilter">Changed-path filter (monorepo):</label></th>
+    <td>
+        <props:multilineProperty name="pathFilter"
+                                 linkTitle="Edit changed-path filter"
+                                 cols="58" rows="4"
+                                 expanded="${not empty propertiesBean.properties['pathFilter']}"/>
+        <div class="bridge-feature-help">
+            Optional. When set, the listener only enqueues this BuildType for
+            a PR if at least one of the PR's changed files matches. Same
+            syntax as the branch filters (<code>+:src/api/**</code> /
+            <code>-:docs/*</code> per line; <code>*</code> spans
+            <code>/</code>). Empty = run regardless of which paths changed.
+            <br>
+            Enforced only for PR webhook triggers (it needs the PR's file
+            list from GitHub). A non-matching PR gets a
+            <em>"Skipped: paths out of scope"</em> Check Run.
+        </div>
+        <span class="error" id="error_pathFilter"></span>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="runOnApproval">Run on PR approval:</label></th>
+    <td>
+        <props:checkboxProperty name="runOnApproval"/>
+        <label for="runOnApproval" style="font-weight:normal;">
+            Enqueue this BuildType when a reviewer approves the PR
+            (<code>pull_request_review</code>).
+        </label>
+        <div class="bridge-feature-help">
+            For expensive suites you only want to run after review. Independent
+            of the ready/synchronize triggers above. Requires the GitHub App to
+            send <code>pull_request_review</code> events. Defaults to unchecked.
+        </div>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="commentTrigger">PR comment trigger phrase:</label></th>
+    <td>
+        <props:textProperty name="commentTrigger" className="longField"/>
+        <label for="commentTrigger" style="font-weight:normal;">
+            e.g. <code>/rebuild</code>
+        </label>
+        <div class="bridge-feature-help">
+            Optional. When a PR comment contains this phrase (case-insensitive)
+            and the commenter is trusted, this BuildType is enqueued. Requires
+            the GitHub App to send <code>issue_comment</code> events. Trusted
+            authors are controlled server-side (Administration &rarr; GitHub
+            Bridge); collaborators only, by default. Empty = disabled.
+        </div>
     </td>
 </tr>

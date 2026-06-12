@@ -23,6 +23,7 @@ class DraftCheckRunReporter(
     private val tokenResolver: TokenResolver,
     private val gitHubClient: GitHubClient,
     private val webLinks: WebLinks,
+    private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
 ) {
 
     private val published = ConcurrentHashMap.newKeySet<Pair<String, String>>()
@@ -38,19 +39,19 @@ class DraftCheckRunReporter(
         if (config.repo.slug.isBlank()) return false
         if (!config.prTriggerEnabled) return false
         if (headSha.isBlank()) return false
+        if (!serverSettings.isRepoAllowed(config.repo.slug)) return false
+        if (serverSettings.dryRun()) {
+            LOG.info("[dry-run] would post Skipped (${reason.name}) Check Run for ${config.repo.slug}@$headSha")
+            return false
+        }
 
         val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return false
 
-        val detailsUrl = try {
-            webLinks.getConfigurationHomePageUrl(buildType)?.takeIf { it.isNotBlank() }
-        } catch (e: Exception) {
-            LOG.debug("WebLinks URL build failed for ${buildType.externalId}: ${e.message}")
-            null
-        }
+        val detailsUrl = safeUrl { webLinks.getConfigurationHomePageUrl(buildType) }
 
         val (title, summary) = reason.titleAndSummary(prNumber, headRef)
         val request = CheckRunRequest(
-            name = "TeamCity / ${buildType.fullName}",
+            name = checkRunName(buildType),
             headSha = headSha,
             status = CheckRunStatus.COMPLETED,
             conclusion = CheckRunConclusion.SKIPPED,
@@ -87,7 +88,8 @@ class DraftCheckRunReporter(
 // skips from branch-out-of-scope skips at a glance.
 enum class SkipReason {
     DRAFT_PR,
-    BRANCH_FILTER;
+    BRANCH_FILTER,
+    PATH_FILTER;
 
     fun titleAndSummary(prNumber: Int, headRef: String?): Pair<String, String> = when (this) {
         DRAFT_PR -> "Skipped: draft PR" to
@@ -99,5 +101,8 @@ enum class SkipReason {
                 "PR source branch '$branch' does not match this BuildType's branch filter; " +
                     "no build was triggered for this revision."
         }
+        PATH_FILTER -> "Skipped: paths out of scope" to
+            "None of the files changed in PR #$prNumber match this BuildType's path filter; " +
+                "no build was triggered for this revision."
     }
 }

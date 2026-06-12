@@ -114,12 +114,13 @@ flowchart TB
 io.github.dlachouette.teamcity.github
 +-- TeamCityGitHubBridgePlugin   (main lifecycle bean)
 +-- api/
-|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, postCheckRun, listInstallations, createInstallationToken)
+|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, listPrFiles, postCheckRun, listIssueComments, createIssueComment, deleteIssueComment, listInstallations, createInstallationToken)
 |   +-- PrInfo                    (data class)
 |   +-- RepoCoords                (data class + parser)
 |   +-- TokenResolver             (self-mint primary, credentials-manager fallback; returns ResolvedAccess = token + apiBase)
 |   +-- ResolvedAccess            (data class: token + apiBase)
 |   +-- AppTokenMinter            (signs RS256 JWT, lists installations, mints ghs_* token)
+|   +-- RsaKeyParser              (PEM/PKCS#1+#8 private-key parsing, extracted from AppTokenMinter; pure, own tests)
 |   +-- AppTokenCache             (per-installation TTL cache for minted tokens)
 |   +-- InstallationInfo / CreatedToken (data classes for the App-level REST API)
 |   +-- CheckRunRequest / CheckRunStatus / CheckRunConclusion
@@ -130,6 +131,7 @@ io.github.dlachouette.teamcity.github
 |   +-- PluginSettingsStorage     (reads/writes plugin-owned settings file)
 |   +-- PluginLogConfigurator     (attaches RollingFileAppender at startup)
 |   +-- LogPathResolver           (state of the dedicated log file)
+|   +-- BridgeServerSettings      (typed accessor for every server-global setting/flag; resolves plugin-file -> legacy internal property -> default; pushes live values via applyTo)
 +-- enrich/
 |   +-- PrBuildEnricher           (BuildServerAdapter.buildStarted)
 |   +-- PrPromotionTagger         (BuildServerAdapter.buildTypeAddedToQueue)
@@ -138,24 +140,33 @@ io.github.dlachouette.teamcity.github
 +-- parameters/
 |   +-- PrParameterProvider  (publishes teamcity.github.bridge.isdraft)
 +-- report/
-|   +-- DraftCheckRunReporter         (queued draft -> skipped Check Run)
-|   +-- BuildStatusCheckRunPublisher  (queued/started/interrupted/finished/queue-removed -> Check Run lifecycle)
+|   +-- DraftCheckRunReporter         (draft/branch/path skip -> "Skipped" Check Run)
+|   +-- BuildStatusCheckRunPublisher  (queued/started/interrupted/finished/queue-removed -> Check Run lifecycle; drives the sticky PR comment)
+|   +-- PrSummaryCommenter            (single sticky per-PR summary comment, one row per check; JSON state in an HTML-comment marker; delete-then-create since HttpURLConnection cannot PATCH; off by default)
 +-- queue/
 |   +-- DraftBuildQueueCleaner    (removes queued draft PR builds; bypassed for manual user triggers)
 +-- retrigger/
-|   +-- PullRequestEventListener  (opened/ready_for_review/synchronize -> BuildTypeEx.addToQueue)
+|   +-- PullRequestEventListener  (opened/ready_for_review/synchronize/closed + review-approved + comment-command + check_run re-run -> BuildTypeEx.addToQueue; external-API triggerBuild; path filtering; closed-PR queue cancellation)
 +-- selftest/
 |   +-- PluginSelfTester          (7 end-to-end checks driven by the admin button)
 +-- web/
-    +-- PluginWebhookController       (POST /webhook, HMAC, records to RecentEventsLog)
+    +-- PluginWebhookController       (POST /webhook, HMAC, replay guard, records to RecentEventsLog; fans events out to the listener)
     +-- WebhookInfoController         (GET /info, /info.md)
     +-- WebhookInfo                   (config snapshot DTO)
-    +-- WebhookPayloadParser          (Jackson on pull_request payloads)
+    +-- WebhookPayloadParser          (Jackson on pull_request / pull_request_review / issue_comment / check_run payloads)
     +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
+    +-- DeliveryReplayGuard           (bounded LRU + TTL of X-GitHub-Delivery ids; drops replayed deliveries)
     +-- RecentEventsLog               (ring buffer, capacity 100)
+    +-- BridgeMetrics                 (in-process counter registry; Prometheus text + JSON snapshots)
+    +-- RequestUrlBuilder             (single home for X-Forwarded-* absolute-URL reconstruction behind the proxy)
+    +-- HealthController              (GET /health, anonymous; "ok"/"degraded" liveness JSON)
+    +-- MetricsController             (GET /metrics, anonymous; Prometheus text; 404 when metrics disabled)
+    +-- ApiController                 (authenticated external API: GET /api/status|events|metrics, POST /api/trigger; bearer-token auth)
     +-- AdminConsolePage              (AdminPage, JSP at admin/bridgeAdmin.jsp)
     +-- AdminSettingsController       (POST /admin/bridge/saveSecret.html, CSRF-protected)
     +-- AdminTestController           (POST /admin/bridge/runTests.html, CSRF-protected)
+    +-- BridgeProjectSettingsTab      (EditProjectTab in the Integrations group; form for the project-level bridge params)
+    +-- BridgeProjectSettingsController (POST backing the tab; writes own project params, requires EDIT_PROJECT)
     +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/bridgeBranchEnrichment.jsp)
 ```
 
@@ -167,25 +178,86 @@ Declared in
 ```xml
 <beans default-autowire="constructor">
     <bean class="...TeamCityGitHubBridgePlugin"/>
+
+    <bean class="...config.PluginSettingsStorage"/>
+    <bean class="...config.PluginLogConfigurator"/>
     <bean class="...config.WebhookConfig"/>
+    <bean class="...config.LogPathResolver"/>
+    <bean class="...config.BridgeServerSettings"/>
 
     <bean class="...api.GitHubClient"/>
+    <bean class="...api.AppTokenCache"/>
+    <bean class="...api.AppTokenMinter"/>
     <bean class="...api.TokenResolver"/>
     <bean class="...cache.PrInfoCache"/>
 
+    <bean class="...feature.GitHubBridgeBuildFeature"/>
     <bean class="...retrigger.PullRequestEventListener"/>
     <bean class="...filter.DraftAwareBuildFilter"/>
+    <bean class="...parameters.PrParameterProvider"/>
+    <bean class="...enrich.PrBuildEnricher"/>
+    <bean class="...enrich.PrPromotionTagger"/>
+    <bean class="...report.DraftCheckRunReporter"/>
+    <bean class="...report.PrSummaryCommenter"/>
+    <bean class="...report.BuildStatusCheckRunPublisher"/>
+    <bean class="...queue.DraftBuildQueueCleaner"/>
+
+    <bean class="...web.RecentEventsLog"/>
+    <bean class="...web.DeliveryReplayGuard"/>
+    <bean class="...web.BridgeMetrics"/>
 
     <bean class="...web.PluginWebhookController"/>
     <bean class="...web.WebhookInfoController"/>
+    <bean class="...web.HealthController"/>
+    <bean class="...web.MetricsController"/>
+    <bean class="...web.ApiController"/>
+    <bean class="...web.AdminConsolePage"/>
+    <bean class="...web.AdminSettingsController"/>
+    <bean class="...web.AdminTestController"/>
+    <bean class="...web.BridgeProjectSettingsTab"/>
+    <bean class="...web.BridgeProjectSettingsController"/>
+    <bean class="...web.BranchEnrichmentPageExtension"/>
+
+    <bean class="...selftest.PluginSelfTester"/>
 </beans>
 ```
 
 `default-autowire="constructor"` makes Spring resolve every
 constructor parameter against the available beans. TC's own beans
 (`OAuthConnectionsManager`, `ProjectConnectionCredentialsManager`,
-`ProjectManager`, `WebControllerManager`, `SBuildServer`) are
+`ProjectManager`, `WebControllerManager`, `SBuildServer`,
+`AuthorizationInterceptor`, `PagePlaces`, `ServerPaths`) are
 exposed by the TC core context, which our XML inherits from.
+
+## Webhook events handled
+
+`PluginWebhookController` verifies the HMAC signature, drops
+replays via `DeliveryReplayGuard` (keyed on `X-GitHub-Delivery`),
+then dispatches by `X-GitHub-Event` to `PullRequestEventListener`:
+
+| Event | Action(s) | Handler | Effect |
+|---|---|---|---|
+| `pull_request` | `opened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. |
+| `pull_request` | `closed` (incl. merged) | `handle` -> `cancelQueuedForClosedPr` | Remove builds still queued for the PR head. |
+| `pull_request_review` | `submitted` / `state=approved` | `handleReviewApproved` | Enqueue run-on-approval BuildTypes. |
+| `issue_comment` | `created` | `handleCommentCommand` | Enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
+| `check_run` | `rerequested` | `handleRerun` | Re-run the BuildType behind the clicked Check Run (ignoring finished builds). |
+
+## Server settings applied live
+
+`BridgeServerSettings` is the single typed accessor for every
+server-global tuning value and feature flag, resolving each key in
+order: plugin-owned settings file (set from the admin page) ->
+legacy `teamcity.github.bridge.*` internal property -> compiled-in
+default. Per-operation values (API version, HTTP retry budget, PR
+info cache TTL and stale grace) are pushed into the live
+`GitHubClient` and `PrInfoCache` beans by
+`BridgeServerSettings.applyTo(...)`, which is called at startup and
+again every time the admin saves settings - so edits take effect
+without a TeamCity restart. Feature flags it gates include
+`dryRun`, `metrics.enabled`, `webhook.replay.enabled`,
+`prComment.enabled`, the external-API `api.token`, the
+`repo.allowlist`, and `comment.allowedAssociations`.
 
 ## Data flow: inbound (GitHub -> TC)
 
@@ -299,9 +371,10 @@ Where we plug into TC:
 | `OAuthConnectionDescriptor.parameters` (App ID + private key + ownerUrl) | `AppTokenMinter` |
 | `ProjectManager.activeBuildTypes` | `PullRequestEventListener` |
 | `BuildTypeEx.createBuildCustomizer` + `addToQueue` | `PullRequestEventListener` |
-
-No `BuildServerAdapter`, no `BuildFeature`, no custom UI yet. These
-are tracked in [development.md#roadmap](development.md#roadmap).
+| `BuildServerAdapter` (build lifecycle) | `BuildStatusCheckRunPublisher`, `PrBuildEnricher`, `PrPromotionTagger`, `DraftCheckRunReporter` |
+| `BuildFeature` (opt-in per BuildType) | `GitHubBridgeBuildFeature` |
+| `EditProjectTab` + `AdminPage` (custom UI) | `BridgeProjectSettingsTab`, `AdminConsolePage`, `BranchEnrichmentPageExtension` |
+| `AuthorizationInterceptor.addPathNotRequiringAuth` (anonymous endpoints) | `HealthController`, `MetricsController`, `ApiController`, `WebhookInfoController`, `PluginWebhookController` |
 
 ## Packaging
 

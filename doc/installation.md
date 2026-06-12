@@ -14,17 +14,24 @@ GitHub App, continue with [github-app-setup.md](github-app-setup.md).
 ## Where the plugin lives
 
 ```
- +-------------------------------+
- |  TeamCity Data Directory      |
- |  <TC_DATA_DIR>/               |
- |  |- plugins/                  |
- |  |    teamcity-github-bridge- |
- |  |    1.6.0.zip                |  <-- drop the archive here
- |  |- config/                   |
- |  |    internal.properties     |  <-- teamcity.github.bridge.webhook.secret goes here
- |  |    teamcity-server-log4j.xml   <-- optional log tuning
- +-------------------------------+
+ +--------------------------------------+
+ |  TeamCity Data Directory             |
+ |  <TC_DATA_DIR>/                      |
+ |  |- plugins/                         |
+ |  |    teamcity-github-bridge-        |
+ |  |    <version>.zip                   |  <-- drop the archive here
+ |  |- config/                          |
+ |  |    teamcity-github-bridge.properties |  <-- plugin-owned settings/secret (primary)
+ |  |    internal.properties            |  <-- teamcity.github.bridge.webhook.secret (legacy fallback)
+ |  |    teamcity-server-log4j.xml          <-- optional log tuning
+ +--------------------------------------+
 ```
+
+> The plugin owns `config/teamcity-github-bridge.properties` (written
+> by the admin page form) and treats it as the primary home for the
+> webhook secret and other settings. The
+> `teamcity.github.bridge.webhook.secret` key in `internal.properties`
+> is read only as a legacy fallback.
 
 ## Step 1: build the archive
 
@@ -114,7 +121,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 ```
 +----------------------------------------------------+
-| TeamCity GitHub Bridge                  v1.6.0     |
+| TeamCity GitHub Bridge                  v1.6.x     |
 |  by Damien Lachouette                   enabled  ON|
 |  Min API: 222521                                   |
 +----------------------------------------------------+
@@ -136,7 +143,11 @@ separately if desired.
 
 ## Next steps
 
-- **First-time setup**: continue with [GitHub App setup](github-app-setup.md).
+- **Fastest path (recommended)**: open `Administration -> GitHub
+  Bridge` and click **Create GitHub App** — the managed-App flow wires
+  up the App, connection, and webhook (URL + secret) for you. See
+  [quickstart.md](quickstart.md).
+- **First-time setup (manual)**: continue with [GitHub App setup](github-app-setup.md).
 - **Already have a GitHub App connection**: go to [Webhook setup](webhook-setup.md).
 - **Just want to enable on more build types**: jump to
   [Configuration -> Enable on a build configuration](configuration.md#enable-on-a-build-configuration).

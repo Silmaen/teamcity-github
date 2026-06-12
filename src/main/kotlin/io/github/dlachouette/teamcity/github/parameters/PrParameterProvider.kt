@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvider
@@ -20,6 +21,7 @@ import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvid
 class PrParameterProvider(
     private val tokenResolver: TokenResolver,
     private val prInfoCache: PrInfoCache,
+    private val serverSettings: BridgeServerSettings,
 ) : AbstractBuildParametersProvider() {
 
     override fun getParameters(build: SBuild, emulationMode: Boolean): Map<String, String> {
@@ -29,6 +31,7 @@ class PrParameterProvider(
 
             computeParams(
                 branchName = build.branch?.name,
+                legacyAliases = serverSettings.legacyAliasesEnabled(),
                 resolver = { number ->
                     val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
                         ?: return@computeParams null
@@ -43,7 +46,8 @@ class PrParameterProvider(
 
     override fun getParametersAvailableOnAgent(build: SBuild): Collection<String> {
         val buildType = build.buildType ?: return emptyList()
-        return if (BridgeFeatureReader.read(buildType) != null) ALL_KEYS else emptyList()
+        if (BridgeFeatureReader.read(buildType) == null) return emptyList()
+        return if (serverSettings.legacyAliasesEnabled()) ALL_KEYS + LEGACY_ALIAS_KEYS else ALL_KEYS
     }
 
     override fun getPrefix(): String = "teamcity.github.bridge"
@@ -57,6 +61,22 @@ class PrParameterProvider(
         const val PARAM_PR_SOURCE_BRANCH: String = "teamcity.github.bridge.pullRequest.sourceBranch"
         const val PARAM_PR_TARGET_BRANCH: String = "teamcity.github.bridge.pullRequest.targetBranch"
         const val PARAM_PR_HEAD_SHA: String = "teamcity.github.bridge.pullRequest.headSha"
+
+        // Aliases under the bundled `pullRequests` feature's namespace,
+        // emitted only when the operator opts in (legacyAliases.enabled).
+        // Lets teams migrate off the bundled feature without rewriting DSL
+        // that still reads `teamcity.pullRequest.*`.
+        const val ALIAS_PR_NUMBER: String = "teamcity.pullRequest.number"
+        const val ALIAS_PR_TITLE: String = "teamcity.pullRequest.title"
+        const val ALIAS_PR_SOURCE_BRANCH: String = "teamcity.pullRequest.sourceBranch"
+        const val ALIAS_PR_TARGET_BRANCH: String = "teamcity.pullRequest.targetBranch"
+
+        val LEGACY_ALIAS_KEYS: List<String> = listOf(
+            ALIAS_PR_NUMBER,
+            ALIAS_PR_TITLE,
+            ALIAS_PR_SOURCE_BRANCH,
+            ALIAS_PR_TARGET_BRANCH,
+        )
 
         val ALL_KEYS: List<String> = listOf(
             PARAM_IS_PULL_REQUEST,
@@ -90,6 +110,7 @@ class PrParameterProvider(
         //   branch name); the rest defaults to empty for fail-safety.
         fun computeParams(
             branchName: String?,
+            legacyAliases: Boolean = false,
             resolver: (Int) -> PrInfo?,
         ): Map<String, String> {
             if (branchName == null || !branchName.startsWith("pull/")) {
@@ -103,7 +124,7 @@ class PrParameterProvider(
             } catch (_: Throwable) {
                 null
             }
-            return mapOf(
+            val params = mutableMapOf(
                 PARAM_IS_PULL_REQUEST to "true",
                 PARAM_IS_DRAFT to (pr?.draft == true).toString(),
                 PARAM_PR_NUMBER to prNumber.toString(),
@@ -113,6 +134,13 @@ class PrParameterProvider(
                 PARAM_PR_TARGET_BRANCH to (pr?.baseRef ?: ""),
                 PARAM_PR_HEAD_SHA to (pr?.headSha ?: ""),
             )
+            if (legacyAliases) {
+                params[ALIAS_PR_NUMBER] = prNumber.toString()
+                params[ALIAS_PR_TITLE] = pr?.title ?: ""
+                params[ALIAS_PR_SOURCE_BRANCH] = pr?.headRef ?: ""
+                params[ALIAS_PR_TARGET_BRANCH] = pr?.baseRef ?: ""
+            }
+            return params
         }
     }
 }

@@ -19,17 +19,18 @@ class PullRequestEventListenerTest {
     // matchesBranchAndSha).
 
     @Test
-    fun `PrAction fromString maps the three supported actions`() {
+    fun `PrAction fromString maps the supported actions`() {
         assertTrue(PrAction.fromString("opened") == PrAction.OPENED)
         assertTrue(PrAction.fromString("ready_for_review") == PrAction.READY_FOR_REVIEW)
         assertTrue(PrAction.fromString("synchronize") == PrAction.SYNCHRONIZE)
+        assertTrue(PrAction.fromString("closed") == PrAction.CLOSED)
     }
 
     @Test
     fun `PrAction fromString returns null for unrelated actions`() {
-        assertTrue(PrAction.fromString("closed") == null)
         assertTrue(PrAction.fromString("edited") == null)
         assertTrue(PrAction.fromString("labeled") == null)
+        assertTrue(PrAction.fromString("assigned") == null)
         assertTrue(PrAction.fromString("") == null)
     }
 

@@ -40,6 +40,23 @@ described in [README.md](../README.md) and detailed in
   `SecurityContextEx.runAsSystemUnchecked`; smart-skip on
   existing builds at `(pull/N, head SHA)`; case-insensitive
   repo slug compare. See CHANGELOG for the migration matrix.
+- v1.7.0 — operator surface + trust-boundary completion. Shipped
+  the bulk of the items previously listed below:
+  webhook **replay protection** (`DeliveryReplayGuard`, Item 3);
+  legacy `teamcity.pullRequest.*` **aliases** (opt-in
+  `legacyAliases.enabled`, Item 5); **`pull_request_review`
+  run-on-approval** (Item 6); **path filtering**, repo
+  **allowlist** + **dry-run** mode; **retry / rate-limit handling**
+  in `GitHubClient`; **`/health` + metrics** and the recent-events
+  log; reaction to **closed / merged** PRs; **re-run from GitHub**
+  (`check_run.rerequested`); the sticky **PR summary comment**
+  (`prComment.enabled`, needs pull-requests write); **comment-
+  triggered builds** (`issue_comment`, author_association
+  allowlisted); and the **external authenticated API**
+  (`/api/status|events|metrics|trigger`, bearer token). All new
+  trigger paths run as the TC system user. Build-failure reasons are
+  now surfaced in the Check Run `output.text` (partial annotations —
+  see Item 10). See [security.md](security.md) for the trust model.
 - v1.6.0 — correctness fixes. The opt-in feature is now honoured
   when inherited from a BuildType template (`BridgeFeatureReader`
   reads `resolvedSettings`, not own-features-only). PR builds that
@@ -105,33 +122,18 @@ Two options, in priority order:
 Medium to large. Option 1 is no work but unbounded wait; option 2
 needs new server endpoint + client JS + careful retry / debounce.
 
-## Item 3 - Replay protection on inbound webhooks
+## Item 3 - Replay protection on inbound webhooks — **SHIPPED in 1.7.0**
 
-### Problem statement
-
-`SignatureVerifier` validates HMAC-SHA256 over the body, which
-prevents tampering but does not prevent **replay** of a captured
-delivery. An attacker who recorded a webhook payload + signature
-could re-deliver it.
-
-### Proposed design
-
-Track the `X-GitHub-Delivery` header (an opaque UUID GitHub
-assigns to each delivery) in a bounded LRU. On every incoming
-webhook:
-
-1. Check the delivery ID against the seen set.
-2. If new, process and remember.
-3. If already seen, return `200 OK` with a `dropped-replay`
-   marker (do not 4xx; GitHub interprets that as failure and
-   retries).
-
-Capacity around 1000 entries with 24-hour TTL matches GitHub's
-own retry envelope.
-
-### Effort
-
-Small. ~50 lines plus a unit test.
+Shipped as `DeliveryReplayGuard`. The `X-GitHub-Delivery` UUID is
+tracked in a bounded LRU (`DEFAULT_MAX_ENTRIES` = 2000) with a
+24-hour TTL. The check runs **after** signature verification: a
+delivery id already seen within the TTL is acknowledged `200 OK`
+("duplicate delivery ignored"), recorded as `SKIPPED`, counted under
+`webhooks.replayed`, and **not** re-processed; a 4xx is deliberately
+avoided so GitHub does not treat it as a failed delivery and retry.
+Enabled by default (`webhook.replay.enabled`), toggleable from the
+admin page. See [security.md](security.md) *Inbound: replay
+protection*.
 
 ## Item 4 - Disable the bundled `commitStatusPublisher` automatically
 
@@ -166,50 +168,24 @@ setting today. The implementation will likely depend on
 Medium to large. Risk-heavy because the integration with the
 bundled publisher is intentionally not exposed.
 
-## Item 5 - Mirror legacy `teamcity.pullRequest.*` variable names
+## Item 5 - Mirror legacy `teamcity.pullRequest.*` variable names — **SHIPPED in 1.7.0**
 
-### Problem statement
+Shipped in `PrParameterProvider`. When the opt-in flag
+`legacyAliases.enabled` (set from the admin page) is on, the
+provider also publishes the bundled feature's `teamcity.pullRequest.*`
+names (`number`, `title`, `sourceBranch`, `targetBranch`) as aliases
+of the same values. Off by default to avoid colliding with the
+bundled feature when both are active — enabling it is the operator's
+signal that the bundled feature has been disabled.
 
-Consumers who used the bundled `pullRequests` build feature have
-DSL references to `teamcity.pullRequest.title`, `.author`, etc.
-Disabling that feature in favour of this plugin requires renaming
-every DSL reference to `teamcity.github.bridge.pullRequest.*`.
+## Item 6 - `pull_request_review` event handling — **SHIPPED in 1.7.0**
 
-### Proposed design
-
-Add an opt-in property
-`teamcity.github.bridge.publishLegacyAliases=true` (default
-`false`) that also publishes the bundled feature's variable names
-as aliases of the same values. Disabled by default to avoid
-collision with the bundled feature when both are active; the
-property is the operator's signed consent that the bundled
-feature has been disabled.
-
-### Effort
-
-Small. ~20 lines in `PrParameterProvider` + a test + a doc note.
-
-## Item 6 - `pull_request_review` event handling
-
-### Problem statement
-
-The plugin currently reacts only to `pull_request` (action
-`ready_for_review`). Reviews (`approved`, `changes_requested`)
-could drive useful behaviour, e.g. retrigger expensive end-to-end
-suites only after approval, or surface review state as a build
-tag.
-
-### Proposed design
-
-Extend `WebhookPayloadParser` and `PluginWebhookController` to
-recognise `pull_request_review`. Add a new
-`ApprovedReviewListener` that conditionally enqueues build types
-tagged with a new opt-in parameter
-`teamcity.github.bridge.runOnApproval=true`.
-
-### Effort
-
-Medium. ~150 lines plus webhook event payload tests.
+Shipped. `PluginWebhookController` now recognises
+`pull_request_review`; `WebhookPayloadParser.parseReviewApproved`
+extracts the approval, and `PullRequestEventListener.handleReviewApproved`
+(running as the system user) enqueues the matching opted-in build
+types on approval, honouring the repo allowlist and skipping draft
+PRs. Run-on-approval is the shipped form of the original idea.
 
 ## Item 7 - Release pipeline
 
@@ -240,7 +216,7 @@ Small. One workflow file.
 
 ### Problem statement
 
-The 84 unit tests cover pure logic. Integration with TC SDK
+The 180+ unit tests cover pure logic. Integration with TC SDK
 classes (`BuildServerAdapter`, `OAuthTokensStorage`,
 `BuildPromotion`, etc.) is exercised only when the plugin is
 installed on a real TC server.
@@ -309,6 +285,28 @@ BouncyCastle: a tiny in-process ASN.1 wrapper converts PKCS#1 to
 PKCS#8 so Java's stock `KeyFactory` can load it. Literal `\n`
 escape sequences (when the key is pasted into a single-line field)
 are normalised to real newlines before parsing.
+
+## Item 10 - Check Run annotations / richer failure detail — **PARTIAL**
+
+### What shipped (1.7.0)
+
+`BuildStatusCheckRunPublisher` now populates the Check Run
+`output.text` (the GitHub-rendered Markdown detail body, max 65535
+chars) with the build's **failure reasons** via `failureDetails(build)`,
+so a failed PR build surfaces *why* it failed in the PR's Checks tab
+rather than only a red status.
+
+### Still future work
+
+Line-level **annotations** (the GitHub `output.annotations` array
+that pins messages to specific files/lines, e.g. from compiler or
+linter output) are not yet emitted. Mapping TeamCity build problems
+and test failures to file/line annotations is the remaining work.
+
+### Effort
+
+Medium. Parsing build problems into annotation coordinates is the
+bulk of it.
 
 ## Open SDK questions worth revisiting
 

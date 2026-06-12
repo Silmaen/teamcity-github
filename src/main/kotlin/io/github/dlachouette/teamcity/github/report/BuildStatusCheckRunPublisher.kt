@@ -40,6 +40,9 @@ class BuildStatusCheckRunPublisher(
     private val gitHubClient: GitHubClient,
     private val webLinks: WebLinks,
     private val prInfoCache: PrInfoCache,
+    private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
+    private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
+    private val prSummaryCommenter: PrSummaryCommenter,
 ) : BuildServerAdapter() {
 
     init {
@@ -106,7 +109,7 @@ class BuildStatusCheckRunPublisher(
             return
         }
         val request = CheckRunRequest(
-            name = "TeamCity / ${ctx.buildType.fullName}",
+            name = checkRunName(ctx.buildType),
             headSha = ctx.headSha,
             status = CheckRunStatus.QUEUED,
             conclusion = null,
@@ -142,7 +145,7 @@ class BuildStatusCheckRunPublisher(
     private fun publishInProgress(build: SBuild) {
         val ctx = resolveContext(build.buildType, build.revisions) ?: return
         val request = CheckRunRequest(
-            name = "TeamCity / ${ctx.buildType.fullName}",
+            name = checkRunName(ctx.buildType),
             headSha = ctx.headSha,
             status = CheckRunStatus.IN_PROGRESS,
             conclusion = null,
@@ -166,15 +169,41 @@ class BuildStatusCheckRunPublisher(
             ?: "TeamCity build finished with status ${build.buildStatus}"
 
         val request = CheckRunRequest(
-            name = "TeamCity / ${ctx.buildType.fullName}",
+            name = checkRunName(ctx.buildType),
             headSha = ctx.headSha,
             status = CheckRunStatus.COMPLETED,
             conclusion = mapping.conclusion,
             outputTitle = mapping.title,
             outputSummary = truncateSummary(summary),
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
+            outputText = failureDetails(build),
         )
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
+        maybeUpdatePrComment(build, ctx, mapping)
+    }
+
+    // Optional sticky PR summary comment (off by default). Only for PR
+    // builds; skipped in dry-run. Reuses the build's installation token,
+    // which must carry the App's pull-requests write permission.
+    private fun maybeUpdatePrComment(build: SBuild, ctx: PrBuildContext, mapping: BuildOutcomeMapping) {
+        if (!serverSettings.prCommentEnabled() || serverSettings.dryRun()) return
+        val branch = build.branch?.name ?: return
+        if (!branch.startsWith("pull/")) return
+        val prNumber = branch.removePrefix("pull/").toIntOrNull() ?: return
+        val emoji = when (mapping.conclusion) {
+            CheckRunConclusion.SUCCESS -> "✅"
+            CheckRunConclusion.FAILURE, CheckRunConclusion.TIMED_OUT -> "❌"
+            CheckRunConclusion.CANCELLED -> "⚪"
+            else -> "⚠️"
+        }
+        prSummaryCommenter.upsert(
+            accessToken = ctx.accessToken,
+            repo = ctx.repo,
+            prNumber = prNumber,
+            apiBase = ctx.apiBase,
+            checkName = checkRunName(ctx.buildType),
+            row = PrSummaryCommenter.Row(emoji, mapping.title, safeUrl { webLinks.getViewResultsUrl(build) }),
+        )
     }
 
     private fun publishQueueRemoved(queuedBuild: SQueuedBuild, user: User?, comment: String) {
@@ -208,7 +237,7 @@ class BuildStatusCheckRunPublisher(
                 ?: comment.takeIf { it.isNotBlank() }
                 ?: "Build did not run to completion (a snapshot dependency likely failed)."
             val request = CheckRunRequest(
-                name = "TeamCity / ${ctx.buildType.fullName}",
+                name = checkRunName(ctx.buildType),
                 headSha = ctx.headSha,
                 status = CheckRunStatus.COMPLETED,
                 conclusion = mapping.conclusion,
@@ -226,7 +255,7 @@ class BuildStatusCheckRunPublisher(
             val summary = comment.takeIf { it.isNotBlank() }
                 ?: "Build was cancelled before it started."
             val request = CheckRunRequest(
-                name = "TeamCity / ${ctx.buildType.fullName}",
+                name = checkRunName(ctx.buildType),
                 headSha = ctx.headSha,
                 status = CheckRunStatus.COMPLETED,
                 conclusion = CheckRunConclusion.CANCELLED,
@@ -252,20 +281,17 @@ class BuildStatusCheckRunPublisher(
         LOG.debug("Ignoring system queue removal with no associated build for ${ctx.buildType.externalId} (${promotion.branch?.name})")
     }
 
-    private fun safeUrl(block: () -> String?): String? {
-        return try {
-            block()?.takeIf { it.isNotBlank() }
-        } catch (e: Exception) {
-            LOG.debug("WebLinks URL build failed: ${e.message}")
-            null
-        }
-    }
-
     private fun post(ctx: PrBuildContext, request: CheckRunRequest, label: String) {
+        if (serverSettings.dryRun()) {
+            LOG.info("[dry-run] would POST $label Check Run for ${ctx.repo.slug}@${ctx.headSha}")
+            return
+        }
         val ok = gitHubClient.postCheckRun(ctx.accessToken, ctx.repo, request, ctx.apiBase)
         if (!ok) {
+            metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.CHECK_RUNS_FAILED)
             LOG.warn("Check Run POST ($label) failed for ${ctx.repo.slug}@${ctx.headSha}")
         } else {
+            metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.CHECK_RUNS_POSTED)
             LOG.info("Published $label Check Run for ${ctx.repo.slug}@${ctx.headSha}")
         }
     }
@@ -273,6 +299,7 @@ class BuildStatusCheckRunPublisher(
     private fun resolveContext(buildType: SBuildType?, revisions: List<BuildRevision>): PrBuildContext? {
         if (buildType == null) return null
         val config = BridgeFeatureReader.read(buildType) ?: return null
+        if (!serverSettings.isRepoAllowed(config.repo.slug)) return null
 
         val headSha = revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
         // TokenResolver already logs the cause (rate-limited).
@@ -303,9 +330,37 @@ class BuildStatusCheckRunPublisher(
         // conservatively to leave headroom for the ellipsis.
         const val SUMMARY_MAX: Int = 60_000
 
+        // Cap how many failure reasons we list in the Check Run body.
+        const val MAX_FAILURE_REASONS: Int = 30
+
         fun truncateSummary(text: String): String =
             if (text.length <= SUMMARY_MAX) text
             else text.take(SUMMARY_MAX) + "\n\n... (truncated)"
+
+        // Build a Markdown body listing the build's failure reasons, for
+        // the Check Run `output.text`. Returns null when there are none
+        // (passing builds), so the field is omitted. Each reason is a
+        // BuildProblemData carrying a human-readable description.
+        fun failureDetails(build: SBuild): String? {
+            val reasons = try {
+                build.failureReasons
+            } catch (e: Exception) {
+                LOG.debug("Could not read failure reasons for build ${build.buildId}: ${e.message}")
+                return null
+            }
+            if (reasons.isEmpty()) return null
+            val body = buildString {
+                append("### Failure details\n\n")
+                reasons.take(MAX_FAILURE_REASONS).forEach { r ->
+                    val desc = r.description?.takeIf { it.isNotBlank() } ?: r.type
+                    append("- ").append(desc).append('\n')
+                }
+                if (reasons.size > MAX_FAILURE_REASONS) {
+                    append("\n_…and ${reasons.size - MAX_FAILURE_REASONS} more (see the TeamCity build log)._")
+                }
+            }
+            return truncateSummary(body)
+        }
 
         // Pure mapping helper — testable without TC SDK fixtures.
         // Encodes the policy: warning is still successful in TC's

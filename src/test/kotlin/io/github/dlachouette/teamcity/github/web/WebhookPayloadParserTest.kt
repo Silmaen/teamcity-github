@@ -76,10 +76,49 @@ class WebhookPayloadParserTest {
 
     @Test
     fun `parse ignores unrelated actions`() {
-        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("closed")))
         assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("edited")))
         assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("labeled")))
         assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("reopened")))
+        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("assigned")))
+    }
+
+    @Test
+    fun `parseIssueComment accepts a created comment on a PR`() {
+        val json = """
+            {"action":"created",
+             "issue":{"number":7,"pull_request":{"url":"x"}},
+             "comment":{"body":"please /rebuild now","author_association":"MEMBER","user":{"login":"alice"}},
+             "repository":{"full_name":"acme/widget"}}
+        """.trimIndent()
+        val parsed = WebhookPayloadParser.parseIssueComment(json)
+        assertNotNull(parsed)
+        assertTrue(parsed!!.prNumber == 7)
+        assertTrue(parsed.body.contains("/rebuild"))
+        assertTrue(parsed.authorAssociation == "MEMBER")
+        assertTrue(parsed.commenter == "alice")
+    }
+
+    @Test
+    fun `parseIssueComment ignores non-PR issues and non-created actions`() {
+        // Issue without a pull_request object.
+        assertNull(
+            WebhookPayloadParser.parseIssueComment(
+                """{"action":"created","issue":{"number":7},"comment":{"body":"x"},"repository":{"full_name":"a/b"}}"""
+            )
+        )
+        // Edited action on a PR comment.
+        assertNull(
+            WebhookPayloadParser.parseIssueComment(
+                """{"action":"edited","issue":{"number":7,"pull_request":{}},"comment":{"body":"x"},"repository":{"full_name":"a/b"}}"""
+            )
+        )
+    }
+
+    @Test
+    fun `parse accepts closed action`() {
+        val parsed = WebhookPayloadParser.parsePullRequestEvent(payload("closed"))
+        assertNotNull(parsed)
+        assertTrue(parsed!!.action == PrAction.CLOSED)
     }
 
     @Test

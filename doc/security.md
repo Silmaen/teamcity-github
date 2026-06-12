@@ -15,7 +15,7 @@ flowchart LR
     GH[GitHub]:::untrusted
     BRIDGE[teamcity-github-bridge]:::plugin
     TC[TeamCity internals]:::trusted
-    SECRETS[Connection descriptor<br/>+ internal.properties]:::trusted
+    SECRETS[Plugin settings file<br/>+ connection descriptor]:::trusted
 
     INET -.spoofed traffic.- BRIDGE
     GH -- pull_request webhook<br/>signed with shared secret --> BRIDGE
@@ -28,8 +28,10 @@ flowchart LR
 The plugin treats anything coming in from the network as untrusted
 until proven otherwise. The proof is:
 - For inbound webhooks: a valid HMAC-SHA256 signature over the raw
-  body, using the shared secret stored in TeamCity's
-  `internal.properties`.
+  body, using the shared secret stored in the plugin settings file
+  `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`
+  (`internal.properties` remains a legacy fallback for the webhook
+  secret only).
 - For outbound API calls: the plugin reads the GitHub App's
   private key from the TC connection descriptor, signs a
   short-lived RS256 JWT as the App, and mints a 1-hour
@@ -126,13 +128,65 @@ trigger arbitrary builds.
 
 - It does **not** validate the GitHub App ID. Any party with the
   shared secret can produce a valid signature. The secret is
-  therefore as sensitive as a password and must be stored only in
-  `internal.properties` (which TeamCity treats as secrets).
+  therefore as sensitive as a password and lives in the plugin
+  settings file `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`
+  (`internal.properties` is a legacy fallback for the webhook secret
+  only). Protect the file with filesystem permissions.
 - It does **not** check the `X-GitHub-Hook-Installation-Target-Id`
   or `X-GitHub-Hook-ID` headers. Future versions may pin the App's
   installation IDs.
 - It does **not** rate-limit. Behind a reverse proxy, configure
   rate limits there.
+
+### Replay protection
+
+A valid HMAC proves a payload was produced by a holder of the shared
+secret, but it cannot distinguish the **original** delivery from a
+**replay** of a captured one. `DeliveryReplayGuard` closes that gap:
+every delivery carries an opaque `X-GitHub-Delivery` UUID, and the
+plugin tracks the recently-seen ids in a bounded LRU.
+
+```
+signature OK ──> deliveryId seen within TTL?
+                   │                    │
+              yes (replay)          no (new)
+                   │                    │
+        200 "duplicate delivery     record id,
+        ignored" — NOT re-processed  process normally
+```
+
+- **Order:** the signature is verified **first**; the replay check
+  runs only on already-authenticated requests.
+- **Acknowledged, not processed:** a replay returns `200 OK` (so
+  GitHub does not interpret a 4xx as failure and keep retrying) but
+  no build/Check Run side-effect runs. It is recorded in the recent
+  events log as `SKIPPED` and counted under `webhooks.replayed`.
+- **Bounds:** LRU of `DEFAULT_MAX_ENTRIES` (2000) ids, each with a
+  24-hour TTL — an id older than the TTL is treated as new again,
+  matching GitHub's own retry envelope. The structure is bounded so
+  it cannot itself become a memory-growth vector.
+- **Toggle:** enabled by default (`webhook.replay.enabled`); can be
+  turned off from the admin page if an operator must replay
+  deliveries deliberately.
+
+### Payload size bound
+
+The webhook endpoint is anonymous and the HMAC can only be computed
+**after** the body bytes are in hand. An unbounded read would let an
+attacker who can reach the endpoint exhaust server memory with a huge
+body before authentication ever runs. The controller therefore caps
+the body at **25 MB** (`MAX_PAYLOAD_BYTES`, GitHub's own documented
+maximum) before signature verification:
+
+- A declared `Content-Length` over the cap is rejected immediately.
+- The body is streamed via a `readBounded` helper that aborts and
+  rejects once the cap is crossed, so an over-large chunked body is
+  never fully buffered.
+- Either case returns `413 Payload Too Large`, logs a warning, and
+  increments `webhooks.too_large`.
+
+This mitigates an unauthenticated memory-exhaustion vector on the one
+endpoint that must stay anonymous.
 
 ## Outbound: GitHub App installation tokens
 
@@ -192,6 +246,7 @@ See the commented contract at the top of `api/TokenResolver.kt`.
 |---|---|---|
 | GitHub App settings | App private key (.pem) | persistent, rotate annually |
 | TeamCity `<connection>` config | App ID, Client ID, Client Secret, private key, optionally webhook secret | persistent, encrypted in TC config |
+| Plugin settings file (managed App) | Managed App ID, private key (PEM), slug, webhook secret — only when an App was created via the manifest flow | persistent, plain text in `<TC_DATA_DIR>/config/teamcity-github-bridge.properties` (same trust level as the webhook secret) |
 | Plugin memory (`AppTokenCache`) | Installation access tokens, keyed by installation ID | 50 minutes (GitHub-side lifetime is 60 min; we keep a 10 min safety margin) |
 | Plugin memory (`PrInfoCache`) | PR JSON snippets (number, title, author, draft, ...) | 60 seconds |
 | Plugin memory (during request) | Access token in `String` | discarded at end of call |
@@ -199,21 +254,146 @@ See the commented contract at the top of `api/TokenResolver.kt`.
 The plugin never writes tokens to disk, never logs them at any
 level, and never includes them in error messages.
 
+## External API: bearer-token authentication
+
+The plugin exposes an authenticated HTTP API for external tooling
+(`ApiController`) under `/app/teamcity-github-bridge/api/*`:
+
+| Route | Method | Effect |
+|---|---|---|
+| `/api/status` | GET | JSON snapshot (versions, flags, allowlist) |
+| `/api/events` | GET | recent webhook events |
+| `/api/metrics` | GET | counter snapshot |
+| `/api/trigger` | POST | **enqueues a build** (`buildTypeId`, `branch`) |
+
+These paths are registered with
+`addPathNotRequiringAuth` like the webhook — they do **not** use
+TeamCity's session auth — so the plugin enforces its own bearer-token
+check on every call:
+
+- **Token source:** a single bearer token stored in plugin settings,
+  set/cleared from its own admin form (`api.token`). It is held
+  separately so a bulk settings save never clears it.
+- **No token => API disabled:** if no token is configured,
+  `isApiEnabled()` is false and every route returns
+  `503 Service Unavailable`. The API is opt-in.
+- **Constant-time compare:** the provided `Authorization: Bearer …`
+  value is compared to the stored token with
+  `MessageDigest.isEqual`, avoiding a timing side-channel. A missing
+  or malformed header, or a mismatch, returns `401`.
+- **Sensitive credential:** because `/api/trigger` can enqueue
+  builds, the token is as sensitive as the webhook secret. Treat it
+  as a credential: scope it to the minimum number of clients, never
+  log or commit it, and **rotate** it on the admin page if it may
+  have leaked (no token blocks the whole API instantly).
+
+## Managed GitHub App creation (manifest flow)
+
+Since v1.7.0 an admin can have the plugin create a GitHub App via
+GitHub's App-manifest flow (admin page → GitHub App card →
+*Create GitHub App*). The browser POSTs a manifest to GitHub, GitHub
+shows a confirmation screen, and on create it redirects back to the
+plugin callback `GET /app-callback?code=...&state=...`
+(`AppManifestController`). The security properties of that callback:
+
+- **Admin-only.** The callback rejects with `403` unless the request
+  carries a TeamCity session whose user has `CHANGE_SERVER_SETTINGS` —
+  the same permission that guards every other settings mutation. Unlike
+  the webhook and `/api/*` routes, it is **not** registered anonymous; it
+  relies on the operator's authenticated browser session.
+- **State check (CSRF defence).** Before opening GitHub's creation page
+  the admin page seeds a random `state` into the session
+  (`bridgeAppState`). The callback only proceeds when the returned
+  `state` matches the session value, and consumes it once. A forged or
+  replayed callback (no matching session `state`) is dropped with an
+  `appError` banner and no credentials are stored.
+- **Credential handling.** On success the plugin exchanges the one-time
+  `code` (`POST /app-manifests/{code}/conversions`) and writes the App
+  ID, **private key (PEM)**, slug and the GitHub-generated **webhook
+  secret** into the plugin settings file. These never appear in the
+  redirect, the page, or any log line.
+
+### The managed App is a powerful credential
+
+The stored managed-App private key is **as sensitive as the connection
+descriptor's private key and the webhook secret**: anyone who can read
+it can act as the App on every installed repository. It lives in
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties` in plain text
+(the same file and trust level as the webhook secret and API token), so
+the file must be protected by filesystem permissions and never committed
+or copied off-host.
+
+Consequences:
+
+- A build type opting into `connectionId=managed` mints installation
+  tokens straight from this key — no per-build-type credential scoping.
+  Keep the App installed on **only** the repositories that need it, and
+  grant only the [least-privilege permissions](#github-app-permissions-principle-of-least-privilege)
+  the plugin requires.
+- Rotate the App's private key on GitHub if the settings file may have
+  leaked; paste the new PEM into `app.privateKey` (or re-run the create
+  flow for a fresh App).
+
+## Comment-triggered builds: author authorization
+
+PR comment commands (`issue_comment`) can start builds via
+`handleCommentCommand`. Without a guard, **any** GitHub user who can
+comment on a PR — including arbitrary outside contributors — could
+start CI. The plugin gates this on the comment author's GitHub
+`author_association`:
+
+- Only comments whose author_association is on the allowlist are
+  acted on. The default is `OWNER,MEMBER,COLLABORATOR` — i.e. people
+  with write access to the repo.
+- A comment from a non-allowed association is logged and dropped
+  before any build is enqueued (`isCommentAuthorAllowed`).
+- The allowlist is configured server-side
+  (`comment.allowedAssociations`). Setting it empty deliberately
+  opens the trigger to everyone — only do this on a private repo.
+
+This keeps the build-trigger surface tied to repo write access
+rather than to "anyone who can type a comment".
+
+## Privilege of the trigger paths (system user)
+
+All inbound paths that enqueue builds or post to GitHub —
+`pull_request`, `pull_request_review` (run-on-approval),
+`issue_comment` (comment command), `check_run` (re-run from GitHub),
+and the external `/api/trigger` endpoint — run inside
+`SecurityContextEx.runAsSystemUnchecked`, i.e. as the TeamCity
+**system user**. This is the same privilege the original
+`pull_request` listener has always used, now extended to the new
+paths.
+
+Consequence: the upstream authorization for these actions is **not**
+TeamCity's per-user permission model but the checks documented above —
+the HMAC signature (all webhook paths), the bearer token
+(`/api/trigger`), and the comment author_association allowlist
+(comment commands). Those checks are the access control for system-user
+build triggering; keep them strict.
+
 ## GitHub App permissions: principle of least privilege
 
-The plugin requests **read-only** access to the resources it needs:
+The plugin requests the minimum access for what it does:
 
 | Permission | Access | Why |
 |---|---|---|
-| Pull requests | Read | Only for `GET /repos/.../pulls/N` |
-| Contents | Read | Required transitively |
 | Metadata | Read | Mandatory baseline |
-| Commit statuses | Read & write | For future commit-status enrichment |
-| Checks | Read & write | For future Check Runs support |
-| Webhooks | Read & write | Required so TC can resolve App webhook config |
+| Checks | Write | Check Run lifecycle |
+| Pull requests | Read & **write** | Read for `GET /repos/.../pulls/N`; **write** is required only for the sticky PR summary comment (off by default — see below) |
+| Contents | Read | Required transitively |
 
-Future versions that post commit statuses or check runs will use
-the same connection without adding more permissions.
+The plugin does **not** require **Commit statuses** or **Webhooks**
+permissions. (TeamCity's bundled features may request them; that is for
+coexistence only, not for this plugin.)
+
+Note the **increased scope**: the sticky PR comment feature needs the
+App's pull-requests **write** permission, which previous versions did
+not require. The feature is **off by default**
+(`prComment.enabled=false`): with it disabled the plugin never writes
+to a PR, so operators who do not want the comment can decline the
+write grant. Only enable the write permission if you turn the sticky
+comment on.
 
 ## Fail-open vs fail-closed: where each applies
 
@@ -223,6 +403,10 @@ consequences differ.
 | Path | Default on failure | Rationale |
 |---|---|---|
 | Webhook signature invalid | **Closed** (reject 401) | A spoofed webhook could trigger arbitrary builds. Cost of false negative is high. |
+| Webhook body over 25 MB | **Closed** (reject 413, before HMAC) | Unauthenticated memory-exhaustion vector on the anonymous endpoint. |
+| Duplicate webhook delivery id | **Closed** to side-effects (ACK 200, do not re-process) | A replay must not double-trigger; ACK keeps GitHub from retrying. |
+| External API token missing/wrong | **Closed** (503 if unset, 401 if wrong) | The trigger route enqueues builds; only an authenticated caller may. |
+| Comment author not on allowlist | **Closed** (drop, no build) | Build triggering must track repo write access, not comment access. |
 | Token resolution fails | **Open** (allow build) | We don't want a credential issue to block the CI pipeline. Cost of false negative (drafts build) is just CI minutes. |
 | GitHub API returns 4xx/5xx | **Open** (allow build) | Same reasoning. |
 | PR info cache stale | Use stale value | Better than reaching out to GitHub during a queue-blocking call. |
@@ -253,17 +437,24 @@ visible to operators) and only enable `DEBUG` when investigating.
 | Threat | Mitigation |
 |---|---|
 | Attacker spoofs a `ready_for_review` webhook to trigger builds | HMAC signature required; constant-time comparison |
-| Attacker steals the webhook secret | Rotate via `internal.properties`; new secret live in <1s |
+| Attacker steals the webhook secret | Rotate in the plugin settings file (`<TC_DATA_DIR>/config/teamcity-github-bridge.properties`); new secret live in <1s |
 | Attacker steals an installation token from logs | Plugin never logs tokens; ~1h TTL limits blast radius |
 | GitHub Apps revoked without notice | Plugin fails open on the draft check; webhooks would just stop arriving |
-| Replay of a captured webhook | Not mitigated currently; HMAC alone does not prevent replay. To be added: timestamp check via the `X-GitHub-Delivery` header. |
+| Replay of a captured webhook | Deliveries deduped by `X-GitHub-Delivery` (bounded LRU + 24h TTL); a redelivered id is acknowledged (200) but not re-processed. See *Inbound: replay protection*. |
+| Unauthenticated memory exhaustion on the webhook endpoint | Request body capped at 25 MB and rejected (413) **before** the HMAC is verified. See *Inbound: payload size bound*. |
+| Outside user triggers a build via a PR comment | Comment commands act only when the comment author's GitHub `author_association` is on the allowlist (OWNER/MEMBER/COLLABORATOR by default). |
+| Stolen external API bearer token (can enqueue builds) | Token stored in plugin settings, compared constant-time; no token => API disabled (503). Rotate it like any credential. |
+| Forged App-creation callback (`/app-callback`) | Requires an admin session (`CHANGE_SERVER_SETTINGS`) **and** a `state` matching the one seeded into the session; mismatch is dropped with no credential stored. |
+| Stolen managed-App private key from the settings file | As sensitive as the connection private key; protect the settings file with filesystem permissions. Rotate the App key (or recreate the App) on suspicion of leak; keep the App installed only on needed repos. |
 | Operator forgets to set the secret | Fail-closed (401), loud per-request warnings |
 | Build type opted in without the connection ID | Token resolution returns null; fail-open allows build with a warning |
 
 ## Hardening checklist for operators
 
-- [ ] `teamcity.github.bridge.webhook.secret` set to a random >=32-byte string and
-      stored only in `internal.properties`.
+- [ ] `teamcity.github.bridge.webhook.secret` set to a random >=32-byte string,
+      stored in the plugin settings file
+      (`<TC_DATA_DIR>/config/teamcity-github-bridge.properties`;
+      `internal.properties` is a legacy fallback for this secret only).
 - [ ] TeamCity is fronted by TLS (the plugin assumes HTTPS in the
       `payloadUrl` returned by `/info`).
 - [ ] GitHub App private key rotated at least annually.
@@ -276,3 +467,16 @@ visible to operators) and only enable `DEBUG` when investigating.
       `DraftAwareBuildFilter` entries).
 - [ ] Webhook URL not exposed to the public internet without a
       reverse proxy that rate-limits (optional but recommended).
+- [ ] Webhook replay protection left **on**
+      (`webhook.replay.enabled`, the default).
+- [ ] External API bearer token (`api.token`) set only if the API is
+      needed; rotated on suspicion of leak; left unset (API disabled)
+      otherwise.
+- [ ] Comment-trigger allowlist (`comment.allowedAssociations`) kept
+      at write-access associations; not emptied on a public repo.
+- [ ] Pull-requests **write** granted only if the sticky PR comment
+      (`prComment.enabled`) is turned on.
+- [ ] If using a **managed App** (`connectionId=managed`), the plugin
+      settings file is protected by filesystem permissions (it holds the
+      App private key in plain text); the App is installed on only the
+      needed repos; its key is rotated on suspicion of leak.

@@ -4,86 +4,119 @@ Concrete walkthroughs of what happens when, who fires what, and what
 the operator should expect to see in the TeamCity UI.
 
 Each scenario assumes the plugin is installed and a build
-configuration has the three opt-in parameters
-(`teamcity.github.bridge.ignoreDrafts`, `teamcity.github.bridge.repo`, `teamcity.github.bridge.connectionId`)
-set as described in [configuration.md](configuration.md).
+configuration is **opted in**, which today means two things (see
+[configuration.md](configuration.md)):
+
+1. The **"GitHub Bridge integration" build feature** is attached to
+   the build configuration (Build Features tab). Its presence is the
+   per-task opt-in; without it the plugin never touches the build.
+2. The surrounding project's **GitHub Bridge** tab carries the two
+   mandatory project-level parameters:
+   `teamcity.github.bridge.repo` (the `owner/name` slug) and
+   `teamcity.github.bridge.connectionId`. The connection id is either
+   `managed` (the server-managed GitHub App created from the admin
+   page) or a TeamCity connection id such as `PROJECT_EXT_42`.
+
+Draft handling is **per build feature**, not a project parameter. The
+old `teamcity.github.bridge.ignoreDrafts` opt-in parameter no longer
+exists. Instead the feature exposes a `triggerOnPrDraft` checkbox
+(default **on** = build drafts too). When it is **off**, draft PR
+builds are suppressed; see Scenario 1.
 
 > The scenarios below split the PR lifecycle into draft-opened,
 > push-to-draft, ready transition, etc. Two ways of getting builds
 > enqueued exist in parallel:
 >
-> - **VCS-trigger path** (legacy default): TC's own VCS trigger on
->   `+:pull/*` enqueues a build on every push. Drafts are then held
->   or removed by `DraftAwareBuildFilter` / `DraftBuildQueueCleaner`.
->   Used in Scenarios 1, 2.
-> - **Plugin-event path** (v1.4.0+, the "drop VCS triggers" pattern):
+> - **VCS-trigger path**: TC's own VCS trigger on `+:pull/*` enqueues
+>   a build on every push. If `triggerOnPrDraft` is off, the draft
+>   build is then **removed from the queue** by `DraftBuildQueueCleaner`
+>   (with `DraftAwareBuildFilter` as a fallback safety net). Used in
+>   Scenarios 1, 2.
+> - **Plugin-event path** (the "drop VCS triggers" pattern):
 >   `PullRequestEventListener` reacts to `pull_request.opened`,
 >   `ready_for_review`, and `synchronize` and enqueues directly. No
->   VCS trigger needed; no draft cancellations to clutter the queue.
->   See Scenario 3 — the sequence diagram covers all three trigger
->   actions. A PR opened **directly as ready** is the `opened` row.
+>   VCS trigger needed; with `triggerOnPrDraft` off, a draft is simply
+>   never enqueued in the first place. See Scenario 3 — the sequence
+>   diagram covers all three trigger actions. A PR opened **directly
+>   as ready** is the `opened` row.
 
-## Scenario 1: a draft PR is opened
+## Scenario 1: a draft PR is opened (and the BT skips drafts)
 
-**Actor**: a developer pushes a branch and opens a draft PR.
+**Actor**: a developer pushes a branch and opens a draft PR, against
+a build configuration whose GitHub Bridge feature has
+`triggerOnPrDraft` **unchecked**.
 
-**Expected outcome**: builds are queued for the PR but held with a
-visible wait reason; no compute is consumed.
+**Expected outcome**: any build TC's VCS trigger enqueues for the
+draft is **removed from the queue** by `DraftBuildQueueCleaner`, and a
+**"Skipped: draft PR"** Check Run is posted on the PR. No compute is
+consumed and the queue stays clean. (If `triggerOnPrDraft` were left
+at its default **on**, the draft would build normally.)
 
 ```mermaid
 sequenceDiagram
     actor Dev
     participant GH as GitHub
     participant TC as TeamCity
-    participant F as DraftAwareBuildFilter
+    participant Cleaner as DraftBuildQueueCleaner
+    participant Gate as BridgeGate
     participant Cache as PrInfoCache
     participant API as GitHub API
+    participant Rep as DraftCheckRunReporter
 
     Dev->>GH: git push + open draft PR #189
     GH->>TC: pull_request event<br/>(action=opened, draft=true)
     Note over TC: VCS root sees the new ref<br/>(this is handled by TC core,<br/>not by this plugin)
     TC->>TC: enqueue build for pull/189
-    TC->>F: canStart(queuedBuild)
-    F->>Cache: get(repo, 189, token)
+    TC->>Cleaner: buildTypeAddedToQueue(queuedBuild)
+    Cleaner->>Cache: get(repo, 189, token)
     Cache->>API: GET /repos/.../pulls/189
     API-->>Cache: {draft: true, ...}
-    Cache-->>F: PrInfo(draft=true)
-    F-->>TC: SimpleWaitReason("PR #189 is draft<br/>and teamcity.github.bridge.ignoreDrafts is enabled")
-    Note over TC: Build held in queue<br/>with the wait reason visible
+    Cache-->>Cleaner: PrInfo(draft=true)
+    Cleaner->>Gate: decide(config, "pull/189", draft=true, ...)
+    Gate-->>Cleaner: SUPPRESS_DRAFT
+    Cleaner->>TC: queuedBuild.removeFromQueue(reason)
+    Cleaner->>Rep: postSkippedCheckRun(reason=DRAFT_PR)
+    Rep->>API: POST /repos/.../check-runs (conclusion=skipped)
+    Note over TC: Build gone from the queue;<br/>DraftAwareBuildFilter is only the fallback<br/>if removeFromQueue ever throws
 ```
 
-In the TeamCity UI, the queued build shows:
+On the PR's Checks tab, GitHub shows:
 
 ```
 +----------------------------------------------------+
-| Build queue                                        |
-|  o  pull/189  Build_LinuxX64_Clang  10:23         |
-|     Waiting reason: PR #189 is draft and          |
-|                     teamcity.github.bridge.ignoreDrafts is enabled. |
+|  -  TeamCity / Build_LinuxX64_Clang                |
+|     Skipped: draft PR                              |
+|     (conclusion: skipped)                          |
 +----------------------------------------------------+
 ```
+
+The build no longer lingers in the TeamCity queue at all; the
+`DraftAwareBuildFilter` `canStart` precondition is kept only as a
+fallback that holds the build if `removeFromQueue` ever fails.
 
 ## Scenario 2: developer pushes a new commit to the draft
 
-**Actor**: same developer, force-push or new commit.
+**Actor**: same developer, force-push or new commit, same BT with
+`triggerOnPrDraft` off.
 
-**Expected outcome**: same as scenario 1 - the new revision is held
-on the same wait reason.
+**Expected outcome**: same as scenario 1 - the new revision's build
+is removed from the queue and a fresh "Skipped: draft PR" Check Run
+is posted at the new head SHA.
 
 ```mermaid
 flowchart LR
     A[git push to draft PR] --> B[TC sees new SHA]
     B --> C[enqueue new build]
-    C --> D[DraftAwareBuildFilter]
-    D --> E{PR still draft?}
-    E -->|yes, from cache or API| F[hold with wait reason]
-    E -->|no| G[allow build]
+    C --> D[DraftBuildQueueCleaner]
+    D --> E{gate: PR still draft<br/>& triggerOnPrDraft off?}
+    E -->|yes, from cache or API| F[removeFromQueue +<br/>post Skipped: draft PR]
+    E -->|no| G[leave build to run]
 ```
 
-The PR info cache has a TTL of 60 seconds, so a recent draft check
-is reused. If 60 seconds have elapsed since the previous check, the
-plugin re-queries GitHub. Either way, no extra compute is spent on
-the build itself.
+The PR info cache has a short TTL (the **PR-info cache TTL** server
+setting, default 60s), so a recent draft check is reused. If the TTL
+has elapsed since the previous check, the plugin re-queries GitHub.
+Either way, no extra compute is spent on the build itself.
 
 ## Scenario 3: any non-draft `pull_request` event fires
 
@@ -93,8 +126,8 @@ directly as ready, or pushes a new commit to an already-ready PR.
 **Expected outcome**: for every matching build configuration that
 does **not** already have a build on this `pull/N` ref at the same
 head SHA, a fresh build is enqueued. Each then passes the
-`DraftAwareBuildFilter` because the cache is invalidated and the PR
-is no longer draft.
+`DraftBuildQueueCleaner` / `DraftAwareBuildFilter` gate because the
+cache is invalidated and the PR is no longer draft.
 
 The three trigger actions map to:
 
@@ -113,22 +146,21 @@ sequenceDiagram
     participant L as PullRequestEventListener
     participant Cache as PrInfoCache
     participant Q as Build queue
-    participant F as DraftAwareBuildFilter
+    participant Gate as BridgeGate
 
     Dev->>GH: open ready / mark ready / push to ready PR
     GH->>W: POST /webhook<br/>action=opened | ready_for_review | synchronize<br/>X-Hub-Signature-256: sha256=...
     W->>W: HMAC-SHA256 verify
     W->>L: handle(payload)
-    L->>L: shouldEnqueue (skip if draft=true on opened/synchronize)
     L->>Cache: invalidate(repo, 189)
     L->>L: scan ProjectManager.activeBuildTypes
-    Note over L: filter by teamcity.github.bridge.repo<br/>(case-insensitive) and<br/>teamcity.github.bridge.ignoreDrafts="true"
+    Note over L: candidate = BTs with the<br/>"GitHub Bridge integration" feature whose<br/>project repo matches (case-insensitive)
     loop for each matched buildType
+        L->>Gate: decide(config, "pull/189", draft, headRef, manual=false)
+        Gate-->>L: ALLOW (PR is ready)
         L->>L: smart-skip if running / queued / finished<br/>build already exists at (pull/189, head SHA)
         L->>Q: addToQueue(promotion, "teamcity-github-bridge")
     end
-    Q->>F: canStart for each
-    F-->>Q: null (PR is no longer draft)
     Q->>Q: start the builds
 ```
 
@@ -150,13 +182,17 @@ comment:
 **Actor**: developer converts back to draft.
 
 **Expected outcome**: the plugin does nothing on the `converted_to_draft`
-action. If a new commit comes in while in draft state, scenario 1
-applies again. In-flight builds are not cancelled - they finish on
-the revision they were started for.
+action. If a new commit comes in while in draft state and the BT has
+`triggerOnPrDraft` off, scenario 1 applies again (queue removal +
+"Skipped: draft PR"). In-flight builds are not cancelled - they
+finish on the revision they were started for.
 
-This is a deliberate design choice: the plugin never cancels builds.
-Cancellation has surprising side effects in TC (it counts as a red
-build on GitHub commit status) so we only ever **hold** or **enqueue**.
+This is a deliberate design choice: the plugin never **stops a
+running build**. Stopping a running build has surprising side effects
+in TC (it counts as a red build on GitHub commit status). The plugin
+will only **remove a not-yet-started build from the queue** (e.g. the
+draft suppression in Scenario 1, or a closed PR in Scenario 18) or
+**enqueue** a new one.
 
 ## Scenario 5: the GitHub App is missing a permission
 
@@ -168,19 +204,19 @@ the draft check, with a warning in the log.
 ```
 [INFO  ] PluginWebhookController - Registered webhook controller at /app/teamcity-github-bridge/webhook
 [WARN  ] GitHubClient - GitHub returned 403 for acme/widget#189
-[WARN  ] DraftAwareBuildFilter - Cannot fetch PR info for acme/widget#189; allowing build to proceed
+[WARN  ] DraftBuildQueueCleaner - Cannot fetch PR info for acme/widget#189; leaving build in queue
 ```
 
 ```mermaid
 flowchart TD
-    A[Build queued for pull/189] --> B[DraftAwareBuildFilter]
+    A[Build queued for pull/189] --> B[DraftBuildQueueCleaner]
     B --> C{token resolved?}
-    C -->|no| D[log warn,<br/>allow build]
+    C -->|no| D[log warn,<br/>leave build in queue]
     C -->|yes| E{API call OK?}
     E -->|no, 403| D
-    E -->|yes| F{draft?}
-    F -->|yes| G[hold with wait reason]
-    F -->|no| H[allow build]
+    E -->|yes| F{draft & triggerOnPrDraft off?}
+    F -->|yes| G[removeFromQueue +<br/>post Skipped: draft PR]
+    F -->|no| H[leave build to run]
 ```
 
 Fail-open is preferred to fail-closed here because:
@@ -239,21 +275,26 @@ maintenance window is non-fatal.
 
 ## Scenario 8: build type without the bridge enabled
 
-**Actor**: build type does **not** have `teamcity.github.bridge.ignoreDrafts=true`.
+**Actor**: build type that does **not** have the "GitHub Bridge
+integration" build feature (or whose project is missing
+`teamcity.github.bridge.repo` / `connectionId`).
 
 **Expected outcome**: nothing the plugin does affects it.
 
-- `DraftAwareBuildFilter` short-circuits on the missing parameter:
+- `BridgeFeatureReader.read(buildType)` returns `null` when the
+  feature is absent or the project chain lacks repo + connectionId,
+  so every gate site short-circuits:
   ```kotlin
-  if (buildType.parameters[PARAM_IGNORE_DRAFTS] != "true") return null
+  val config = BridgeFeatureReader.read(buildType) ?: return
   ```
-  -> filter returns `null` (allow), the build proceeds as usual.
-- `PullRequestEventListener` filters by the same parameter, so the
-  build type is never enqueued by the retrigger flow.
+  -> `DraftBuildQueueCleaner` / `DraftAwareBuildFilter` leave the
+  build untouched and it proceeds as usual.
+- `PullRequestEventListener` only scans build types that carry the
+  feature, so the build type is never enqueued by the retrigger flow.
 
 This isolation guarantees the plugin is **safe to deploy** to a
-TeamCity server: nothing changes until a team opts in by setting
-the three parameters.
+TeamCity server: nothing changes until a team opts in by adding the
+build feature and setting the project's repo + connectionId.
 
 ## Scenario 9: multi-repo project
 
@@ -359,15 +400,43 @@ Bridge`.
 +----------------------------------------------------------+
 | TeamCity GitHub Bridge                                   |
 +----------------------------------------------------------+
+| Getting started                                          |
+|   1. Create & install the GitHub App (card below)        |
+|   2. Point a project at it (repo + connectionId=managed) |
+|   3. Add the "GitHub Bridge integration" build feature   |
+|   4. Verify App config + Run self-tests, open a PR       |
++----------------------------------------------------------+
 | Plugin status                                            |
-|   Plugin version:    0.9.3                               |
-|   TeamCity version:  TeamCity 2026.1 (build 222521)      |
+|   Plugin version:    1.6.x                               |
+|   TeamCity version:  TeamCity 2026.1 (build <n>)         |
 |   Webhook URL:       https://.../app/.../webhook         |
-|   HMAC secret:       [configured]                        |
+|   HMAC secret:       [configured]  [Set/Replace] [Clear] |
 |   Dedicated log:     [configured] /.../...-bridge.log    |
 |   Config snapshot:   JSON | Markdown                     |
 +----------------------------------------------------------+
-| Recent events (last 12 in-memory)                        |
+| GitHub App                                               |
+|   [Create GitHub App]   (manifest pre-filled: webhook    |
+|                          URL, permissions, events)       |
+|   -- once configured --                                  |
+|   managed App: <app-slug>   [Open settings] [Install]    |
+|   connectionId=managed                                   |
+|   [Verify App configuration]  (GET /app, checks perms    |
+|                                & subscribed events)       |
++----------------------------------------------------------+
+| Server settings (applied immediately, no restart)        |
+|   API base / API version / PR-info cache TTL / grace     |
+|   HTTP retry attempts + base delay                       |
+|   Feature flags: replay protection, dry-run, metrics,    |
+|                  legacy aliases, sticky PR comment       |
+|   Repository allowlist / Comment-trigger authors         |
++----------------------------------------------------------+
+| External API                                             |
+|   [enabled/disabled]  API token form  [Set] [Disable]    |
++----------------------------------------------------------+
+| Self-tests                                               |
+|   [Run self-tests]  (see scenario 11.b)                  |
++----------------------------------------------------------+
+| Recent events (last N in-memory)                         |
 |   2026-05-25 14:02:30  pull_request  ready_for_review    |
 |                        acme/widget   200  accepted       |
 |   2026-05-25 14:01:55  ping                              |
@@ -384,16 +453,27 @@ Bridge`.
 +----------------------------------------------------------+
 ```
 
-The "Recent events" table is in-memory only (ring buffer of 100
-entries, cleared on TC restart). The dedicated log file is the
-long-term audit. If you do not see any events after a webhook
-delivery, recheck signature and URL with the troubleshooting fold
-on the same page.
+The page is organised top-to-bottom as: a **Getting started** card
+(the four-step opt-in), **Plugin status**, a **GitHub App** card
+(one-click create from a pre-filled manifest, deep links to the App's
+settings / installations on GitHub, and a **Verify App configuration**
+button that calls `GET /app` and diffs the App's live permissions and
+subscribed events against what the plugin needs), an editable **Server
+settings** form (tuning + feature-flag checkboxes, saved to the
+plugin properties file and applied without a restart), the **External
+API** token form, the **Run self-tests** button, and the **Recent
+events** table.
 
-The admin page also exposes:
-- A **HMAC secret form** to set or rotate the webhook secret (CSRF
-  protected, writes to `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`).
-- A **Run self-tests** button (see scenario 11.b below).
+The "Recent events" table is in-memory only (ring buffer cleared on
+TC restart). The dedicated log file is the long-term audit. If you do
+not see any events after a webhook delivery, recheck signature and URL
+with the troubleshooting fold on the same page.
+
+The **HMAC secret form** sets or rotates the webhook secret (CSRF
+protected, writes to
+`<TC_DATA_DIR>/config/teamcity-github-bridge.properties`); the secret
+is never echoed back. The same properties file backs the **API token**
+and **Server settings** forms.
 
 ## Scenario 11.b: operator runs the self-tests
 
@@ -431,8 +511,9 @@ sequenceDiagram
     UI->>Admin: render PASS/WARN/FAIL/SKIP table
 ```
 
-The seven test categories are described in
-[api-reference.md](api-reference.md#tests-run-as-of-v0.9.3).
+The test categories (config checks, GitHub reachability, HMAC
+roundtrip, webhook self-delivery, and per-project token resolution)
+are described in [api-reference.md](api-reference.md#tests-run).
 
 Typical reading:
 - All PASS: the plugin is healthy. Webhooks will land, tokens will
@@ -441,9 +522,10 @@ Typical reading:
   the reverse proxy strips a header or the secret was rotated on
   one side only.
 - "Token resolution" FAIL on every project: the connection ID is
-  wrong, the App is not installed on the repo, or the connection
-  has never been "Test connected" in TC (which is what mints the
-  first token).
+  wrong (it must be `managed` for the server-managed App, or a real
+  TeamCity connection id like `PROJECT_EXT_42`), the App is not
+  installed on the repo, or — for a TC connection — it has never been
+  "Test connected" in TC (which is what mints the first token).
 - "GitHub API auth" FAIL after "Token resolution" PASS: GitHub
   rejected the token. The App's installation may have been revoked
   on the org side.
@@ -490,6 +572,218 @@ The plugin always calls `buildType.addToQueue(promotion, "teamcity-github-bridge
 it never tries to be clever about whether one is already running.
 That decision lives in TC core.
 
+## Scenario 14: a collaborator comments "/rebuild"
+
+**Actor**: a repo collaborator types a comment containing the
+configured trigger phrase (e.g. `/rebuild`) on an open PR; an
+outside contributor types the same phrase.
+
+**Expected outcome**: the collaborator's comment enqueues every
+opted-in BuildType whose `commentTrigger` phrase appears in the body
+(case-insensitive). The outside contributor's comment is ignored.
+
+The author is trusted by GitHub's `author_association`: by default
+`OWNER`, `MEMBER`, `COLLABORATOR` (people with write access). Anyone
+else - a drive-by `NONE`/`CONTRIBUTOR` commenter - cannot start
+builds.
+
+```mermaid
+sequenceDiagram
+    actor Collab as Collaborator
+    actor Outsider
+    participant GH as GitHub
+    participant W as PluginWebhookController
+    participant L as PullRequestEventListener
+    participant SS as BridgeServerSettings
+    participant Q as Build queue
+
+    Collab->>GH: comment "/rebuild" on PR #189
+    GH->>W: POST /webhook (event=issue_comment, action=created)
+    W->>L: handleCommentCommand(payload)
+    L->>SS: isRepoAllowed + isCommentAuthorAllowed(COLLABORATOR)
+    SS-->>L: true / true
+    Note over L: match BTs whose commentTrigger<br/>("/rebuild") appears in the body
+    L->>Q: addToQueue(...) for each match
+
+    Outsider->>GH: comment "/rebuild" on PR #190
+    GH->>W: POST /webhook (event=issue_comment)
+    W->>L: handleCommentCommand(payload)
+    L->>SS: isCommentAuthorAllowed(NONE)
+    SS-->>L: false
+    Note over L: log "Ignoring ... (association=NONE not allowed)"<br/>and return — nothing enqueued
+```
+
+The trusted set is tunable via the
+`comment.allowedAssociations` setting. An empty value opens the
+trigger to everyone (use with care).
+
+## Scenario 15: a review approval triggers a gated suite
+
+**Actor**: a reviewer clicks **Approve** on a PR.
+
+**Expected outcome**: every opted-in BuildType that requested
+**run-on-approval** (typically an expensive suite deliberately held
+back until a human has approved) is enqueued. Normal
+ready/synchronize gating is independent of this path.
+
+```mermaid
+flowchart TD
+    A[Reviewer approves PR #189] --> B[GitHub: pull_request_review<br/>state=approved]
+    B --> C[POST /webhook event=pull_request_review]
+    C --> D[PullRequestEventListener.handleReviewApproved]
+    D --> E{repo allowed & not draft?}
+    E -->|no| X[ignore]
+    E -->|yes| F[candidate BTs where<br/>runOnApproval && prTriggerEnabled<br/>&& branch matches]
+    F --> G[enqueueIfAbsent on pull/189 @ head SHA]
+```
+
+A BuildType that does **not** set run-on-approval is untouched by
+this event; it still participates in the normal opened /
+ready_for_review / synchronize path.
+
+## Scenario 16: re-run from the GitHub Checks UI
+
+**Actor**: a developer clicks **Re-run** on a TeamCity Check Run in
+the PR's Checks tab.
+
+**Expected outcome**: GitHub sends a `check_run` event with
+`action=rerequested`. The plugin maps the Check Run name back to its
+BuildType and enqueues a fresh build - even though a finished build
+already exists at that head SHA (re-running a finished build is
+exactly the intent).
+
+```mermaid
+sequenceDiagram
+    actor Dev
+    participant GH as GitHub
+    participant W as PluginWebhookController
+    participant L as PullRequestEventListener
+    participant Q as Build queue
+
+    Dev->>GH: click "Re-run" on "TeamCity / Build_LinuxX64_Clang"
+    GH->>W: POST /webhook (event=check_run, action=rerequested)
+    W->>L: handleRerun(payload)
+    L->>L: find candidate BT where checkRunName(bt) == payload.checkRunName
+    Note over L: enqueueIfAbsent(..., ignoreFinished=true)<br/>skips only a currently running/queued build,<br/>never a finished one
+    L->>Q: addToQueue(promotion, "...re-run requested from GitHub")
+```
+
+If the Check Run name matches no BuildType (e.g. it belongs to
+another CI), the listener logs `matched no BuildType` and returns.
+
+## Scenario 17: monorepo path filtering
+
+**Actor**: a developer opens a PR that touches only `docs/`, in a
+repo where one BuildType (`api-test`) is filtered to `src/api/**`.
+
+**Expected outcome**: `api-test` is **skipped** with a Check Run
+"Skipped: paths out of scope"; BuildTypes without a path filter (or
+whose filter matches a changed file) are enqueued normally.
+
+```mermaid
+flowchart TD
+    A[PR #189 changes docs/intro.md] --> B[PullRequestEventListener]
+    B --> C[gate: ALLOW targets]
+    C --> D{any target has a path filter?}
+    D -->|no| K[enqueue all]
+    D -->|yes| E[GitHubClient.listPrFiles -> changed files]
+    E --> F{filter matches a changed file?}
+    F -->|src/api/** vs docs/* : no| G[drop api-test<br/>post Skipped: PATH_FILTER]
+    F -->|yes| H[keep & enqueue]
+```
+
+Path filtering **fails open**: if the token cannot be resolved or
+the changed-files list comes back empty, all targets are kept rather
+than silently swallowed. The changed-files list is fetched once,
+lazily, and only when at least one target actually uses a filter.
+
+## Scenario 18: PR is closed or merged
+
+**Actor**: a developer merges the PR, or closes it without merging.
+
+**Expected outcome**: every build still **queued** for that PR's
+head is removed from the queue, so closing a PR mid-build stops
+burning agent minutes. Running builds are left to finish (stopping
+them would need an acting user and extra permissions).
+
+```mermaid
+flowchart LR
+    A[PR #189 merged/closed] --> B[pull_request action=closed]
+    B --> C[PullRequestEventListener.cancelQueuedForClosedPr]
+    C --> D[for each candidate BT:<br/>remove queued builds on pull/189]
+    D --> E[builds_cancelled counter incremented]
+```
+
+The removal comment reads `teamcity-github-bridge: PR #189 merged`
+(or `closed`). The plugin still never cancels *running* builds - the
+no-cancel-running stance from Scenario 4 stands.
+
+## Scenario 19: querying status and triggering a build via the external API
+
+**Actor**: an external tool (CI orchestrator, ChatOps bot) calls the
+authenticated HTTP API. The API is enabled only when an API bearer
+token has been set on the admin page; otherwise every call returns
+`503`.
+
+**Expected outcome**: `GET /api/status` returns a JSON snapshot;
+`POST /api/trigger` enqueues a build.
+
+```bash
+TOKEN='the-api-token-set-on-the-admin-page'
+BASE='https://<TC_HOST>/app/teamcity-github-bridge/api'
+
+# Health/config snapshot
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/status" | jq
+# -> {"pluginVersion":"<version>","secretConfigured":true,"dryRun":false,
+#     "replayProtection":true,"metricsEnabled":true,"repoAllowlist":[...]}
+
+# Recent webhook events
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/events" | jq '.events[0]'
+
+# Counter snapshot (JSON; same numbers as /metrics in Prometheus form)
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/metrics" | jq
+
+# Trigger a build of a BuildType on a branch
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"buildTypeId":"MyProject_ApiTest","branch":"pull/189"}' \
+     "$BASE/trigger"
+# -> {"queued":true,"detail":"queued MyProject_ApiTest on pull/189"}
+```
+
+Responses:
+- `503 {"error":"API disabled (no token configured)"}` - no API
+  token set on the admin page.
+- `401 {"error":"invalid or missing bearer token"}` - token absent
+  or wrong (compared constant-time).
+- `409` with `{"queued":false,...}` - the trigger could not enqueue
+  (unknown build type, etc.).
+
+When dry-run is on, `POST /api/trigger` returns
+`{"queued":true,"detail":"dry-run: would enqueue ..."}` without
+adding a build.
+
+## Scenario 20: dry-run mode
+
+**Actor**: an operator turns on **dry-run** in the admin settings to
+stage a rollout without side effects.
+
+**Expected outcome**: every mutating action is logged with a
+`[dry-run]` prefix but not performed - no builds enqueued, no builds
+removed from the queue, no Check Runs or PR comments posted. Webhook
+verification, candidate matching, gating, and path filtering still
+run, so the log shows exactly what *would* have happened.
+
+```
+[INFO] PullRequestEventListener - [dry-run] would enqueue MyProject_ApiTest for acme/widget#189 (no build added)
+[INFO] BuildStatusCheckRunPublisher - [dry-run] would POST queued Check Run for acme/widget@<sha>
+[INFO] PullRequestEventListener - [dry-run] would remove queued MyProject_ApiTest for acme/widget#190
+```
+
+Dry-run is the recommended first step when enabling the bridge on a
+busy server: watch the dedicated log for a few real PRs, confirm the
+right BuildTypes are matched, then turn it off.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |
@@ -509,6 +803,13 @@ That decision lives in TC core.
 | API error during draft check | Logged warning | Build allowed (fail-open) |
 | Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
 | Build type not opted in | None | No change |
+| Trusted collaborator comments the trigger phrase | `PullRequestEventListener.handleCommentCommand` enqueues matching BTs | Builds run; outside commenters are ignored |
+| PR review approved | `handleReviewApproved` enqueues run-on-approval BTs | Gated suites run |
+| Re-run clicked in GitHub Checks UI | `handleRerun` (`ignoreFinished=true`) | Fresh build runs even past a finished one |
+| PR touches only out-of-scope paths | `applyPathFilter` drops the BT, posts Skipped | GitHub PR shows "Skipped: paths out of scope" |
+| PR closed / merged | `cancelQueuedForClosedPr` removes queued builds | Queue drained; running builds finish |
+| External API trigger | `triggerBuild` via `/api/trigger` | Build enqueued (or dry-run no-op) |
+| Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds/Check Runs/comments; log shows intent |
 
 ## See also
 

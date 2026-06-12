@@ -41,7 +41,7 @@ class AdminTestController(
             return null
         }
 
-        val webhookUrl = absoluteWebhookUrl(request)
+        val webhookUrl = RequestUrlBuilder.absoluteUrl(request, PluginWebhookController.WEBHOOK_PATH)
         val results: List<TestResult> = try {
             tester.runAllTests(webhookUrl)
         } catch (e: Exception) {
@@ -57,26 +57,6 @@ class AdminTestController(
     private fun redirectUrl(request: HttpServletRequest, marker: String): String {
         return request.contextPath.trimEnd('/') +
             "/admin/admin.html?item=bridgeAdmin&tab=bridgeAdmin&bridgeResult=$marker"
-    }
-
-    private fun absoluteWebhookUrl(request: HttpServletRequest): String {
-        val scheme = request.getHeader("X-Forwarded-Proto")?.substringBefore(',')?.trim()?.lowercase()
-            ?: request.scheme
-        val hostHeader = request.getHeader("X-Forwarded-Host")?.substringBefore(',')?.trim()
-        val authority = if (!hostHeader.isNullOrBlank()) {
-            hostHeader
-        } else {
-            val name = request.serverName
-            val port = request.getHeader("X-Forwarded-Port")?.toIntOrNull() ?: request.serverPort
-            val portPart = when {
-                scheme == "http" && port == 80 -> ""
-                scheme == "https" && port == 443 -> ""
-                else -> ":$port"
-            }
-            "$name$portPart"
-        }
-        val ctx = request.contextPath.trimEnd('/')
-        return "$scheme://$authority$ctx${PluginWebhookController.WEBHOOK_PATH}"
     }
 
     companion object {

@@ -5,32 +5,79 @@ second, fix third.
 
 ## Where to look first
 
+Three quick triage stops, in order, before you dig into logs:
+
+1. **Admin page "Recent events" table.** `Administration -> Server
+   Administration -> GitHub Bridge` shows the last N webhook events
+   the plugin actually processed (in-memory; full history in the
+   dedicated log). Empty when GitHub never reached the plugin.
+2. **`GET /app/teamcity-github-bridge/health`** — liveness JSON for
+   load balancers and a quick "is the plugin alive" check. Returns
+   `{"status":"ok", ...}` when the webhook secret is configured,
+   `"degraded"` when it is not (always HTTP 200 — the status field
+   is the signal, not the HTTP code).
+3. **`GET /app/teamcity-github-bridge/metrics`** — Prometheus counters
+   (`bridge_<name>_total`). Confirms enqueues, cancellations, API
+   calls etc. are actually happening. Returns 404 when metrics export
+   is disabled (see [/metrics returns 404](#symptom-metrics-returns-404)).
+
 ```
 +---------------------------------------------------------------+
-|  1. Self-test button (v0.9.0+)  *** start here ***            |
+|  1. Self-test button  *** start here ***                     |
 |     Admin -> Server Admin -> GitHub Bridge -> Run self-tests  |
 |     -> PASS/WARN/FAIL/SKIP table localises the broken step    |
 +---------------------------------------------------------------+
-|  2. Plugin /info endpoint (one-shot health snapshot)          |
+|  2. Admin "Recent events" table + /health + /metrics          |
+|     Admin -> Server Admin -> GitHub Bridge                    |
+|     curl https://<TC_HOST>/app/teamcity-github-bridge/health  |
+|     curl https://<TC_HOST>/app/teamcity-github-bridge/metrics |
++---------------------------------------------------------------+
+|  3. Plugin /info endpoint (one-shot health snapshot)          |
 |     curl https://<TC_HOST>/app/teamcity-github-bridge/info    |
 |     -> secretConfigured, logConfigured, payloadUrl, logFile   |
 +---------------------------------------------------------------+
-|  3. Dedicated plugin log                                      |
+|  4. Dedicated plugin log                                      |
 |     <TC_DATA_DIR>/logs/teamcity-github-bridge.log             |
-|     -> auto-configured at startup since v0.6.0                |
 +---------------------------------------------------------------+
-|  4. Server log fallback (if dedicated log was overridden)     |
+|  5. Server log fallback (if dedicated log was overridden)     |
 |     <TC_DATA_DIR>/logs/teamcity-server.log                    |
 |     Grep for `io.github.dlachouette` (package) or             |
 |     `teamcity-github-bridge` (plugin name).                   |
 +---------------------------------------------------------------+
-|  5. GitHub App webhook "Recent Deliveries" panel              |
+|  6. GitHub App webhook "Recent Deliveries" panel              |
 |     https://github.com/settings/apps/<your-app>/advanced      |
 +---------------------------------------------------------------+
-|  6. Queue UI                                                  |
+|  7. Queue UI                                                  |
 |     Look at the wait reason on held builds                    |
 +---------------------------------------------------------------+
 ```
+
+### How opt-in works (the model everything below assumes)
+
+A BuildType participates only when **both** of these are true:
+
+1. The **"GitHub Bridge integration" build feature** is present (and
+   enabled) on the BuildType — directly or inherited from a BuildType
+   template.
+2. The surrounding **project** sets, on its GitHub Bridge tab,
+   `teamcity.github.bridge.repo` (the `owner/name` slug, matching
+   GitHub's `repository.full_name`) and
+   `teamcity.github.bridge.connectionId`.
+
+`connectionId` is either:
+
+- **`managed`** — the server-managed GitHub App created through the
+  plugin's admin manifest flow (`Administration -> Server
+  Administration -> GitHub Bridge`), or
+- a **TeamCity connection id** — `PROJECT_EXT_<N>` or `CID_<hash>` —
+  pointing at a GitHub App connection visible from the project chain.
+
+Draft behaviour is **not** a parameter. It is the per-feature
+**`triggerOnPrDraft`** checkbox (with **`triggerOnPrReady`** as its
+prerequisite — `triggerOnPrDraft` is only honoured when
+`triggerOnPrReady` is on). With `triggerOnPrDraft` off, an auto
+trigger on a draft PR is removed from the queue and reported as a
+**"Skipped: draft PR"** Check Run.
 
 ## Symptom: self-test shows "Token resolution" FAIL on every project
 
@@ -44,11 +91,13 @@ After clicking **Run self-tests** the rows
 
 | Cause | Fix |
 |---|---|
-| The App is not installed on the target repository's owner (org or user account) | Visit `https://github.com/settings/apps/<your-app>/installations` and install the App on the owner of the repo named in `teamcity.github.bridge.repo`. |
+| `connectionId=managed` but no managed App is configured | The `managed` sentinel mints from the server-managed App. If none was set up, the resolver fails with `connectionId is 'managed' but no managed GitHub App is configured.` Run the manifest flow at `Administration -> Server Administration -> GitHub Bridge` to create one (it stores the App ID, slug and private key). |
+| The (managed or connection) App is not installed on the target repository's owner (org or user account) | Visit `https://github.com/settings/apps/<your-app>/installations` and install the App on the owner of the repo named in `teamcity.github.bridge.repo`. |
 | The App's permissions do not cover the repo (e.g. `Checks: Write` missing) | Add at minimum `Pull requests: Read`, `Checks: Write`, `Contents: Read`, `Metadata: Read`; accept the permission update on the App's installation page. |
+| GitHub Enterprise Server: the API base override is not set | A managed App on GHES must reach the enterprise API, not `api.github.com`. Set the `api.base` override in the admin settings (`Administration -> Server Administration -> GitHub Bridge`) to your `https://<ghes-host>/api/v3` base. The log shows the `apiBase used: ...` value on a failed mint. |
 | The connection's `appId` or `secure:privateKey` parameter is missing or empty (manual edit of the project file?) | Open `Project -> Connections -> Edit`, paste the App ID and private key, save. The self-mint path needs both. The plugin logs `Connection PROJECT_EXT_N does not expose the GitHub App credentials this plugin needs` when this happens. |
 | The private key cannot be parsed (truncated, wrong format, mangled by a copy-paste) | Re-paste the `.pem` file content as-is. The plugin accepts both `-----BEGIN PRIVATE KEY-----` (PKCS#8) and `-----BEGIN RSA PRIVATE KEY-----` (PKCS#1). The log entry is `Could not parse the private key stored on connection PROJECT_EXT_N`. |
-| The `teamcity.github.bridge.connectionId` value points at a project the connection is not visible from | Confirm in TC: `Project -> Connections` should list the connection on the project's own page or on one of its parents. |
+| The `teamcity.github.bridge.connectionId` value points at a project the connection is not visible from | Confirm in TC: `Project -> Connections` should list the connection on the project's own page or on one of its parents. Note: when `connectionId=managed` no project connection is needed at all — the credentials live in the plugin's admin settings. |
 
 The dedicated log file carries one warning per failed
 (project, connection, repo) triple, with the exact reason. The
@@ -180,18 +229,20 @@ echo "Expected header: $expected"
 ### What you see
 
 A PR with `draft: true` on GitHub leads to a green build in
-TeamCity, not a held one with a wait reason.
+TeamCity, instead of being removed from the queue and reported as a
+"Skipped: draft PR" Check Run.
 
 ### Likely causes
 
 | Cause | Fix |
 |---|---|
-| Build type does not have `teamcity.github.bridge.ignoreDrafts=true` | Add it. See [configuration.md](configuration.md). |
-| Build type does not have `teamcity.github.bridge.repo` | Add it; the slug must match `repository.full_name` from GitHub. |
-| `teamcity.github.bridge.connectionId` points to a wrong/non-existent connection | The plugin logs `No GitHub App connection found for id=...`. Fix the ID. |
+| The BuildType's feature has `triggerOnPrDraft` left **on** | The draft gate only suppresses when the **"GitHub Bridge integration"** feature has `triggerOnPrDraft` **unchecked** (and `triggerOnPrReady` checked). Open `Edit Configuration -> Build Features -> GitHub Bridge integration` and uncheck "trigger on draft PRs". |
+| The BuildType has no "GitHub Bridge integration" feature at all | Without the feature the BuildType is not opted in; nothing gates it. Add the feature (or inherit it from a template — needs 1.6.0+). |
+| The project does not set `teamcity.github.bridge.repo` | Set it on the project's GitHub Bridge tab; the slug must match `repository.full_name` from GitHub. With no repo the config never resolves and the gate is skipped. |
+| The project's `teamcity.github.bridge.connectionId` is wrong/empty | Set `managed` or a valid `PROJECT_EXT_<N>` / `CID_<hash>`. With no token the plugin cannot fetch PR draft state and fails open. The log shows `Cannot resolve token`. |
 | GitHub App lacks `Pull requests: read` permission | API returns 403; plugin logs the warning and fails open. Add the permission and accept it on the App page. |
-| Branch does not look like `pull/N` | The filter only acts on branch names matching `pull/<number>`. Check the VCS root's branchSpec. |
-| Build was triggered manually by an operator (since v1.3.0) | This is intentional: a manual "Run" bypasses the draft gate. The log shows `Allowing manual user trigger of <buildType> on draft PR`. To suppress this, ask the operator to wait until the PR is marked ready. |
+| Branch does not look like `pull/N` | The gate only treats `pull/<number>` branches as PRs. Check the VCS root's branchSpec. |
+| Build was triggered manually by an operator | This is intentional: a manual "Run" HARD-blocks a draft build that would be suppressed, but bypasses the soft branch filters. The gate distinguishes manual from auto triggers via `isManualTrigger`. To avoid surprises, ask the operator to wait until the PR is marked ready. |
 
 ### Verify
 
@@ -206,8 +257,9 @@ You should see one of:
 - `Cannot resolve token for <buildType>; allowing build to proceed`
 - `Cannot fetch PR info for <repo>#<n>; allowing build to proceed`
 
-If neither appears, the filter is not even reaching this build:
-check the three parameters and the branch name.
+If neither appears, the gate is not even reaching this build: confirm
+the feature is present, the project repo + connectionId are set, and
+the branch name matches `pull/<number>`.
 
 ## Symptom: PR marked ready, but no retrigger happens
 
@@ -222,7 +274,9 @@ queue.
 | Cause | Fix |
 |---|---|
 | `teamcity.github.bridge.repo` slug does not match GitHub's `repository.full_name` | Compare case-sensitively. GitHub normalises owner/name casing differently in some places. |
-| Build types do not have `teamcity.github.bridge.ignoreDrafts=true` | The retrigger filter requires both `teamcity.github.bridge.repo` match and `teamcity.github.bridge.ignoreDrafts="true"`. |
+| The BuildTypes are not opted in | The listener only enqueues BuildTypes whose **"GitHub Bridge integration"** feature resolves against the project's `repo` + `connectionId`. Confirm the feature is present (or template-inherited on 1.6.0+) and the project params are set. |
+| The matching BuildTypes do not run on ready PRs | Each candidate needs `triggerOnPrReady` on (it is on by default). With it off the gate HARD-blocks the BuildType for every PR. |
+| The PR's source branch is excluded by the branch filter | The `prTrigger` branch list (project-level, or the per-feature override) must match the PR head ref. An empty list matches every branch. |
 | Build queue optimiser deduped against an existing build | A build for `pull/N` on the same revision may already be running. Check the running builds list. |
 | Build types are paused | `ProjectManager.activeBuildTypes` excludes paused. Unpause or use a sibling build type. |
 
@@ -415,6 +469,163 @@ If you want the warning to disappear, run the build container with
 `docker-compose.yml`. If you still see the warning, ensure
 `.cache/home` exists on the host (the `./dev` script creates it).
 
+## Symptom: external API returns 503 or 401
+
+### What you see
+
+```
+$ curl -s https://<TC_HOST>/app/teamcity-github-bridge/api/status
+{"error":"API disabled (no token configured)"}     # HTTP 503
+
+$ curl -s -H "Authorization: Bearer wrong" .../api/status
+{"error":"invalid or missing bearer token"}         # HTTP 401
+```
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| `503` - no API bearer token configured | The external API is disabled until you set an API token. `Administration -> Server Administration -> GitHub Bridge`, set the API token (stored under the `api.token` setting), save. |
+| `401` - missing `Authorization` header | Send `Authorization: Bearer <token>`. Any other scheme, or no header, is rejected. |
+| `401` - token mismatch | The supplied token differs from the configured one (compared constant-time). Re-copy the exact value; trailing whitespace is trimmed but the bodies must match. |
+
+Distinguish these from TeamCity's own `/app/*` auth 401 (body
+`Authentication required`): the API does its own bearer-token auth
+via `addPathNotRequiringAuth`, so its 401 body is JSON.
+
+## Symptom: a "/rebuild" comment does nothing
+
+### What you see
+
+A collaborator comments the trigger phrase on a PR, GitHub shows the
+`issue_comment` delivery as `200`, but no build is enqueued.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The comment author is not on the allowlist | Only `author_association` values in `comment.allowedAssociations` (default `OWNER,MEMBER,COLLABORATOR`) may trigger. The log shows `Ignoring PR #<n> comment command from <user> (association=<X> not allowed)`. Add the association or grant the user write access. |
+| The GitHub App is not sending `issue_comment` | Enable the **Issue comments** event on the App's webhook subscriptions. Without it GitHub never delivers the comment. |
+| The trigger phrase does not match | The BuildType's feature must set a non-blank `commentTrigger`, and the phrase must appear in the comment body (case-insensitive substring). Check for typos on either side. |
+| The repo is not on the server allowlist | If `repo.allowlist` is set, the repo must be on it; otherwise the listener returns early. |
+
+### Verify
+
+```bash
+grep PullRequestEventListener <TC_DATA_DIR>/logs/teamcity-github-bridge.log | tail -20
+```
+
+You should see `PR #<n> comment by <user> matched N BT(s)` on a
+successful match.
+
+## Symptom: run-on-approval suite never starts after an approval
+
+### What you see
+
+A reviewer approves the PR, but the BuildType meant to run on
+approval is never enqueued.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The GitHub App is not sending `pull_request_review` | Enable the **Pull request reviews** event on the App. Without it, approvals never reach the plugin. |
+| The BuildType did not opt into run-on-approval | The feature must set run-on-approval and have the PR trigger enabled; the branch must match the trigger's branch filter. |
+| The PR is still a draft | `handleReviewApproved` returns early for draft PRs. |
+| The review was not an approval | Only `state=approved` submissions are acted on; "commented" or "changes requested" reviews are ignored. |
+| The repo is not on the allowlist | Same allowlist gate as the other events. |
+
+### Verify
+
+```bash
+grep "approved" <TC_DATA_DIR>/logs/teamcity-github-bridge.log | tail
+```
+
+Look for `PR #<n> approved: N run-on-approval BT(s)`.
+
+## Symptom: the GitHub "Re-run" button does nothing
+
+### What you see
+
+Clicking **Re-run** on a TeamCity Check Run in the PR's Checks tab
+produces no new build.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The GitHub App is not sending `check_run` | Enable the **Check runs** event on the App's webhook subscriptions. The re-run button fires a `check_run` `rerequested` delivery the plugin must receive. |
+| The Check Run name matches no BuildType | The plugin maps `payload.checkRunName` back to a BuildType via `checkRunName(bt)`. If it matches none (e.g. a different CI's check), the log shows `check_run rerequested '<name>' matched no BuildType`. |
+| No PR number or head branch in the payload | A `check_run` without an associated PR/branch is logged and ignored. |
+| The repo is not on the allowlist | Same allowlist gate. |
+
+Note: re-run intentionally bypasses the "already finished" skip
+(`ignoreFinished=true`), but it still skips a build that is
+currently running or queued at that head SHA.
+
+## Symptom: the PR summary comment is not posted
+
+### What you see
+
+Builds finish and post Check Runs, but no rolling "TeamCity build
+summary" comment appears on the PR thread.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The feature is disabled | The sticky PR comment is **off by default** (`prComment.enabled`). Turn it on in the admin settings. |
+| The App lacks pull-requests write | Posting/deleting issue comments needs the App's **Pull requests: Write** (issues write) permission. Without it the upsert logs `Failed upserting PR summary comment ...`. Add the permission and accept it on the App's installation page. |
+| Dry-run is on | `maybeUpdatePrComment` is skipped in dry-run. |
+| The build is not a PR build | The comment is only posted for builds on a `pull/<n>` branch. |
+
+The comment is a single "sticky" row-per-check summary; because
+`HttpURLConnection` cannot PATCH, an update is delete-then-create,
+so the comment moves to the bottom of the thread on each refresh.
+
+## Symptom: `/metrics` returns 404
+
+### What you see
+
+```
+$ curl -i https://<TC_HOST>/app/teamcity-github-bridge/metrics
+HTTP/1.1 404 Not Found
+```
+
+### Cause
+
+Metrics export is disabled. `MetricsController` returns `404` when
+`metrics.enabled` is off, even though the controller is registered.
+
+### Fix
+
+Enable metrics in the admin settings (`metrics.enabled`). The
+endpoint then serves Prometheus text (`bridge_<name>_total`
+counters). The same counters are also available as JSON via the
+authenticated `/api/metrics` route. Note: 404 here means "disabled",
+not "plugin not loaded" - distinguish from a 404 on `/info`, which
+points at a load/proxy problem.
+
+## Symptom: builds are not triggered for a particular repo
+
+### What you see
+
+Webhook deliveries arrive `200`, the BuildTypes are correctly
+configured, but nothing is enqueued for one specific repo.
+
+### Likely causes
+
+| Cause | Fix |
+|---|---|
+| The repo allowlist excludes it | If `repo.allowlist` is non-empty, only listed `owner/repo` slugs are acted on; everything else is ignored with `Repo <slug> is not on the allowlist`. Add the repo or clear the allowlist (empty = no restriction). |
+| Dry-run is on | Every enqueue becomes a `[dry-run] would enqueue ...` log line with no build added. Turn dry-run off once you have validated the matching. |
+
+### Verify
+
+```bash
+grep -E "not on the allowlist|\[dry-run\]" <TC_DATA_DIR>/logs/teamcity-github-bridge.log | tail
+```
+
 ## Reading the plugin's logs
 
 The plugin uses one logger category per package. Filter by:
@@ -437,7 +648,7 @@ Useful log lines:
 | `Webhook with invalid or missing signature rejected (event=X)` | Signature mismatch; check both sides. |
 | `Handling pull_request.<action> for <repo>#<n>` | Webhook received and verified. Action is one of `opened`, `ready_for_review`, `synchronize`. |
 | `Skipping <buildType> for <repo>#<n>: already running/queued/finished ...` | Smart-skip kicked in — a build already exists at the same head SHA, no fresh enqueue. |
-| `No build types found for <repo>` | None of the active build types have `teamcity.github.bridge.repo=<repo>` + `teamcity.github.bridge.ignoreDrafts=true`. |
+| `No build types found for <repo>` | None of the active build types are opted in for `<repo>`: either the "GitHub Bridge integration" feature is missing, or the project's `teamcity.github.bridge.repo` / `connectionId` did not resolve. |
 | `Suppressing build of <buildType> for draft PR <repo>#<n>` | Draft filter applied. |
 | `Cannot resolve token for <buildType>` | The connection ID is wrong or the App is uninstalled. |
 | `Cannot fetch PR info for <repo>#<n>` | GitHub API call failed. Check rate limits or permissions. |

@@ -65,14 +65,23 @@
     </div>
 </c:if>
 
-<form class="bridge-runtests-form" method="post" action="${runTestsUrl}">
-    <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
-    <button type="submit">Run self-tests</button>
-    <span style="color: #555; font-size: 13px;">
-        Runs 7+ checks end-to-end: config, GitHub reachability, HMAC roundtrip,
-        webhook self-delivery, and token resolution for every opted-in build configuration.
-    </span>
-</form>
+<div class="bridge-section bridge-card">
+    <h2>Getting started</h2>
+    <ol style="margin:4px 0 0 18px; padding:0; line-height:1.7;">
+        <li><strong>Create &amp; install the GitHub App</strong> — use the <em>GitHub App</em> card below
+            (one click; webhook URL, permissions and events are pre-filled). Then install it on your org/repos.</li>
+        <li><strong>Point a project at it</strong> — open <em>Administration &rarr; &lt;your project&gt; &rarr; GitHub Bridge</em>,
+            set the repository and <code>connectionId=${managedConnectionId}</code>.</li>
+        <li><strong>Opt a build configuration in</strong> — add the <em>GitHub Bridge integration</em> build feature
+            (Build Features tab) to each build configuration that should report to GitHub.</li>
+        <li><strong>Verify</strong> — use <em>Verify App configuration</em> (GitHub App card) and <em>Run self-tests</em> (below),
+            then open a pull request and watch the Check Run appear.</li>
+    </ol>
+    <p style="font-size:12px; color:#888; margin-bottom:0;">
+        Prefer to wire an existing App by hand? See the
+        <a href="https://github.com/silmaen/teamcity-github/blob/main/doc/github-app-setup.md" target="_blank">manual setup guide</a>.
+    </p>
+</div>
 
 <c:if test="${not empty testResults}">
     <div class="bridge-section">
@@ -185,6 +194,206 @@
             </td>
         </tr>
     </table>
+</div>
+
+<div class="bridge-section bridge-card">
+    <h2>GitHub App</h2>
+    <c:choose>
+        <c:when test="${managedAppConfigured}">
+            <p>
+                <span class="bridge-status bridge-ok">managed App configured</span>
+                &nbsp;<code>${managedAppSlug}</code>
+            </p>
+            <p style="font-size:13px;">
+                <a href="${appSettingsUrl}" target="_blank">Open App settings on GitHub</a>
+                &middot;
+                <a href="${appInstallUrl}" target="_blank">Install / manage installations</a>
+            </p>
+            <p style="font-size:13px; color:#555;">
+                To use this App, set <code>connectionId=${managedConnectionId}</code> on your build
+                configurations (project &rarr; GitHub Bridge tab), instead of a TeamCity connection ID.
+            </p>
+            <form method="post" action="${saveSecretUrl}" style="margin:8px 0;">
+                <input type="hidden" name="action" value="verifyApp"/>
+                <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
+                <button type="submit" style="padding:6px 16px; background:#1976d2; color:#fff; border:none; border-radius:3px; font-weight:600; cursor:pointer;">Verify App configuration</button>
+                <span style="color:#555; font-size:13px;">Calls <code>GET /app</code> and checks the App's live permissions &amp; subscribed events against what the plugin needs.</span>
+            </form>
+            <c:if test="${not empty appVerification}">
+                <div style="margin-top:8px;">
+                    <c:choose>
+                        <c:when test="${appVerification['ok']}">
+                            <span class="bridge-status bridge-ok">configuration OK</span>
+                        </c:when>
+                        <c:when test="${not appVerification['reachable']}">
+                            <span class="bridge-status bridge-bad">unreachable</span> &nbsp;${appVerification['detail']}
+                        </c:when>
+                        <c:otherwise>
+                            <span class="bridge-status bridge-warn">needs attention</span>
+                        </c:otherwise>
+                    </c:choose>
+                    <div style="font-size:13px; margin-top:4px;"><c:out value="${appVerification['detail']}"/></div>
+                    <c:if test="${not empty appVerification['missingPermissions']}">
+                        <div style="font-size:13px; margin-top:4px;">Missing permissions: <code><c:out value="${appVerification['missingPermissions']}"/></code></div>
+                    </c:if>
+                    <c:if test="${not empty appVerification['missingEvents']}">
+                        <div style="font-size:13px;">Missing events: <code><c:out value="${appVerification['missingEvents']}"/></code></div>
+                    </c:if>
+                </div>
+            </c:if>
+        </c:when>
+        <c:otherwise>
+            <p style="color:#555; font-size:13px; margin-top:0;">
+                Let the plugin create a pre-configured GitHub App for you (correct
+                webhook URL, permissions, and events). GitHub shows a confirmation
+                screen; after you create it, the credentials are stored here
+                automatically. You still install the App on your org/repos afterwards.
+            </p>
+            <form id="bridge-create-app" method="post" action="https://github.com/settings/apps/new?state=${appState}">
+                <input type="hidden" name="manifest" id="bridge-manifest" value="<c:out value='${appManifestJson}'/>"/>
+                <label style="font-size:13px;">GitHub organisation (optional, leave blank for a personal App):
+                    <input type="text" id="bridge-app-org" placeholder="my-org" style="width:200px;"/>
+                </label>
+                <br/>
+                <button type="submit" style="margin-top:8px; padding:6px 16px; background:#2e7d32; color:#fff; border:none; border-radius:3px; font-weight:600; cursor:pointer;">Create GitHub App</button>
+            </form>
+            <script>
+                (function () {
+                    var f = document.getElementById('bridge-create-app');
+                    f.addEventListener('submit', function () {
+                        var org = (document.getElementById('bridge-app-org').value || '').trim();
+                        f.action = org
+                            ? 'https://github.com/organizations/' + encodeURIComponent(org) + '/settings/apps/new?state=${appState}'
+                            : 'https://github.com/settings/apps/new?state=${appState}';
+                    });
+                })();
+            </script>
+        </c:otherwise>
+    </c:choose>
+</div>
+
+<div class="bridge-section bridge-card">
+    <h2>Server settings</h2>
+    <p style="color:#555; font-size:13px; margin-top:0;">
+        Tuning and feature flags applied server-wide. Saved to
+        <code>&lt;TC_DATA_DIR&gt;/config/teamcity-github-bridge.properties</code>
+        and applied immediately (no restart). Leave a text field blank to
+        revert it to the default / legacy internal property.
+    </p>
+    <form method="post" action="${saveSettingsUrl}">
+        <input type="hidden" name="action" value="saveSettings"/>
+        <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
+        <table class="bridge-kv">
+            <tr>
+                <th><label for="set-apiBase">API base override</label></th>
+                <td>
+                    <input type="text" id="set-apiBase" name="apiBase" value="<c:out value='${set_apiBase}'/>" placeholder="(derive per connection)" style="width:360px;"/>
+                    <div style="font-size:11px;color:#888;">Blank = derive from each connection's GitHub URL (github.com &rarr; api.github.com, GHE &rarr; &lt;host&gt;/api/v3).</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="set-apiVersion">API version</label></th>
+                <td>
+                    <input type="text" id="set-apiVersion" name="apiVersion" value="<c:out value='${set_apiVersion}'/>" placeholder="2022-11-28" style="width:160px;"/>
+                    <div style="font-size:11px;color:#888;">The <code>X-GitHub-Api-Version</code> header, e.g. <code>2022-11-28</code>.</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="set-ttl">PR-info cache TTL (s)</label></th>
+                <td><input type="number" min="0" id="set-ttl" name="ttlSeconds" value="${set_ttlSeconds}" style="width:100px;"/></td>
+            </tr>
+            <tr>
+                <th><label for="set-grace">Stale grace (s)</label></th>
+                <td>
+                    <input type="number" min="0" id="set-grace" name="staleGraceSeconds" value="${set_staleGraceSeconds}" style="width:100px;"/>
+                    <div style="font-size:11px;color:#888;">How long a stale PR-info entry may still be served when a refresh fetch fails.</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="set-attempts">HTTP retry attempts</label></th>
+                <td><input type="number" min="1" max="10" id="set-attempts" name="httpMaxAttempts" value="${set_httpMaxAttempts}" style="width:80px;"/> &nbsp; base delay (ms) <input type="number" min="0" name="httpBaseDelayMs" value="${set_httpBaseDelayMs}" style="width:100px;"/></td>
+            </tr>
+            <tr>
+                <th>Feature flags</th>
+                <td>
+                    <label style="display:block;"><input type="checkbox" name="replayEnabled" <c:if test="${set_replayEnabled}">checked</c:if>/> Webhook replay protection</label>
+                    <label style="display:block;"><input type="checkbox" name="dryRun" <c:if test="${set_dryRun}">checked</c:if>/> Dry-run (log intended actions, perform none)</label>
+                    <label style="display:block;"><input type="checkbox" name="metricsEnabled" <c:if test="${set_metricsEnabled}">checked</c:if>/> Metrics endpoint</label>
+                    <label style="display:block;"><input type="checkbox" name="legacyAliases" <c:if test="${set_legacyAliases}">checked</c:if>/> Publish legacy <code>teamcity.pullRequest.*</code> aliases</label>
+                    <label style="display:block;"><input type="checkbox" name="prComment" <c:if test="${set_prComment}">checked</c:if>/> Sticky PR summary comment <span style="color:#888;">(needs the App's pull-requests write permission)</span></label>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="set-allowlist">Repository allowlist</label></th>
+                <td>
+                    <textarea id="set-allowlist" name="repoAllowlist" rows="3" style="width:360px;font-family:monospace;"><c:out value="${set_repoAllowlist}"/></textarea>
+                    <div style="font-size:11px;color:#888;">One <code>owner/name</code> per line. Empty = act on all repositories.</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="set-assoc">Comment-trigger authors</label></th>
+                <td>
+                    <input type="text" id="set-assoc" name="commentAssociations" value="<c:out value='${set_commentAssociations}'/>" style="width:360px;"/>
+                    <div style="font-size:11px;color:#888;">GitHub <code>author_association</code> values allowed to trigger builds via PR comments (comma-separated). Default <code>OWNER,MEMBER,COLLABORATOR</code>.</div>
+                </td>
+            </tr>
+            <tr>
+                <td></td>
+                <td><button type="submit" style="padding:6px 16px; background:#1976d2; color:#fff; border:none; border-radius:3px; font-weight:600; cursor:pointer;">Save server settings</button></td>
+            </tr>
+        </table>
+    </form>
+</div>
+
+<div class="bridge-section bridge-card">
+    <h2>External API</h2>
+    <p style="color:#555; font-size:13px; margin-top:0;">
+        A bearer token enables the authenticated API under
+        <code>/app/teamcity-github-bridge/api/</code> (status, events, metrics,
+        and build trigger). No token = API disabled. Pass it as
+        <code>Authorization: Bearer &lt;token&gt;</code>.
+    </p>
+    <c:choose>
+        <c:when test="${apiTokenConfigured}">
+            <span class="bridge-status bridge-ok">enabled</span>
+        </c:when>
+        <c:otherwise>
+            <span class="bridge-status bridge-warn">disabled</span>
+        </c:otherwise>
+    </c:choose>
+    <form class="bridge-secret-form" method="post" action="${saveSecretUrl}" autocomplete="off">
+        <label for="bridge-apitoken-input">
+            <c:choose>
+                <c:when test="${apiTokenConfigured}">Replace the API token:</c:when>
+                <c:otherwise>Set an API token to enable the API:</c:otherwise>
+            </c:choose>
+        </label>
+        <input id="bridge-apitoken-input" type="password" name="apiToken" placeholder="paste a strong random string" autocomplete="new-password" required/>
+        <input type="hidden" name="action" value="setApiToken"/>
+        <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
+        <button type="submit">Save</button>
+        <div class="bridge-hint">Generate with <code>openssl rand -hex 32</code>. Stored alongside the other plugin settings; never echoed back.</div>
+    </form>
+    <c:if test="${apiTokenConfigured}">
+        <form method="post" action="${saveSecretUrl}" style="margin-top:6px;"
+              onsubmit="return confirm('Clear the API token? The external API will be disabled until a new one is set.');">
+            <input type="hidden" name="action" value="clearApiToken"/>
+            <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
+            <button type="submit" style="color:#b71c1c; background:transparent; border:1px solid #b71c1c; padding:4px 10px; border-radius:3px;">Disable API</button>
+        </form>
+    </c:if>
+</div>
+
+<div class="bridge-section bridge-card">
+    <h2>Self-tests</h2>
+    <form class="bridge-runtests-form" method="post" action="${runTestsUrl}">
+        <input type="hidden" name="${csrfTokenName}" value="${csrfToken}"/>
+        <button type="submit">Run self-tests</button>
+        <span style="color: #555; font-size: 13px;">
+            Run this <strong>after</strong> setting the webhook secret and creating the App. Checks config,
+            GitHub reachability, HMAC roundtrip, webhook self-delivery, and token resolution for every opted-in build configuration.
+        </span>
+    </form>
 </div>
 
 <div class="bridge-section">

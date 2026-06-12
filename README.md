@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -98,24 +98,78 @@ Concretely:
   so the plugin works on a vanilla TeamCity 2026.1 sandbox without
   any prior interaction with TC's connection cache.
 
+New in 1.7.0:
+
+- **One-click managed GitHub App** - create a pre-configured GitHub App
+  straight from the admin page (GitHub's manifest flow): the webhook URL,
+  permissions and events are filled in for you and the credentials are
+  stored automatically. A **Verify** button checks the live App against
+  what the plugin needs. Point a project at it with `connectionId=managed`
+  — no TeamCity OAuth connection or `.pem` handling required.
+- **In-product configuration pages** - no more editing files by
+  hand. A per-project **GitHub Bridge** settings tab lets project
+  admins tune behaviour for their project, and the server admin page
+  edits the server-level settings and feature flags live, with every
+  change applied immediately (no restart).
+- **HTTP retry + GitHub rate-limit handling** - transient failures
+  are retried, and the client honours GitHub's `Retry-After` /
+  rate-limit headers so it backs off instead of hammering the API.
+- **Webhook replay protection** - duplicate deliveries are detected
+  and dropped by deduplicating on the `X-GitHub-Delivery` id.
+- **`/health` and `/metrics` endpoints** - a JSON `/health` probe
+  for liveness checks and a Prometheus-format `/metrics` endpoint
+  for scraping.
+- **Cancels still-queued builds on `pull_request.closed`/merged** -
+  when a PR is closed or merged, any of its builds still sitting in
+  the queue are removed instead of wasting agent time.
+- **Monorepo path filtering** - a per-buildType `pathFilter` so a
+  build only fires when the PR touches paths it cares about.
+- **Run-on-approval and re-run from the GitHub Checks UI** -
+  `pull_request_review` can gate builds on approval, and the
+  **Re-run** button on a GitHub Check Run (`check_run` `rerequested`)
+  re-enqueues the build.
+- **Trigger builds from PR comments** - posting a configurable
+  phrase as an `issue_comment` enqueues builds, restricted to
+  trusted commenters (repo collaborators by default).
+- **Optional sticky PR summary comment** - a single maintained
+  comment on the PR that summarises build status (requires the
+  GitHub App to have pull-requests/issues **write** permission).
+- **Repo allowlist and dry-run mode** - scope the plugin to an
+  explicit set of repositories, and a dry-run mode that logs what
+  it *would* do without enqueuing or posting anything.
+- **Authenticated external HTTP API** - a bearer-token API under
+  `/app/teamcity-github-bridge/api/` exposing status, events and
+  metrics, and able to trigger builds programmatically.
+- **Legacy `teamcity.pullRequest.*` parameter aliases** (opt-in) -
+  exposes the PR metadata under the bundled parameter names for DSL
+  that already relies on them.
+
 ## Quick start
 
-Everything runs in Docker - nothing is installed on the host.
+**➡️ New here? Follow the [5-minute Quickstart](doc/quickstart.md)** — it
+takes you from a fresh install to a green Check Run using the one-click
+**managed GitHub App** flow (no private key, no manual webhook).
+
+Build the plugin archive (everything runs in Docker — nothing is
+installed on the host):
 
 ```bash
-# Build the plugin archive
 ./dev package
-# -> target/teamcity-github-bridge-1.6.0.zip
+# -> target/teamcity-github-bridge-<version>.zip
 
 # Drop it into your TeamCity Data Dir and restart
 cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
 ```
 
-Then follow the three setup pages:
+Then, in the product:
 
-1. [Set up the GitHub App](doc/github-app-setup.md) (~5 min)
-2. [Configure the App-level webhook](doc/webhook-setup.md) (~3 min)
-3. [Enable the bridge on a build configuration](doc/configuration.md#enable-on-a-build-configuration) (~1 min per build type)
+1. **Administration → GitHub Bridge → Create GitHub App**, and install it.
+2. **Administration → \<project\> → GitHub Bridge**: set the repository and `connectionId=managed`.
+3. Add the **GitHub Bridge integration** build feature to a build configuration.
+
+Prefer to wire an existing App by hand? See
+[github-app-setup.md → Option B](doc/github-app-setup.md) and
+[webhook-setup.md](doc/webhook-setup.md).
 
 ## Architecture at a glance
 
@@ -165,8 +219,13 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 > with the linked page closest to the question you are answering;
 > they cross-link rather than nest.
 
+**New to the plugin? Start with the [Quickstart](doc/quickstart.md).**
+The [doc/ index](doc/README.md) maps every page to a task.
+
 ### Get it running
 
+- [Quickstart](doc/quickstart.md) - fresh install to a green Check Run
+  in 5 minutes via the managed-App flow.
 - [Installation](doc/installation.md) - build the zip, drop it in
   the data dir, verify the load.
 - [GitHub App setup](doc/github-app-setup.md) - create the App,
@@ -208,7 +267,7 @@ See [doc/architecture.md](doc/architecture.md) for the full picture
 
 ## Status
 
-**Stable**. Current version is **1.6.0**. 152 unit tests pass.
+**Stable**. Current version is **1.7.0**. 180+ unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery
@@ -223,7 +282,7 @@ may add fields and endpoints; they will not rename or remove what
 already exists.
 
 See [CHANGELOG.md](CHANGELOG.md) for the per-version change log.
-See [doc/roadmap.md](doc/roadmap.md) for what comes after 1.3.
+See [doc/roadmap.md](doc/roadmap.md) for what's shipped and what's planned next.
 
 ## License
 

@@ -1,6 +1,7 @@
 package io.github.dlachouette.teamcity.github.api
 
 import com.intellij.openapi.diagnostic.Logger
+import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import jetbrains.buildServer.serverSide.SProject
 import jetbrains.buildServer.serverSide.connections.credentials.ConnectionCredentialsException
 import jetbrains.buildServer.serverSide.connections.credentials.ProjectConnectionCredentialsManager
@@ -57,6 +58,7 @@ class TokenResolver(
     private val oauthConnectionsManager: OAuthConnectionsManager,
     private val credentialsManager: ProjectConnectionCredentialsManager,
     private val appTokenMinter: AppTokenMinter,
+    private val serverSettings: BridgeServerSettings,
 ) {
 
     private val lastWarnedAtMs = ConcurrentHashMap<String, Long>()
@@ -69,6 +71,11 @@ class TokenResolver(
     private val unsupportedProviderTypes = ConcurrentHashMap.newKeySet<String>()
 
     fun resolveAccessToken(project: SProject, connectionId: String, repo: RepoCoords): ResolvedAccess? {
+        // Sentinel: mint from the plugin-managed App (created via the
+        // manifest flow) rather than a TeamCity OAuth connection.
+        if (connectionId == BridgeServerSettings.MANAGED_CONNECTION_ID) {
+            return resolveViaManagedApp(repo, project.externalId)
+        }
         val descriptor = findConnection(project, connectionId)
         if (descriptor == null) {
             if (shouldLog("no-conn", project.externalId, connectionId)) {
@@ -101,6 +108,34 @@ class TokenResolver(
         return ResolvedAccess(token = accessToken, apiBase = apiBase)
     }
 
+    private fun resolveViaManagedApp(repo: RepoCoords, projectId: String): ResolvedAccess? {
+        val appId = serverSettings.managedAppId()
+        val pem = serverSettings.managedAppPrivateKey()
+        if (appId == null || pem == null) {
+            if (shouldLog("no-managed-app", projectId, BridgeServerSettings.MANAGED_CONNECTION_ID)) {
+                LOG.warn(
+                    "connectionId is '${BridgeServerSettings.MANAGED_CONNECTION_ID}' but no managed GitHub App is configured. " +
+                        "Create one from Administration -> GitHub Bridge, or point connectionId at a TeamCity connection."
+                )
+            }
+            return null
+        }
+        val apiBase = serverSettings.apiBaseOverride() ?: GitHubClient.DEFAULT_API_BASE
+        val token = try {
+            appTokenMinter.mint(
+                connectionId = BridgeServerSettings.MANAGED_CONNECTION_ID,
+                connectionDisplayName = "Managed GitHub App",
+                params = mapOf("appId" to appId, "privateKey" to pem),
+                repo = repo,
+                apiBase = apiBase,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("Managed-App mint threw for repo=${repo.slug}: [${e.javaClass.simpleName}] ${e.message}", e)
+            null
+        } ?: return null
+        return ResolvedAccess(token = token, apiBase = apiBase)
+    }
+
     // Computes the REST apiBase for the connection. Tries the
     // candidate descriptor keys first, falls back to api.github.com
     // if none are present.
@@ -116,6 +151,9 @@ class TokenResolver(
     // connection) pair, even when resolveAccessToken fails. Returns
     // null only if the connection cannot be found.
     fun computeApiBase(project: SProject, connectionId: String): String? {
+        if (connectionId == BridgeServerSettings.MANAGED_CONNECTION_ID) {
+            return serverSettings.apiBaseOverride() ?: GitHubClient.DEFAULT_API_BASE
+        }
         val descriptor = findConnection(project, connectionId) ?: return null
         return apiBaseFromDescriptor(descriptor)
     }

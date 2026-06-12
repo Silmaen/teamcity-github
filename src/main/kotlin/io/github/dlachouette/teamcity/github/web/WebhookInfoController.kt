@@ -26,9 +26,9 @@ class WebhookInfoController(
     }
 
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView? {
-        val scheme = resolvedScheme(request)
+        val scheme = RequestUrlBuilder.resolvedScheme(request)
         val info = WebhookInfo(
-            payloadUrl = absoluteWebhookUrl(request, scheme),
+            payloadUrl = RequestUrlBuilder.absoluteUrl(request, PluginWebhookController.WEBHOOK_PATH),
             contentType = "application/json",
             sslVerification = scheme == "https",
             recommendedEvents = WebhookEvents.RECOMMENDED,
@@ -54,29 +54,6 @@ class WebhookInfoController(
                 null
             }
         }
-    }
-
-    private fun resolvedScheme(request: HttpServletRequest): String {
-        val forwarded = request.getHeader("X-Forwarded-Proto")?.substringBefore(',')?.trim()
-        return forwarded?.lowercase()?.takeIf { it.isNotBlank() } ?: request.scheme
-    }
-
-    private fun absoluteWebhookUrl(request: HttpServletRequest, scheme: String): String {
-        val ctx = request.contextPath.trimEnd('/')
-        val hostHeader = request.getHeader("X-Forwarded-Host")?.substringBefore(',')?.trim()
-        val authority = if (!hostHeader.isNullOrBlank()) {
-            hostHeader
-        } else {
-            val name = request.serverName
-            val port = request.getHeader("X-Forwarded-Port")?.toIntOrNull() ?: request.serverPort
-            val portPart = when {
-                scheme == "http" && port == 80 -> ""
-                scheme == "https" && port == 443 -> ""
-                else -> ":$port"
-            }
-            "$name$portPart"
-        }
-        return "$scheme://$authority$ctx${PluginWebhookController.WEBHOOK_PATH}"
     }
 
     companion object {

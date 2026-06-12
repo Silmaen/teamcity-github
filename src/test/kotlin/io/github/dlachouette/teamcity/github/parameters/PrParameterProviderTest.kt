@@ -91,6 +91,22 @@ class PrParameterProviderTest {
     }
 
     @Test
+    fun `legacy aliases are emitted only when enabled and only for PR builds`() {
+        val without = PrParameterProvider.computeParams("pull/189", legacyAliases = false) { _ -> readyPr }
+        assertEquals(null, without[PrParameterProvider.ALIAS_PR_NUMBER])
+
+        val with = PrParameterProvider.computeParams("pull/189", legacyAliases = true) { _ -> readyPr }
+        assertEquals("189", with[PrParameterProvider.ALIAS_PR_NUMBER])
+        assertEquals("Add raycast shadows", with[PrParameterProvider.ALIAS_PR_TITLE])
+        assertEquals("feature/raycast", with[PrParameterProvider.ALIAS_PR_SOURCE_BRANCH])
+        assertEquals("main", with[PrParameterProvider.ALIAS_PR_TARGET_BRANCH])
+
+        // Non-PR builds never get aliases even when enabled.
+        val nonPr = PrParameterProvider.computeParams("main", legacyAliases = true) { _ -> readyPr }
+        assertEquals(null, nonPr[PrParameterProvider.ALIAS_PR_NUMBER])
+    }
+
+    @Test
     fun `ALL_KEYS lists exactly 8 keys and matches DEFAULT_NON_PR_PARAMS`() {
         assertEquals(8, PrParameterProvider.ALL_KEYS.size)
         assertEquals(PrParameterProvider.ALL_KEYS.toSet(), PrParameterProvider.DEFAULT_NON_PR_PARAMS.keys)

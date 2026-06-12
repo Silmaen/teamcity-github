@@ -43,6 +43,17 @@ data class BridgeFeatureConfig(
     val triggerOnBranch: Boolean,
     val triggerOnPrReady: Boolean,
     val triggerOnPrDraft: Boolean,
+    // Optional monorepo path filter over the PR's changed files. Empty =
+    // no path restriction. Enforced by the listener only (it needs the
+    // PR file list from the GitHub API). Defaults to an empty matcher so
+    // existing call sites/tests need not supply it.
+    val pathFilter: BranchSpecMatcher = BranchSpecMatcher.parse(null),
+    // When true, this BT is enqueued on PR approval (pull_request_review),
+    // for suites deliberately gated behind review. Default false.
+    val runOnApproval: Boolean = false,
+    // Optional PR-comment trigger phrase (case-insensitive substring).
+    // Empty = no comment trigger.
+    val commentTrigger: String = "",
 )
 
 object BridgeFeatureReader {
@@ -125,6 +136,9 @@ object BridgeFeatureReader {
             triggerOnBranch = triggerOnBranch,
             triggerOnPrReady = triggerOnPrReady,
             triggerOnPrDraft = triggerOnPrDraft,
+            pathFilter = BranchSpecMatcher.parse(featureParams[GitHubBridgeBuildFeature.PARAM_PATH_FILTER]),
+            runOnApproval = featureParams[GitHubBridgeBuildFeature.PARAM_RUN_ON_APPROVAL] == "true",
+            commentTrigger = featureParams[GitHubBridgeBuildFeature.PARAM_COMMENT_TRIGGER]?.trim().orEmpty(),
         )
     }
 }

@@ -53,7 +53,7 @@ class AppTokenMinterTest {
 
     @Test
     fun `parsePrivateKey accepts a fresh PKCS8 PEM`() {
-        val parsed = AppTokenMinter.parsePrivateKey(pkcs8Pem)
+        val parsed = RsaKeyParser.parsePrivateKey(pkcs8Pem)
         assertNotNull(parsed)
         assertEquals(privateKey.modulus, parsed!!.modulus)
     }
@@ -61,22 +61,22 @@ class AppTokenMinterTest {
     @Test
     fun `parsePrivateKey tolerates literal backslash-n escape sequences`() {
         val singleLine = pkcs8Pem.replace("\n", "\\n")
-        val parsed = AppTokenMinter.parsePrivateKey(singleLine)
+        val parsed = RsaKeyParser.parsePrivateKey(singleLine)
         assertNotNull(parsed)
     }
 
     @Test
     fun `parsePrivateKey rejects garbage input`() {
-        assertNull(AppTokenMinter.parsePrivateKey("not a pem at all"))
-        assertNull(AppTokenMinter.parsePrivateKey(""))
-        assertNull(AppTokenMinter.parsePrivateKey("-----BEGIN PRIVATE KEY-----\n!!not-base64!!\n-----END PRIVATE KEY-----"))
+        assertNull(RsaKeyParser.parsePrivateKey("not a pem at all"))
+        assertNull(RsaKeyParser.parsePrivateKey(""))
+        assertNull(RsaKeyParser.parsePrivateKey("-----BEGIN PRIVATE KEY-----\n!!not-base64!!\n-----END PRIVATE KEY-----"))
     }
 
     @Test
     fun `parsePrivateKey accepts a PKCS1 PEM produced manually`() {
         val crt = privateKey as RSAPrivateCrtKey
         val pkcs1Pem = pkcs1Pem(crt)
-        val parsed = AppTokenMinter.parsePrivateKey(pkcs1Pem)
+        val parsed = RsaKeyParser.parsePrivateKey(pkcs1Pem)
         assertNotNull(parsed)
         assertEquals(crt.modulus, parsed!!.modulus)
         assertEquals(crt.privateExponent, parsed.privateExponent)
@@ -89,7 +89,7 @@ class AppTokenMinterTest {
         val crt = privateKey as RSAPrivateCrtKey
         val pemMultiLine = pkcs1Pem(crt)
         val pemSingleLine = pemMultiLine.replace("\n", "").replace("\r", "")
-        val parsed = AppTokenMinter.parsePrivateKey(pemSingleLine)
+        val parsed = RsaKeyParser.parsePrivateKey(pemSingleLine)
         assertNotNull(parsed)
         assertEquals(crt.modulus, parsed!!.modulus)
     }
@@ -97,7 +97,7 @@ class AppTokenMinterTest {
     @Test
     fun `parsePrivateKey accepts a PKCS8 PEM squashed onto a single line`() {
         val pemSingleLine = pkcs8Pem.replace("\n", "").replace("\r", "")
-        val parsed = AppTokenMinter.parsePrivateKey(pemSingleLine)
+        val parsed = RsaKeyParser.parsePrivateKey(pemSingleLine)
         assertNotNull(parsed)
         assertEquals(privateKey.modulus, parsed!!.modulus)
     }
@@ -253,11 +253,10 @@ class AppTokenMinterTest {
 
         assertEquals("ghs_first", first)
         assertEquals("ghs_first", second)
-        // First call: list + create. Second call: list happens again
-        // (the list call is independent of cache - we need it to find
-        // the installation id), but createInstallationToken is only
-        // hit once because the cache satisfies the second mint.
-        assertEquals(2, stub.listCalls.get())
+        // First call: list + create. Second call takes the fast path —
+        // the learned owner -> installation-id mapping plus the warm token
+        // cache satisfy it without re-listing installations or minting.
+        assertEquals(1, stub.listCalls.get())
         assertEquals(1, stub.createCalls.get())
     }
 

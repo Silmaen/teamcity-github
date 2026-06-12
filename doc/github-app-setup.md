@@ -1,9 +1,10 @@
 # GitHub App setup
 
 This page walks through creating a GitHub App that this plugin can
-talk to. If you already have one (for the bundled
-`commitStatusPublisher`, for instance), you can reuse it - just
-verify the permissions and skip to [Step 5](#step-5-create-the-teamcity-connection).
+talk to. There are two ways to do it: let the plugin create a
+pre-configured App for you (**Option A**, recommended), or create it
+manually and wire a TeamCity connection (**Option B**). See
+[Two ways to get the App](#two-ways-to-get-the-app).
 
 ## Why a GitHub App and not a PAT
 
@@ -29,6 +30,145 @@ The plugin assumes **GitHub App authentication only**. No PAT, no
 per-user OAuth tokens. This is a deliberate constraint to keep the
 trust model simple.
 
+## Two ways to get the App
+
+- **Option A — let the plugin create it for you (recommended, v1.7.0+).**
+  The admin page builds a pre-configured App manifest (correct webhook
+  URL, exact permissions, exact events), GitHub shows you a confirmation
+  screen, and on create the plugin stores the credentials for you. You
+  then install it and point build configs at the sentinel
+  `connectionId=managed`. No TeamCity connection, no `.pem` to handle by
+  hand. Jump to [Option A](#option-a-let-the-plugin-create-the-app-for-you-recommended).
+- **Option B — create the App manually and wire a TeamCity connection.**
+  The classic flow: create the App on GitHub yourself, grant
+  permissions, generate a private key, and register a TeamCity GitHub
+  App connection whose ID you reference per build type. Jump to
+  [Option B](#option-b-create-the-app-manually).
+
+The two options are mutually exclusive per build configuration: a build
+type either references `connectionId=managed` (Option A) or a TeamCity
+connection ID like `PROJECT_EXT_42` (Option B).
+
+## Option A: let the plugin create the App for you (recommended)
+
+Available since v1.7.0. The plugin uses GitHub's
+[App-manifest creation flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
+to register a fully pre-configured App in a few clicks. This is the
+recommended path — for the fastest end-to-end walkthrough see the
+[quickstart](../quickstart.md).
+
+### A.1 Start the creation flow
+
+1. Go to `Administration -> Server Administration -> GitHub Bridge`.
+2. Find the **GitHub App** card. When no managed App exists yet it shows
+   a **Create GitHub App** button and an optional **GitHub
+   organisation** field.
+3. Leave the org field blank for a personal App, or type an org slug
+   (e.g. `my-org`) to create an org-owned App.
+4. Click **Create GitHub App**.
+
+Under the hood the plugin builds an App manifest pre-filled with:
+
+- `name` — the App name.
+- `url` / `redirect_url` — the plugin callback on this server.
+- `hook_attributes.url` — **this server's webhook URL** (the same value
+  shown under *Plugin status -> Webhook URL*), `active: true`.
+- `public: false` — a private App.
+- `default_permissions`:
+
+  | Permission | Level |
+  |---|---|
+  | `metadata` | `read` |
+  | `checks` | `write` |
+  | `pull_requests` | `write` |
+  | `contents` | `read` |
+
+- `default_events`: `pull_request`, `pull_request_review`,
+  `issue_comment`, `check_run`.
+
+The form POSTs the manifest to
+`https://github.com/settings/apps/new?state=<random>` (or
+`https://github.com/organizations/<org>/settings/apps/new?state=<random>`
+when an org is given), carrying a random `state` the plugin seeded into
+your admin session.
+
+### A.2 Confirm on GitHub
+
+GitHub shows a confirmation screen listing the App name, permissions and
+events from the manifest. Review and confirm. GitHub then creates the
+App and redirects your browser back to the plugin callback:
+
+```
+GET /app/teamcity-github-bridge/app-callback?code=<one-time-code>&state=<random>
+```
+
+The callback requires a logged-in admin (`CHANGE_SERVER_SETTINGS`) and
+validates the returned `state` against the one in your session (CSRF
+defence). It then exchanges the one-time `code` via
+`POST /app-manifests/{code}/conversions` and stores into the plugin
+settings file, automatically:
+
+- the **App ID** (`app.id`),
+- the **private key** (PEM, `app.privateKey`),
+- the **App slug** (`app.slug`),
+- the **webhook secret** GitHub generated (`webhook.secret`).
+
+You never handle the `.pem` by hand. On success the admin page shows a
+green *managed App configured* banner with the App slug.
+
+### A.3 Install the App
+
+Creating an App does **not** install it on any repository. From the
+GitHub App card click **Install / manage installations** (deep-links to
+`https://github.com/apps/<slug>/installations/new`):
+
+1. Choose the account/org that owns your repos.
+2. Pick `All repositories` or `Only select repositories`.
+3. Confirm the install.
+
+### A.4 Point build configurations at the managed App
+
+Instead of a TeamCity connection ID, set the sentinel value on each
+opted-in build type's `connectionId` (or on a parent project / template):
+
+```
+teamcity.github.bridge.connectionId = managed
+```
+
+`TokenResolver` then mints installation tokens directly from the stored
+App credentials. The REST API base comes from the **API base override**
+setting (`api.base`) when set, otherwise `api.github.com` — so for
+GitHub Enterprise you must set `api.base` to `<host>/api/v3`.
+
+### A.5 Verify
+
+On the GitHub App card click **Verify App configuration**. The plugin
+authenticates as the App (App JWT), calls `GET /app`, and diffs the
+App's *live* permissions and subscribed events against what the plugin
+requires (the table in [A.1](#a1-start-the-creation-flow)). It reports
+any missing permissions/events. The card also deep-links to:
+
+- `https://github.com/settings/apps/<slug>` — *Open App settings on
+  GitHub* (to add a missing permission/event), and
+- `https://github.com/apps/<slug>/installations/new` — *Install / manage
+  installations*.
+
+> If verify reports missing permissions after you add them on GitHub,
+> remember installed Apps must also have the new permissions accepted by
+> the installer (`Settings -> Applications -> Configure -> Accept new
+> permissions`).
+
+That is the whole flow: **create -> confirm on GitHub -> credentials
+auto-stored -> install -> set `connectionId=managed` -> verify**. You do
+not need the manual steps below or a TeamCity connection.
+
+## Option B: create the App manually
+
+If you prefer to register the App yourself (or already have one for the
+bundled `commitStatusPublisher`), follow the steps below. You can reuse
+an existing App — just verify the permissions and skip to
+[Step 5](#step-5-create-the-teamcity-connection).
+
 ## Step 1: create the App
 
 1. Go to `https://github.com/settings/apps/new`
@@ -51,23 +191,34 @@ trust model simple.
 
 ## Step 2: grant the right permissions
 
+Grant exactly the canonical set the plugin requires (the same set
+the Option A manifest requests):
+
 | Resource | Access | Why the plugin needs it |
 |---|---|---|
-| **Pull requests** | Read | Query draft status via `GET /repos/{owner}/{repo}/pulls/{N}` |
-| **Contents** | Read | Required transitively for repository visibility |
 | **Metadata** | Read | Mandatory baseline (GitHub Apps always need this) |
-| **Commit statuses** | Read & write | (Future) post enriched commit statuses |
-| **Checks** | Read & write | (Future) post check runs with rich state |
-| **Webhooks** | Read & write | Required so the plugin can read the App-level webhook config |
+| **Checks** | Write | Post Check Runs with rich state |
+| **Pull requests** | Write | Read for `GET /repos/{owner}/{repo}/pulls/{N}` (draft status); write is needed only for the optional sticky PR summary comment, but request write to match the managed-App manifest |
+| **Contents** | Read | Required transitively for repository visibility |
+
+Do **not** grant **Commit statuses** or **Webhooks** — this plugin
+does not need them. (TeamCity's bundled `commitStatusPublisher` /
+connection-test flow may ask for them; those are for coexistence
+only, not required by this plugin.)
 
 Subscribe to events (you can add these now or wait until
-[webhook-setup.md](webhook-setup.md)):
+[webhook-setup.md](webhook-setup.md)). The plugin consumes:
 
 - [x] Pull request
-- [x] Pull request review (optional, for future review-state hooks)
-- [x] Push (optional, future)
-- [x] Check suite (optional, future)
-- [x] Meta (recommended - notifies on App config changes)
+- [x] Pull request review
+- [x] Issue comment
+- [x] Check run
+- [x] Meta (recommended - notifies on App config changes; `ping` is
+      automatic)
+
+You may also subscribe to **Push** and **Check suite**, but only for
+coexistence with the bundled plugins / future use — this plugin does
+not consume them today.
 
 ## Step 3: generate a private key
 
@@ -223,6 +374,10 @@ the TeamCity admin UI:
 
 ## Next step
 
-You have an App and a TeamCity connection. Now wire up the webhook
-so GitHub can notify TeamCity about events: continue with
-[webhook-setup.md](webhook-setup.md).
+You have an App and a TeamCity connection (Option B) or a managed App
+(Option A). Now wire up the webhook so GitHub can notify TeamCity about
+events: continue with [webhook-setup.md](webhook-setup.md).
+
+> For an **Option A** managed App the webhook URL and secret were set
+> automatically from the manifest, so the webhook is already configured —
+> you only need to make sure the App is installed on your repositories.
