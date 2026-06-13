@@ -57,7 +57,7 @@ class AppManagerTest {
         assertEquals("write", json.path("default_permissions").path("checks").asText())
         assertEquals("write", json.path("default_permissions").path("pull_requests").asText())
         val events = json.path("default_events").map { it.asText() }
-        assertTrue(events.containsAll(listOf("pull_request", "pull_request_review", "issue_comment", "check_run")))
+        assertTrue(events.containsAll(listOf("pull_request", "pull_request_review", "pull_request_review_comment", "check_run")))
     }
 
     @Test
@@ -74,7 +74,7 @@ class AppManagerTest {
         val app = AppInfo(
             slug = "my-app",
             permissions = mapOf("metadata" to "read", "checks" to "write", "pull_requests" to "write", "contents" to "read"),
-            events = listOf("pull_request", "pull_request_review", "issue_comment", "check_run"),
+            events = listOf("pull_request", "pull_request_review", "pull_request_review_comment", "check_run"),
         )
         val (mgr, storage) = manager(tmp, app)
         storage.set(BridgeServerSettings.KEY_APP_ID, "123")
@@ -89,7 +89,7 @@ class AppManagerTest {
         val app = AppInfo(
             slug = "my-app",
             permissions = mapOf("metadata" to "read", "checks" to "read"), // checks too weak, pull_requests missing
-            events = listOf("pull_request"), // missing review/comment/check_run
+            events = listOf("pull_request"), // missing review/review_comment/check_run
         )
         val (mgr, storage) = manager(tmp, app)
         storage.set(BridgeServerSettings.KEY_APP_ID, "123")
@@ -99,7 +99,7 @@ class AppManagerTest {
         assertFalse(v.ok)
         assertTrue(v.missingPermissions.contains("checks"))
         assertTrue(v.missingPermissions.contains("pull_requests"))
-        assertTrue(v.missingEvents.contains("issue_comment"))
+        assertTrue(v.missingEvents.contains("pull_request_review_comment"))
     }
 
     @Test

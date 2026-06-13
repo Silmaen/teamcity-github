@@ -339,11 +339,22 @@ lists are **SOFT** (a manual "Run" bypasses them).
 | `prTriggerBranchesOverride` | SOFT | _empty_ (inherit) | Branches list override (PR source) | When set, **REPLACES** the project's `prTrigger.branches` for this BuildType. Matched against the PR source branch. Empty = inherit. Auto enqueues for excluded PRs post a `Skipped: branch out of scope` Check Run. |
 | `pathFilter` | SOFT | _empty_ (= all paths) | Changed-path filter (monorepo) | **New.** When set, the listener only enqueues this BuildType for a PR if at least one of the PR's changed files matches. VCS-filter syntax (`+:src/api/**` / `-:docs/*` per line; `*` spans `/`). Enforced **only for PR webhook triggers** (it needs the PR file list from GitHub). A non-matching PR gets a `Skipped: paths out of scope` Check Run. |
 | `runOnApproval` | — | `false` | Run on PR approval | **New.** When checked, the BuildType is enqueued on PR approval (`pull_request_review` submitted = approved) — for expensive suites you only want to run after review. Independent of the ready/synchronize triggers. Requires the App to send `pull_request_review` events. |
-| `commentTrigger` | — | _empty_ (disabled) | PR comment trigger phrase | **New.** Optional trigger phrase (e.g. `/rebuild`). When a PR comment contains it (case-insensitive substring) **and** the commenter is trusted (server-side `comment.allowedAssociations`, collaborators-only by default), this BuildType is enqueued. Requires the App to send `issue_comment` events. Empty = disabled. |
+| `commentTrigger` | — | _empty_ (disabled) | PR comment trigger phrase | **New.** Optional trigger phrase (e.g. `/rebuild`). When a PR comment contains it (case-insensitive substring) **and** the commenter is trusted (server-side `comment.allowedAssociations`, collaborators-only by default), this BuildType is enqueued. Fires on inline PR review comments (`pull_request_review_comment`), which the App subscribes to by default. General PR *conversation* comments (`issue_comment`) also work but are **opt-in**: GitHub only delivers them when the App has the **Issues** permission, which the plugin does not request by default. Empty = disabled. |
+| `requirePhrase` | SOFT | _empty_ (no requirement) | PR metadata: require phrase | **New (v1.8.0).** Run only if the PR's **title OR body** contains this text (case-insensitive substring). Empty = no requirement. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `skipPhrase` | SOFT | _empty_ (no skip) | PR metadata: skip phrase | **New (v1.8.0).** Skip the build if the PR's **title OR body** contains this text (case-insensitive substring), e.g. `[skip ci]`. Empty = never skipped on this basis. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `labelFilter` | SOFT | _empty_ (run regardless of labels) | PR metadata: label filter | **New (v1.8.0).** VCS-filter syntax over the PR's **label names** (`+:ci` = run only if labelled `ci`, `-:no-ci` = skip if labelled `no-ci`; one rule per line). Empty = run regardless of labels. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
 
-`branchTriggerBranchesOverride`, `prTriggerBranchesOverride` and
-`pathFilter` are validated at save time against the branch-spec syntax;
-an invalid spec is rejected with an inline error.
+The three PR-metadata filters (`requirePhrase`, `skipPhrase`,
+`labelFilter`) are evaluated together by `BridgeGate.metadataAllows`:
+the build is excluded if the title/body contains `skipPhrase`, **or**
+`requirePhrase` is set and absent from the title/body, **or**
+`labelFilter` is set and no rule matches the PR's labels. They are
+**SOFT** (a manual operator "Run" bypasses them, like the branch/path
+filters) and apply to **PR builds only**.
+
+`branchTriggerBranchesOverride`, `prTriggerBranchesOverride`,
+`pathFilter` and `labelFilter` are validated at save time against the
+branch-spec syntax; an invalid spec is rejected with an inline error.
 
 ### Via Kotlin DSL
 
@@ -359,6 +370,9 @@ object Build_LinuxX64_Clang : BuildType({
             param("pathFilter", "+:src/**\n-:docs/**")      // monorepo
             param("runOnApproval", "true")                  // run after approval
             param("commentTrigger", "/rebuild")             // PR-comment trigger
+            param("skipPhrase", "[skip ci]")                // skip if PR title/body says so
+            param("labelFilter", "+:ci\n-:no-ci")           // run only on `ci`, skip `no-ci`
+            // requirePhrase left blank = no phrase requirement.
             // branchTriggerBranchesOverride / prTriggerBranchesOverride
             // left blank to inherit the project's lists.
         }
@@ -560,10 +574,9 @@ feature while its project chain provides `teamcity.github.bridge.repo`
 - Any other branch covered by the buildType's VCS root.
 
 Earlier versions gated the publisher on a draft-only flag and a
-`pull/` branch ref; both guards were removed (roadmap
-[Gap A4](roadmap.md#gap-a4)). As a result you can now disable the
-bundled `commitStatusPublisher` for every opted-in build type and
-still have full GitHub PR coverage from the plugin.
+`pull/` branch ref; both guards were removed. As a result you can now
+disable the bundled `commitStatusPublisher` for every opted-in build
+type and still have full GitHub PR coverage from the plugin.
 
 ## Check Run publisher coexistence with the bundled `commitStatusPublisher`
 
@@ -622,8 +635,9 @@ release will provide a Build Feature for one-click opt-out.
 
 ## Validation
 
-The build feature's branch/path overrides (`branchTriggerBranchesOverride`,
-`prTriggerBranchesOverride`, `pathFilter`) are validated against the
+The build feature's branch/path overrides and label filter
+(`branchTriggerBranchesOverride`, `prTriggerBranchesOverride`,
+`pathFilter`, `labelFilter`) are validated against the
 branch-spec syntax at save time, and `triggerOnPrDraft` without
 `triggerOnPrReady` is rejected with an inline error. The mandatory
 project params are not validated at save; instead the plugin fails open

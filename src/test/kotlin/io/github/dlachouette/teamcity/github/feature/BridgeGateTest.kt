@@ -14,6 +14,9 @@ class BridgeGateTest {
         triggerOnBranch: Boolean = true,
         triggerOnPrReady: Boolean = true,
         triggerOnPrDraft: Boolean = true,
+        requirePhrase: String = "",
+        skipPhrase: String = "",
+        labelSpec: String = "",
     ) = BridgeFeatureConfig(
         repo = RepoCoords.parse("acme/widget"),
         connectionId = "CID_abc",
@@ -24,6 +27,9 @@ class BridgeGateTest {
         triggerOnBranch = triggerOnBranch,
         triggerOnPrReady = triggerOnPrReady,
         triggerOnPrDraft = triggerOnPrDraft && triggerOnPrReady,
+        requirePhrase = requirePhrase,
+        skipPhrase = skipPhrase,
+        labelFilter = BranchSpecMatcher.parse(labelSpec),
     )
 
     // --- Non-PR branch context ---
@@ -170,5 +176,68 @@ class BridgeGateTest {
                 BridgeGate.decide(cfg, "pull/42", true, "Feature/foo", manual),
             )
         }
+    }
+
+    // --- PR metadata gate (title / body / labels) ---
+
+    @Test
+    fun `skip phrase in title suppresses (auto) but manual bypasses`() {
+        val cfg = config(skipPhrase = "[skip ci]")
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = false, prTitle = "Fix bug [skip ci]"),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = true, prTitle = "Fix bug [skip ci]"),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = false, prTitle = "Fix bug"),
+        )
+    }
+
+    @Test
+    fun `require phrase must appear in title or body`() {
+        val cfg = config(requirePhrase = "/fulltest")
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "pull/7", false, "feature/x", false, prTitle = "t", prBody = "please /fulltest"),
+        )
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(cfg, "pull/7", false, "feature/x", false, prTitle = "t", prBody = "nothing here"),
+        )
+    }
+
+    @Test
+    fun `label filter include and exclude`() {
+        val include = config(labelSpec = "+:ci")
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(include, "pull/7", false, "feature/x", false, prLabels = listOf("ci", "bug")),
+        )
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(include, "pull/7", false, "feature/x", false, prLabels = listOf("bug")),
+        )
+
+        val exclude = config(labelSpec = "-:no-ci")
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(exclude, "pull/7", false, "feature/x", false, prLabels = listOf("no-ci")),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(exclude, "pull/7", false, "feature/x", false, prLabels = listOf("ready")),
+        )
+    }
+
+    @Test
+    fun `no metadata filters means allow`() {
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(config(), "pull/7", false, "feature/x", false, prTitle = "anything", prLabels = listOf("x")),
+        )
     }
 }

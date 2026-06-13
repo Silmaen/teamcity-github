@@ -89,7 +89,8 @@ class DraftCheckRunReporter(
 enum class SkipReason {
     DRAFT_PR,
     BRANCH_FILTER,
-    PATH_FILTER;
+    PATH_FILTER,
+    METADATA_FILTER;
 
     fun titleAndSummary(prNumber: Int, headRef: String?): Pair<String, String> = when (this) {
         DRAFT_PR -> "Skipped: draft PR" to
@@ -103,6 +104,9 @@ enum class SkipReason {
         }
         PATH_FILTER -> "Skipped: paths out of scope" to
             "None of the files changed in PR #$prNumber match this BuildType's path filter; " +
+                "no build was triggered for this revision."
+        METADATA_FILTER -> "Skipped: PR metadata out of scope" to
+            "PR #$prNumber did not satisfy this BuildType's title/body or label filter; " +
                 "no build was triggered for this revision."
     }
 }

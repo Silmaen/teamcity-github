@@ -296,6 +296,55 @@ INFO  - Retriggering N build type(s) for <repo>#<n> on pull_request.<action>
 If `N=0`, the filter found no matching configurations; verify the
 parameters.
 
+## Symptom: build skipped with "Skipped: PR metadata out of scope"
+
+### What you see
+
+A PR build is not enqueued and its GitHub Check Run reads
+**"Skipped: PR metadata out of scope"** (conclusion `skipped`,
+`SkipReason.METADATA_FILTER`), even though the branch and paths are in
+scope and the PR is ready.
+
+### Cause
+
+The BuildType's **"GitHub Bridge integration"** feature has one or more
+of the **PR-metadata** filters set (v1.8.0+), and the PR's title, body
+or labels did not satisfy them. `BridgeGate.metadataAllows` excludes the
+build when:
+
+- `skipPhrase` is set and appears in the PR **title or body** (e.g.
+  `[skip ci]`), **or**
+- `requirePhrase` is set and is **absent** from the title/body, **or**
+- `labelFilter` is set and **no rule matches** the PR's label names
+  (`+:ci` requires the `ci` label; `-:no-ci` skips when `no-ci` is
+  present).
+
+These are **soft** filters enforced for **automatic PR triggers only**.
+
+### Fix
+
+| Cause | Fix |
+|---|---|
+| PR title/body contains the `skipPhrase` | Remove the phrase (e.g. drop `[skip ci]` from the title) and push, or edit the feature's `skipPhrase` if it is too broad. |
+| The `requirePhrase` is missing from the PR | Add the phrase to the PR title or description, or clear `requirePhrase` on the feature. |
+| The `labelFilter` rules do not match the PR's labels | Add the required label (e.g. `ci`) or remove the excluding label (e.g. `no-ci`); or adjust the `+:`/`-:` rules on the feature. |
+| You actually want this build now | Click **Run** in the TC UI — a **manual trigger always bypasses** the metadata filters (as it does the branch/path filters). |
+
+Check the current values under `Edit Configuration -> Build Features ->
+GitHub Bridge integration` (the *PR metadata* fields), and compare them
+against the PR's title/body/labels on GitHub. Remember the title **and**
+body are matched together (case-insensitive substring), and labels are
+matched against their **names**.
+
+### Verify
+
+```bash
+grep -E "SUPPRESS_METADATA|metadata out of scope" <TC_DATA_DIR>/logs/teamcity-github-bridge.log | tail
+```
+
+A build that passed the metadata gate is enqueued normally; one that was
+excluded shows the suppression and the posted skipped Check Run.
+
 ## Symptom: 404 on `/app/teamcity-github-bridge/info`
 
 ### What you see
@@ -498,14 +547,16 @@ via `addPathNotRequiringAuth`, so its 401 body is JSON.
 ### What you see
 
 A collaborator comments the trigger phrase on a PR, GitHub shows the
-`issue_comment` delivery as `200`, but no build is enqueued.
+`pull_request_review_comment` (or `issue_comment`) delivery as `200`,
+but no build is enqueued.
 
 ### Likely causes
 
 | Cause | Fix |
 |---|---|
 | The comment author is not on the allowlist | Only `author_association` values in `comment.allowedAssociations` (default `OWNER,MEMBER,COLLABORATOR`) may trigger. The log shows `Ignoring PR #<n> comment command from <user> (association=<X> not allowed)`. Add the association or grant the user write access. |
-| The GitHub App is not sending `issue_comment` | Enable the **Issue comments** event on the App's webhook subscriptions. Without it GitHub never delivers the comment. |
+| The GitHub App is not sending `pull_request_review_comment` | Enable the **Pull request review comment** event on the App's webhook subscriptions. Without it GitHub never delivers inline-comment triggers. |
+| You posted a PR *conversation* comment, not an inline review comment | Conversation comments arrive as `issue_comment`, which GitHub only delivers when the App holds the opt-in **Issues** permission and is subscribed to **Issue comment**. By default the plugin requests neither (it stays scoped to pull requests). Either comment on the PR's diff (an inline review comment) or add the **Issues** permission + `issue_comment` subscription. |
 | The trigger phrase does not match | The BuildType's feature must set a non-blank `commentTrigger`, and the phrase must appear in the comment body (case-insensitive substring). Check for typos on either side. |
 | The repo is not on the server allowlist | If `repo.allowlist` is set, the repo must be on it; otherwise the listener returns early. |
 

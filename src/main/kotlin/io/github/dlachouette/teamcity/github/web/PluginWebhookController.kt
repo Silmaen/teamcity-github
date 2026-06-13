@@ -130,6 +130,17 @@ class PluginWebhookController(
                     detail = if (parsed != null) "PR comment handled" else "not a PR comment",
                 )
             }
+            "pull_request_review_comment" -> {
+                val parsed = WebhookPayloadParser.parsePullRequestReviewComment(String(payload, Charsets.UTF_8))
+                if (parsed != null) pullRequestEventListener.handleCommentCommand(parsed)
+                response.status = HttpServletResponse.SC_OK
+                recentEventsLog.record(
+                    event = event, repo = parsed?.repo?.slug, action = "created",
+                    httpStatus = HttpServletResponse.SC_OK,
+                    outcome = if (parsed != null) Outcome.ACCEPTED else Outcome.SKIPPED,
+                    detail = if (parsed != null) "PR review comment handled" else "ignored",
+                )
+            }
             "check_run" -> {
                 val parsed = WebhookPayloadParser.parseRerunRequest(String(payload, Charsets.UTF_8))
                 if (parsed != null) pullRequestEventListener.handleRerun(parsed)

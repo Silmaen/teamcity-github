@@ -47,19 +47,25 @@ class DraftBuildQueueCleaner(
         val prDraft: Boolean?
         val prHeadRef: String?
         val prNumber: Int?
+        var prTitle = ""
+        var prBody = ""
+        var prLabels = emptyList<String>()
         if (isPr) {
             prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
             val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
             val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase) ?: return
             prDraft = pr.draft
             prHeadRef = pr.headRef
+            prTitle = pr.title
+            prBody = pr.body
+            prLabels = pr.labels
         } else {
             prNumber = null
             prDraft = null
             prHeadRef = null
         }
 
-        val decision = BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManual)
+        val decision = BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManual, prTitle, prBody, prLabels)
         if (decision == GateDecision.ALLOW) return
 
         val reason = when (decision) {
@@ -67,6 +73,7 @@ class DraftBuildQueueCleaner(
             GateDecision.SUPPRESS_DRAFT -> "PR is draft; this BuildType has triggerOnPrDraft=false"
             GateDecision.SUPPRESS_BRANCH_PR -> "PR source branch '$prHeadRef' is excluded by the BT's PR branch filter"
             GateDecision.SUPPRESS_BRANCH_NON_PR -> "Branch '$branchName' is excluded by the BT's branch filter"
+            GateDecision.SUPPRESS_METADATA -> "PR metadata (title/body/labels) excluded by the BT's metadata filter"
             GateDecision.ALLOW -> error("unreachable")
         }
 

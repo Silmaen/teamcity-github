@@ -43,6 +43,9 @@ class DraftAwareBuildFilter(
         // For non-PR builds, only the branch name matters.
         val prDraft: Boolean?
         val prHeadRef: String?
+        var prTitle = ""
+        var prBody = ""
+        var prLabels = emptyList<String>()
         if (isPr) {
             val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return null
             val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
@@ -53,12 +56,15 @@ class DraftAwareBuildFilter(
             }
             prDraft = pr.draft
             prHeadRef = pr.headRef
+            prTitle = pr.title
+            prBody = pr.body
+            prLabels = pr.labels
         } else {
             prDraft = null
             prHeadRef = null
         }
 
-        return when (BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManual)) {
+        return when (BridgeGate.decide(config, branchName, prDraft, prHeadRef, isManual, prTitle, prBody, prLabels)) {
             GateDecision.ALLOW -> null
             GateDecision.SUPPRESS_HARD -> {
                 LOG.info("Holding ${buildType.externalId} on $branchName (HARD-blocked by GitHub Bridge feature)")
@@ -75,6 +81,10 @@ class DraftAwareBuildFilter(
             GateDecision.SUPPRESS_BRANCH_NON_PR -> {
                 LOG.info("Holding out-of-scope non-PR build of ${buildType.externalId} on $branchName")
                 SimpleWaitReason("Branch '$branchName' is excluded by this BuildType's branch filter")
+            }
+            GateDecision.SUPPRESS_METADATA -> {
+                LOG.info("Holding metadata-excluded PR build of ${buildType.externalId} on $branchName")
+                SimpleWaitReason("PR title/body or labels are excluded by this BuildType's metadata filter")
             }
         }
     }

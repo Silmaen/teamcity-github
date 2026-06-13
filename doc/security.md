@@ -336,11 +336,15 @@ Consequences:
 
 ## Comment-triggered builds: author authorization
 
-PR comment commands (`issue_comment`) can start builds via
-`handleCommentCommand`. Without a guard, **any** GitHub user who can
-comment on a PR — including arbitrary outside contributors — could
-start CI. The plugin gates this on the comment author's GitHub
-`author_association`:
+PR comment commands can start builds via `handleCommentCommand`. The
+trigger fires on inline PR review comments
+(`pull_request_review_comment`), the event the App subscribes to by
+default; general PR conversation comments (`issue_comment`) are handled
+the same way but are **opt-in** (they need the **Issues** permission,
+which the plugin does not request by default — see below). Without a
+guard, **any** GitHub user who can comment on a PR — including
+arbitrary outside contributors — could start CI. The plugin gates this
+on the comment author's GitHub `author_association`:
 
 - Only comments whose author_association is on the allowlist are
   acted on. The default is `OWNER,MEMBER,COLLABORATOR` — i.e. people
@@ -358,7 +362,9 @@ rather than to "anyone who can type a comment".
 
 All inbound paths that enqueue builds or post to GitHub —
 `pull_request`, `pull_request_review` (run-on-approval),
-`issue_comment` (comment command), `check_run` (re-run from GitHub),
+`pull_request_review_comment` (comment command; `issue_comment` too
+when the opt-in Issues permission is granted), `check_run` (re-run from
+GitHub),
 and the external `/api/trigger` endpoint — run inside
 `SecurityContextEx.runAsSystemUnchecked`, i.e. as the TeamCity
 **system user**. This is the same privilege the original
@@ -383,9 +389,15 @@ The plugin requests the minimum access for what it does:
 | Pull requests | Read & **write** | Read for `GET /repos/.../pulls/N`; **write** is required only for the sticky PR summary comment (off by default — see below) |
 | Contents | Read | Required transitively |
 
-The plugin does **not** require **Commit statuses** or **Webhooks**
-permissions. (TeamCity's bundled features may request them; that is for
-coexistence only, not for this plugin.)
+The plugin does **not** require **Commit statuses**, **Webhooks**, or
+**Issues** permissions. (TeamCity's bundled features may request the
+first two; that is for coexistence only, not for this plugin.) The
+**Issues** permission is intentionally omitted to keep the App scoped
+to pull requests, not issues — which is why GitHub does not deliver the
+`issue_comment` event by default. Comment triggers work via
+`pull_request_review_comment` without it; granting the **Issues**
+permission (and subscribing to `issue_comment`) is an **opt-in** for
+operators who also want to trigger from PR conversation comments.
 
 Note the **increased scope**: the sticky PR comment feature needs the
 App's pull-requests **write** permission, which previous versions did

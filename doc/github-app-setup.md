@@ -55,7 +55,7 @@ Available since v1.7.0. The plugin uses GitHub's
 [App-manifest creation flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
 to register a fully pre-configured App in a few clicks. This is the
 recommended path — for the fastest end-to-end walkthrough see the
-[quickstart](../quickstart.md).
+[quickstart](quickstart.md).
 
 ### A.1 Start the creation flow
 
@@ -84,7 +84,15 @@ Under the hood the plugin builds an App manifest pre-filled with:
   | `contents` | `read` |
 
 - `default_events`: `pull_request`, `pull_request_review`,
-  `issue_comment`, `check_run`.
+  `pull_request_review_comment`, `check_run`.
+
+  > Conversation-comment triggers (the `issue_comment` event) are
+  > **opt-in**: GitHub only delivers `issue_comment` when the App holds
+  > the **Issues** permission, which the manifest deliberately does not
+  > request. Comment triggers fire on inline PR review comments
+  > (`pull_request_review_comment`) out of the box; to also trigger from
+  > general PR conversation comments, add the Issues permission and
+  > subscribe to `issue_comment` manually.
 
 The form POSTs the manifest to
 `https://github.com/settings/apps/new?state=<random>` (or
@@ -211,7 +219,7 @@ Subscribe to events (you can add these now or wait until
 
 - [x] Pull request
 - [x] Pull request review
-- [x] Issue comment
+- [x] Pull request review comment
 - [x] Check run
 - [x] Meta (recommended - notifies on App config changes; `ping` is
       automatic)
@@ -219,6 +227,14 @@ Subscribe to events (you can add these now or wait until
 You may also subscribe to **Push** and **Check suite**, but only for
 coexistence with the bundled plugins / future use — this plugin does
 not consume them today.
+
+> **Issue comment is opt-in.** GitHub only exposes the **Issue comment**
+> event when the App has the **Issues** permission, which this plugin
+> deliberately does not request (it stays scoped to pull requests, not
+> issues). Comment triggers work on inline PR review comments
+> (`pull_request_review_comment`) without it. To also trigger from
+> general PR conversation comments, add the **Issues** permission and
+> subscribe to **Issue comment** yourself.
 
 ## Step 3: generate a private key
 

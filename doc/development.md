@@ -9,7 +9,7 @@ add a feature.
 |---|---|---|
 | `docker` (with Compose plugin) | recent | Builds, tests, and packaging run inside the official `maven:3.9.9-eclipse-temurin-21` image. Nothing else is required. |
 | `git` | any | Source control. |
-| A code editor or IDE | optional | IntelliJ IDEA Community is the closest match; see [IDE setup](#ide-setup) below. |
+| A code editor or IDE | optional | IntelliJ IDEA Community is the closest match. |
 
 You do **not** need:
 - A local JDK (it lives in the container).
@@ -30,7 +30,6 @@ teamcity-github/
 +-- .cache/                       # Maven local repo + HOME, git-ignored
 +-- doc/
 |   +-- *.md                      # human + AI-facing documentation
-|   +-- historical/               # early design transfer documents (kept for context)
 +-- src/
     +-- main/
     |   +-- assembly/plugin.xml   # builds the plugin.zip layout
@@ -277,12 +276,3 @@ See [roadmap.md](roadmap.md) for the current roadmap.
   in; pulling in something heavier needs a discussion.
 - Update the relevant doc page (`doc/*.md`) in the same PR. The
   README's "Status" section is updated at release time only.
-
-## Pointer to historical context
-
-Early design notes from the first integration of this plugin live
-under [`historical/`](historical/). They cover the original SDK
-exploration, the trapdoors hit at the time, and the rationale
-behind some still-load-bearing decisions. Useful when you wonder
-"why did they design it this way"; not maintained as current
-documentation.

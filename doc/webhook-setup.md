@@ -133,7 +133,7 @@ Example output:
   "payloadUrl": "https://teamcity.example.com/app/teamcity-github-bridge/webhook",
   "contentType": "application/json",
   "sslVerification": true,
-  "recommendedEvents": ["pull_request", "pull_request_review", "issue_comment", "check_run", "push", "check_suite", "ping"],
+  "recommendedEvents": ["pull_request", "pull_request_review", "pull_request_review_comment", "check_run", "push", "check_suite", "ping"],
   "secretConfigured": true,
   "logFile": "<TC_DATA_DIR>/logs/teamcity-github-bridge.log",
   "logConfigured": true,
@@ -193,9 +193,10 @@ today (subscribing now means no resubscription later):
 - [x] **Pull request review** - powers **run-on-approval**: a build
   can be gated until a reviewer approves, at which point the review
   event enqueues it.
-- [x] **Issue comment** - powers **comment triggers**: posting the
-  configured phrase on a PR (an `issue_comment`) enqueues builds,
-  restricted to trusted commenters (collaborators by default).
+- [x] **Pull request review comment** - powers **comment triggers**:
+  posting the configured phrase as an inline review comment on a PR's
+  diff (a `pull_request_review_comment`) enqueues builds, restricted to
+  trusted commenters (collaborators by default).
 - [x] **Check run** - powers the **Re-run** button in GitHub's
   Checks UI: a `check_run` `rerequested` event re-enqueues the build
   straight from the PR's checks tab.
@@ -206,6 +207,16 @@ today (subscribing now means no resubscription later):
   plugin today.*
 - [x] **Ping** - delivered once on save; used for the health-check
   round-trip below.
+
+> **Issue comment is opt-in.** The plugin also handles `issue_comment`
+> (general PR *conversation* comments), but it is **not** in the
+> recommended/required set: GitHub only exposes the **Issue comment**
+> event when the App has the **Issues** permission, which this plugin
+> deliberately does not request (it stays scoped to pull requests, not
+> issues). Inline-comment triggers work via
+> `pull_request_review_comment` without it. To also trigger from PR
+> conversation comments, grant the **Issues** permission and subscribe
+> to **Issue comment** yourself.
 
 > **Permission note**: the **sticky PR summary comment** feature
 > (a single maintained comment on the PR summarising build status)
@@ -254,7 +265,8 @@ If you see `404 Not Found`:
 | `pull_request` with `action: closed` (incl. merged) | Cancel any of the PR's builds still sitting in the queue. | `200 OK` |
 | `pull_request` (other actions: `labeled`, `edited`, ...) | Ignored. | `200 OK` |
 | `pull_request_review` with `action: submitted`, approved | Run-on-approval: enqueue matching builds gated on review approval. | `200 OK` |
-| `issue_comment` with `action: created` on a PR | If the body matches the configured trigger phrase and the commenter is trusted (collaborator by default), enqueue matching builds. | `200 OK` |
+| `pull_request_review_comment` with `action: created` | If the inline review comment body matches the configured trigger phrase and the commenter is trusted (collaborator by default), enqueue matching builds. | `200 OK` |
+| `issue_comment` with `action: created` on a PR | Same as above, for PR conversation comments. Only delivered if the App has the opt-in **Issues** permission + `issue_comment` subscription. | `200 OK` |
 | `check_run` with `action: rerequested` | Re-enqueue the build behind the Check Run (the **Re-run** button in GitHub's Checks UI). | `200 OK` |
 | Any other event | Ignored. | `204 No Content` |
 

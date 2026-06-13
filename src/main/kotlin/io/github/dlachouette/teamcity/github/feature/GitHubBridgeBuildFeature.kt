@@ -84,6 +84,9 @@ class GitHubBridgeBuildFeature(
         BranchSpecMatcher.validate(input[PARAM_PATH_FILTER])?.let {
             invalid += InvalidProperty(PARAM_PATH_FILTER, it)
         }
+        BranchSpecMatcher.validate(input[PARAM_LABEL_FILTER])?.let {
+            invalid += InvalidProperty(PARAM_LABEL_FILTER, it)
+        }
 
         invalid
     }
@@ -111,5 +114,13 @@ class GitHubBridgeBuildFeature(
         // Optional trigger phrase: when a PR comment contains it (and the
         // commenter is trusted), this BT is enqueued. Empty = disabled.
         const val PARAM_COMMENT_TRIGGER: String = "commentTrigger"
+
+        // PR-metadata gate (auto triggers only; manual bypasses):
+        //   requirePhrase — run only if PR title/body contains it.
+        //   skipPhrase    — skip if PR title/body contains it.
+        //   labelFilter   — +:/-: filter over PR label names.
+        const val PARAM_REQUIRE_PHRASE: String = "requirePhrase"
+        const val PARAM_SKIP_PHRASE: String = "skipPhrase"
+        const val PARAM_LABEL_FILTER: String = "labelFilter"
     }
 }

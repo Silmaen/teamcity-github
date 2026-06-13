@@ -51,6 +51,11 @@ object WebhookPayloadParser {
             val baseRef = pr.path("base").path("ref").asText("")
             val draft = pr.path("draft").asBoolean(false)
             val merged = pr.path("merged").asBoolean(false)
+            val title = pr.path("title").asText("")
+            val body = pr.path("body").asText("")
+            val labels = pr.path("labels").mapNotNull {
+                it.path("name").asText("").takeIf { n -> n.isNotBlank() }
+            }
 
             PrEventPayload(
                 action = action,
@@ -61,6 +66,9 @@ object WebhookPayloadParser {
                 headRef = headRef,
                 draft = draft,
                 merged = merged,
+                title = title,
+                body = body,
+                labels = labels,
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request payload: ${e.message}")
@@ -123,6 +131,32 @@ object WebhookPayloadParser {
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse issue_comment payload: ${e.message}")
+            null
+        }
+    }
+
+    // Parses a `pull_request_review_comment` event (an inline comment on
+    // the PR's diff). Like issue_comment but the payload carries the PR
+    // object at the top level, so it is always a PR by construction.
+    fun parsePullRequestReviewComment(payload: String): CommentCommandPayload? {
+        return try {
+            val node = MAPPER.readTree(payload)
+            if (node.path("action").asText("") != "created") return null
+            val number = node.path("pull_request").path("number").asInt(-1)
+            if (number < 0) return null
+            val repoSlug = node.path("repository").path("full_name").asText("")
+            if (repoSlug.isBlank()) return null
+            val comment = node.path("comment")
+
+            CommentCommandPayload(
+                repo = RepoCoords.parse(repoSlug),
+                prNumber = number,
+                body = comment.path("body").asText(""),
+                authorAssociation = comment.path("author_association").asText(""),
+                commenter = comment.path("user").path("login").asText(""),
+            )
+        } catch (e: Exception) {
+            LOG.warn("Failed to parse pull_request_review_comment payload: ${e.message}")
             null
         }
     }

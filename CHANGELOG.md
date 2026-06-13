@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-06-13
+
+Pull-request metadata gating and a correction to the comment-trigger
+event. (Intermediate patch builds were internal staging only and are not
+released separately.)
+
+### Added
+
+- **PR-metadata build gate.** Per-build-configuration filters that trigger
+  or suppress a build based on the pull request's title, description and
+  labels:
+  - `requirePhrase` — run only if the PR title or body contains the phrase;
+  - `skipPhrase` — skip if the PR title or body contains it (e.g. `[skip ci]`);
+  - `labelFilter` — VCS-filter rules over PR label names (e.g. `+:ci`,
+    `-:no-ci`).
+
+  Enforced for automatic triggers (a non-matching PR gets a *"Skipped: PR
+  metadata out of scope"* Check Run); a manual *Run* always bypasses them.
+  PR title/body/labels are read from the webhook payload (no extra API
+  call) and from `GET /pulls/{n}` on the queue/filter paths.
+
+### Changed
+
+- **Comment triggers now fire on `pull_request_review_comment`** (inline
+  PR diff comments) instead of `issue_comment`. GitHub only exposes the
+  `issue_comment` event when the App holds the *Issues* permission, which
+  the plugin deliberately does not request; `issue_comment` stays handled
+  as an opt-in for operators who add that permission. The managed-App
+  manifest now subscribes to `pull_request_review_comment`.
+
 ## [1.7.0] - 2026-06-12
 
 GitHub App self-provisioning, in-product configuration, reliability
@@ -47,7 +77,8 @@ not released separately.)
 - **Comment-triggered builds.** A per-build-configuration `commentTrigger`
   phrase; a PR comment containing it enqueues the build, restricted to
   trusted commenters (GitHub `author_association` allowlist —
-  `OWNER,MEMBER,COLLABORATOR` by default). Handles `issue_comment`.
+  `OWNER,MEMBER,COLLABORATOR` by default). Handles the `issue_comment`
+  webhook event.
 - **Authenticated external HTTP API** under
   `/app/teamcity-github-bridge/api/` (bearer token, constant-time
   compared; no token = disabled): `GET status`, `GET events`,

@@ -452,6 +452,10 @@ open class GitHubClient {
                 headSha = head.path("sha").asText(""),
                 draft = node.path("draft").asBoolean(false),
                 state = node.path("state").asText("open"),
+                body = node.path("body").asText(""),
+                labels = node.path("labels").mapNotNull {
+                    it.path("name").asText("").takeIf { n -> n.isNotBlank() }
+                },
             )
         }
 

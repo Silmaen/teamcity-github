@@ -121,14 +121,14 @@ Go to `Administration -> Plugins List`. You should see:
 
 ```
 +----------------------------------------------------+
-| TeamCity GitHub Bridge                  v1.6.x     |
+| TeamCity GitHub Bridge                  v1.x       |
 |  by Damien Lachouette                   enabled  ON|
 |  Min API: 222521                                   |
 +----------------------------------------------------+
 ```
 
 If the plugin is greyed out or the version is missing, refer to
-[troubleshooting.md](troubleshooting.md#plugin-does-not-load).
+[troubleshooting.md](troubleshooting.md#symptom-plugin-does-not-load).
 
 ## Uninstall
 

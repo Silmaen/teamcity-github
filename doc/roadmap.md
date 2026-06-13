@@ -12,6 +12,13 @@ described in [README.md](../README.md) and detailed in
 
 ## Shipped since 1.0
 
+- v1.8.0 — PR-metadata build gate (per-build-configuration
+  `requirePhrase` / `skipPhrase` / `labelFilter` over the PR title,
+  body and labels; SOFT, manual bypasses, "Skipped: PR metadata out of
+  scope" Check Run). Comment triggers moved to
+  `pull_request_review_comment` (inline diff comments) since GitHub only
+  exposes `issue_comment` with the Issues permission, which the plugin
+  does not request.
 - v1.2.0 — self-mint installation tokens (Item 9 below) + GitHub
   Enterprise support across every REST endpoint.
 - v1.3.0 — full Check Run lifecycle (queued / in_progress /

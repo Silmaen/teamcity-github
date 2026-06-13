@@ -222,6 +222,7 @@ class PullRequestEventListener(
         val targets = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
         val branchSkips = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
         val draftSkips = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
+        val metadataSkips = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
         candidates.forEach { (bt, config) ->
             when (BridgeGate.decide(
                 config = config,
@@ -229,10 +230,14 @@ class PullRequestEventListener(
                 prDraft = payload.draft,
                 prHeadRef = payload.headRef,
                 isManualTrigger = false,
+                prTitle = payload.title,
+                prBody = payload.body,
+                prLabels = payload.labels,
             )) {
                 GateDecision.ALLOW -> targets += bt to config
                 GateDecision.SUPPRESS_DRAFT -> draftSkips += bt to config
                 GateDecision.SUPPRESS_BRANCH_PR -> branchSkips += bt to config
+                GateDecision.SUPPRESS_METADATA -> metadataSkips += bt to config
                 GateDecision.SUPPRESS_HARD,
                 GateDecision.SUPPRESS_BRANCH_NON_PR -> Unit // silent
             }
@@ -240,6 +245,7 @@ class PullRequestEventListener(
 
         postSkippedCheckRuns(branchSkips, payload, SkipReason.BRANCH_FILTER)
         postSkippedCheckRuns(draftSkips, payload, SkipReason.DRAFT_PR)
+        postSkippedCheckRuns(metadataSkips, payload, SkipReason.METADATA_FILTER)
 
         // Monorepo path filtering: drop targets whose path filter matches
         // none of the PR's changed files (posts a "paths out of scope" skip).
@@ -543,6 +549,11 @@ data class PrEventPayload(
     // true only on `closed` events where the PR was merged (vs. closed
     // without merging). Informational; both cancel in-flight builds.
     val merged: Boolean = false,
+    // PR metadata for the title/body/label gate. Read straight from the
+    // webhook payload (no extra API call).
+    val title: String = "",
+    val body: String = "",
+    val labels: List<String> = emptyList(),
 )
 
 // pull_request_review submitted with state=approved.

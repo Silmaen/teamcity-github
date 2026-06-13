@@ -130,16 +130,22 @@ class BuildStatusCheckRunPublisher(
         val isManual = queuedBuild.triggeredBy.isTriggeredByUser
         val prDraft: Boolean?
         val prHeadRef: String?
+        var prTitle = ""
+        var prBody = ""
+        var prLabels = emptyList<String>()
         if (branchName.startsWith("pull/")) {
             val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return false
             val pr = prInfoCache.get(ctx.repo, prNumber, ctx.accessToken, ctx.apiBase) ?: return false
             prDraft = pr.draft
             prHeadRef = pr.headRef
+            prTitle = pr.title
+            prBody = pr.body
+            prLabels = pr.labels
         } else {
             prDraft = null
             prHeadRef = null
         }
-        return BridgeGate.decide(ctx.config, branchName, prDraft, prHeadRef, isManual) != GateDecision.ALLOW
+        return BridgeGate.decide(ctx.config, branchName, prDraft, prHeadRef, isManual, prTitle, prBody, prLabels) != GateDecision.ALLOW
     }
 
     private fun publishInProgress(build: SBuild) {

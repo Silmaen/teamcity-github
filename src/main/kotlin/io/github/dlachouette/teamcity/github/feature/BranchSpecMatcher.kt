@@ -49,6 +49,18 @@ class BranchSpecMatcher private constructor(
         return matches(target)
     }
 
+    // Set semantics, for matching against a COLLECTION of values (e.g.
+    // PR labels) rather than a single string:
+    //   - any value matches an exclude  -> false (excluded wins)
+    //   - include rules present         -> at least one value must match
+    //   - no include rules              -> true (default-open)
+    // An empty matcher matches everything (including an empty set).
+    fun matchesSet(values: Collection<String>): Boolean {
+        if (values.any { v -> excludePatterns.any { it.matcher(v).matches() } }) return false
+        if (includePatterns.isEmpty()) return true
+        return values.any { v -> includePatterns.any { it.matcher(v).matches() } }
+    }
+
     fun isEmpty(): Boolean = includePatterns.isEmpty() && excludePatterns.isEmpty()
 
     fun asString(): String = rawSpec

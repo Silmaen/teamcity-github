@@ -102,7 +102,7 @@ class AppManager(
         val REQUIRED_EVENTS: List<String> = listOf(
             "pull_request",
             "pull_request_review",
-            "issue_comment",
+            "pull_request_review_comment",
             "check_run",
         )
 

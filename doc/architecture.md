@@ -153,7 +153,7 @@ io.github.dlachouette.teamcity.github
     +-- PluginWebhookController       (POST /webhook, HMAC, replay guard, records to RecentEventsLog; fans events out to the listener)
     +-- WebhookInfoController         (GET /info, /info.md)
     +-- WebhookInfo                   (config snapshot DTO)
-    +-- WebhookPayloadParser          (Jackson on pull_request / pull_request_review / issue_comment / check_run payloads)
+    +-- WebhookPayloadParser          (Jackson on pull_request / pull_request_review / pull_request_review_comment / issue_comment / check_run payloads)
     +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
     +-- DeliveryReplayGuard           (bounded LRU + TTL of X-GitHub-Delivery ids; drops replayed deliveries)
     +-- RecentEventsLog               (ring buffer, capacity 100)
@@ -240,7 +240,8 @@ then dispatches by `X-GitHub-Event` to `PullRequestEventListener`:
 | `pull_request` | `opened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. |
 | `pull_request` | `closed` (incl. merged) | `handle` -> `cancelQueuedForClosedPr` | Remove builds still queued for the PR head. |
 | `pull_request_review` | `submitted` / `state=approved` | `handleReviewApproved` | Enqueue run-on-approval BuildTypes. |
-| `issue_comment` | `created` | `handleCommentCommand` | Enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
+| `pull_request_review_comment` | `created` | `handleCommentCommand` | Default comment-trigger event (inline PR diff comment): enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
+| `issue_comment` | `created` | `handleCommentCommand` | Same, for PR *conversation* comments. **Opt-in**: only delivered when the App has the **Issues** permission, which the plugin does not request by default. |
 | `check_run` | `rerequested` | `handleRerun` | Re-run the BuildType behind the clicked Check Run (ignoring finished builds). |
 
 ## Server settings applied live
@@ -416,10 +417,6 @@ itself loads.
 
 ## Cross-references
 
-- The bytecode-level inspection that drove these design choices is
-  documented in
-  [`historical/2026-05-23-teamcity-2026.1-internals-fr.md`](historical/2026-05-23-teamcity-2026.1-internals-fr.md)
-  (French, transfer doc).
 - See [security.md](security.md) for the trust boundaries and the
   signature-verification path in detail.
 - See [development.md](development.md) for how to add a new bean

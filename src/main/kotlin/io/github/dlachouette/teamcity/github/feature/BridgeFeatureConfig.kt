@@ -54,6 +54,14 @@ data class BridgeFeatureConfig(
     // Optional PR-comment trigger phrase (case-insensitive substring).
     // Empty = no comment trigger.
     val commentTrigger: String = "",
+    // PR-metadata gate (enforced for auto triggers; manual bypasses):
+    //   - requirePhrase: run only if the PR title OR body contains it.
+    //   - skipPhrase:    skip if the PR title OR body contains it (e.g. [skip ci]).
+    //   - labelFilter:   +:/-: filter over PR label names (e.g. -:no-ci, +:ci).
+    // All empty = no metadata restriction.
+    val requirePhrase: String = "",
+    val skipPhrase: String = "",
+    val labelFilter: BranchSpecMatcher = BranchSpecMatcher.parse(null),
 )
 
 object BridgeFeatureReader {
@@ -139,6 +147,9 @@ object BridgeFeatureReader {
             pathFilter = BranchSpecMatcher.parse(featureParams[GitHubBridgeBuildFeature.PARAM_PATH_FILTER]),
             runOnApproval = featureParams[GitHubBridgeBuildFeature.PARAM_RUN_ON_APPROVAL] == "true",
             commentTrigger = featureParams[GitHubBridgeBuildFeature.PARAM_COMMENT_TRIGGER]?.trim().orEmpty(),
+            requirePhrase = featureParams[GitHubBridgeBuildFeature.PARAM_REQUIRE_PHRASE]?.trim().orEmpty(),
+            skipPhrase = featureParams[GitHubBridgeBuildFeature.PARAM_SKIP_PHRASE]?.trim().orEmpty(),
+            labelFilter = BranchSpecMatcher.parse(featureParams[GitHubBridgeBuildFeature.PARAM_LABEL_FILTER]),
         )
     }
 }
@@ -161,6 +172,10 @@ enum class GateDecision {
     // `triggerOnPrReady=true`). Manual would HARD-block instead (see
     // gate); from auto: post "Skipped: draft PR".
     SUPPRESS_DRAFT,
+    // PR metadata (title/body phrase filters or label filter) excluded
+    // this build. Manual triggers bypass. From auto: post
+    // "Skipped: PR metadata out of scope".
+    SUPPRESS_METADATA,
 }
 
 // Centralised gating logic shared by:
@@ -187,9 +202,12 @@ object BridgeGate {
         prDraft: Boolean?,
         prHeadRef: String?,
         isManualTrigger: Boolean,
+        prTitle: String = "",
+        prBody: String = "",
+        prLabels: List<String> = emptyList(),
     ): GateDecision {
         val isPr = branchName.startsWith("pull/")
-        return if (isPr) decidePr(config, branchName, prDraft, prHeadRef, isManualTrigger)
+        return if (isPr) decidePr(config, branchName, prDraft, prHeadRef, isManualTrigger, prTitle, prBody, prLabels)
         else decideBranch(config, branchName, isManualTrigger)
     }
 
@@ -199,6 +217,9 @@ object BridgeGate {
         prDraft: Boolean?,
         prHeadRef: String?,
         isManualTrigger: Boolean,
+        prTitle: String,
+        prBody: String,
+        prLabels: List<String>,
     ): GateDecision {
         // Project-level kill switch.
         if (!config.prTriggerEnabled) return GateDecision.SUPPRESS_HARD
@@ -209,13 +230,38 @@ object BridgeGate {
         if (prDraft == true && !config.triggerOnPrDraft) {
             return if (isManualTrigger) GateDecision.SUPPRESS_HARD else GateDecision.SUPPRESS_DRAFT
         }
-        // Manual bypasses branch filter.
+        // Manual bypasses the SOFT filters (branch + metadata).
         if (isManualTrigger) return GateDecision.ALLOW
         // Branch filter (matched against headRef for `pull/*`).
         if (!config.prTriggerBranches.matches(branchName, prHeadRef)) {
             return GateDecision.SUPPRESS_BRANCH_PR
         }
+        // PR-metadata filter (title/body phrases + labels).
+        if (!metadataAllows(config, prTitle, prBody, prLabels)) {
+            return GateDecision.SUPPRESS_METADATA
+        }
         return GateDecision.ALLOW
+    }
+
+    // True iff the PR's title/body/labels satisfy the build's metadata
+    // filters. Public for unit testing.
+    fun metadataAllows(
+        config: BridgeFeatureConfig,
+        prTitle: String,
+        prBody: String,
+        prLabels: List<String>,
+    ): Boolean {
+        val text = "$prTitle\n$prBody"
+        if (config.skipPhrase.isNotBlank() && text.contains(config.skipPhrase, ignoreCase = true)) {
+            return false
+        }
+        if (config.requirePhrase.isNotBlank() && !text.contains(config.requirePhrase, ignoreCase = true)) {
+            return false
+        }
+        if (!config.labelFilter.isEmpty() && !config.labelFilter.matchesSet(prLabels)) {
+            return false
+        }
+        return true
     }
 
     private fun decideBranch(

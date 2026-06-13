@@ -183,11 +183,64 @@
             e.g. <code>/rebuild</code>
         </label>
         <div class="bridge-feature-help">
-            Optional. When a PR comment contains this phrase (case-insensitive)
-            and the commenter is trusted, this BuildType is enqueued. Requires
-            the GitHub App to send <code>issue_comment</code> events. Trusted
-            authors are controlled server-side (Administration &rarr; GitHub
-            Bridge); collaborators only, by default. Empty = disabled.
+            Optional. When a comment on the pull request contains this phrase
+            (case-insensitive) and the commenter is trusted, this build
+            configuration is enqueued. Fires on
+            <code>pull_request_review_comment</code> (inline diff comments) —
+            the managed App subscribes to it by default. General PR conversation
+            comments (<code>issue_comment</code>) also work, but GitHub only
+            exposes that event if the App is granted the <em>Issues</em>
+            permission, so it is off by default. Trusted authors are controlled
+            server-side (Administration &rarr; GitHub Bridge);
+            <code>OWNER,MEMBER,COLLABORATOR</code> by default. Empty = disabled.
         </div>
+    </td>
+</tr>
+
+<tr>
+    <th colspan="2" style="background:#f5f5f5; padding:6px 12px;">
+        <strong>PR metadata gate</strong>
+        <div class="bridge-feature-help" style="font-weight:normal; margin-top:2px;">
+            Optional SOFT filters on the pull request's title, description and
+            labels. Auto triggers that don't pass post a
+            <em>"Skipped: PR metadata out of scope"</em> Check Run; a manual
+            "Run" always bypasses them.
+        </div>
+    </th>
+</tr>
+<tr>
+    <th><label for="requirePhrase">Require phrase (title/body):</label></th>
+    <td>
+        <props:textProperty name="requirePhrase" className="longField"/>
+        <div class="bridge-feature-help">
+            Optional. Run only if the PR <strong>title or description</strong>
+            contains this text (case-insensitive). Empty = no requirement.
+        </div>
+    </td>
+</tr>
+<tr>
+    <th><label for="skipPhrase">Skip phrase (title/body):</label></th>
+    <td>
+        <props:textProperty name="skipPhrase" className="longField"/>
+        <div class="bridge-feature-help">
+            Optional. <strong>Skip</strong> the build if the PR title or
+            description contains this text — e.g. <code>[skip ci]</code>.
+        </div>
+    </td>
+</tr>
+<tr>
+    <th><label for="labelFilter">Label filter:</label></th>
+    <td>
+        <props:multilineProperty name="labelFilter"
+                                 linkTitle="Edit label filter"
+                                 cols="58" rows="3"
+                                 expanded="${not empty propertiesBean.properties['labelFilter']}"/>
+        <div class="bridge-feature-help">
+            Optional. VCS-filter syntax over the PR's <strong>labels</strong>:
+            <code>+:ci</code> (run only if labelled <code>ci</code>),
+            <code>-:no-ci</code> (skip if labelled <code>no-ci</code>),
+            one rule per line. Empty = run regardless of labels.
+        </div>
+        <span class="error" id="error_labelFilter"></span>
     </td>
 </tr>

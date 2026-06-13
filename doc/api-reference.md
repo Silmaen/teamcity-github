@@ -54,7 +54,7 @@ before processing.
 
 | Header | Required | Meaning |
 |---|---|---|
-| `X-GitHub-Event` | yes | The event type. Handled: `ping`, `pull_request` (incl. `closed`/`merged`), `pull_request_review`, `issue_comment`, `check_run` (`rerequested`). |
+| `X-GitHub-Event` | yes | The event type. Handled: `ping`, `pull_request` (incl. `closed`/`merged`), `pull_request_review`, `pull_request_review_comment`, `issue_comment` (opt-in; needs the Issues permission), `check_run` (`rerequested`). |
 | `X-Hub-Signature-256` | yes | `sha256=<hex>` HMAC over the raw body |
 | `Content-Type` | yes | Must be `application/json` |
 | `X-GitHub-Delivery` | recommended | Unique delivery ID. Used for **replay protection**: when enabled, a redelivered payload carrying a delivery ID already seen is acked with `200 OK` (`duplicate delivery ignored`) but not re-processed. |
@@ -85,7 +85,8 @@ body is buffered.
 |---|---|---|
 | `pull_request` | `ready_for_review`, plus `closed`/`merged` and other parsed actions | Enqueue or cancel builds per the listener logic. Actions that do not parse return `200 OK` without enqueuing. |
 | `pull_request_review` | `approved` | An approval is handled; non-approval reviews are skipped. |
-| `issue_comment` | `created` on a PR | A comment command on a pull request is handled; non-PR comments are skipped. |
+| `pull_request_review_comment` | `created` | An inline PR review comment command is handled. This is the default comment-trigger event (subscribed by the managed App). |
+| `issue_comment` | `created` on a PR | A PR conversation comment command is handled; non-PR comments are skipped. **Opt-in**: GitHub only delivers this when the App has the Issues permission, which the plugin does not request by default. |
 | `check_run` | `rerequested` | A check-run re-run request triggers a re-run; other actions are skipped. |
 | `ping` | always | Replies `pong`. |
 
@@ -180,7 +181,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
   "recommendedEvents": [
     "pull_request",
     "pull_request_review",
-    "issue_comment",
+    "pull_request_review_comment",
     "check_run",
     "push",
     "check_suite",
@@ -198,7 +199,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
 | `payloadUrl` | string | The absolute URL GitHub should POST events to. Computed from the request's host, scheme, port, and context path (with `X-Forwarded-Proto` and `X-Forwarded-Host` respected when present). |
 | `contentType` | string | Always `application/json`. The plugin does not parse `application/x-www-form-urlencoded`. |
 | `sslVerification` | boolean | `true` when the request reached the plugin over HTTPS (after honouring `X-Forwarded-Proto`). Reflected so the operator copies the right value into GitHub. |
-| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Acted on: `pull_request`, `pull_request_review`, `issue_comment`, `check_run`, `ping`. Forward-listed: `push`, `check_suite`. |
+| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Acted on: `pull_request`, `pull_request_review`, `pull_request_review_comment`, `check_run`, `ping`. Forward-listed: `push`, `check_suite`. `issue_comment` is also acted on but is opt-in (needs the Issues permission) so it is not in this list. |
 | `secretConfigured` | boolean | `true` when `teamcity.github.bridge.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
 | `logFile` | string | Absolute path where the plugin's dedicated log file lives (or *would* live) - always `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`. |
 | `logConfigured` | boolean | `true` when the dedicated log file currently exists, i.e. an operator has merged the log4j snippet (`teamcity-github-bridge-log4j-snippet.xml`) into `teamcity-server-log4j.xml`. |
@@ -241,7 +242,7 @@ Configure these values on your GitHub App webhook page
 
 - `pull_request`
 - `pull_request_review`
-- `issue_comment`
+- `pull_request_review_comment`
 - `check_run`
 - `push`
 - `check_suite`

@@ -407,7 +407,7 @@ Bridge`.
 |   4. Verify App config + Run self-tests, open a PR       |
 +----------------------------------------------------------+
 | Plugin status                                            |
-|   Plugin version:    1.6.x                               |
+|   Plugin version:    1.x                                 |
 |   TeamCity version:  TeamCity 2026.1 (build <n>)         |
 |   Webhook URL:       https://.../app/.../webhook         |
 |   HMAC secret:       [configured]  [Set/Replace] [Clear] |
@@ -513,7 +513,7 @@ sequenceDiagram
 
 The test categories (config checks, GitHub reachability, HMAC
 roundtrip, webhook self-delivery, and per-project token resolution)
-are described in [api-reference.md](api-reference.md#tests-run).
+are described in [api-reference.md](api-reference.md#self-tests).
 
 Typical reading:
 - All PASS: the plugin is healthy. Webhooks will land, tokens will
@@ -574,13 +574,20 @@ That decision lives in TC core.
 
 ## Scenario 14: a collaborator comments "/rebuild"
 
-**Actor**: a repo collaborator types a comment containing the
-configured trigger phrase (e.g. `/rebuild`) on an open PR; an
-outside contributor types the same phrase.
+**Actor**: a repo collaborator posts an inline review comment
+containing the configured trigger phrase (e.g. `/rebuild`) on an open
+PR's diff; an outside contributor posts the same phrase.
 
 **Expected outcome**: the collaborator's comment enqueues every
 opted-in BuildType whose `commentTrigger` phrase appears in the body
 (case-insensitive). The outside contributor's comment is ignored.
+
+This fires on the inline PR review comment event
+(`pull_request_review_comment`), which the App subscribes to by
+default. General PR *conversation* comments (`issue_comment`) trigger
+the same way but are **opt-in**: GitHub only delivers them when the App
+has the **Issues** permission, which the plugin does not request by
+default.
 
 The author is trusted by GitHub's `author_association`: by default
 `OWNER`, `MEMBER`, `COLLABORATOR` (people with write access). Anyone
@@ -597,16 +604,16 @@ sequenceDiagram
     participant SS as BridgeServerSettings
     participant Q as Build queue
 
-    Collab->>GH: comment "/rebuild" on PR #189
-    GH->>W: POST /webhook (event=issue_comment, action=created)
+    Collab->>GH: inline review comment "/rebuild" on PR #189
+    GH->>W: POST /webhook (event=pull_request_review_comment, action=created)
     W->>L: handleCommentCommand(payload)
     L->>SS: isRepoAllowed + isCommentAuthorAllowed(COLLABORATOR)
     SS-->>L: true / true
     Note over L: match BTs whose commentTrigger<br/>("/rebuild") appears in the body
     L->>Q: addToQueue(...) for each match
 
-    Outsider->>GH: comment "/rebuild" on PR #190
-    GH->>W: POST /webhook (event=issue_comment)
+    Outsider->>GH: inline review comment "/rebuild" on PR #190
+    GH->>W: POST /webhook (event=pull_request_review_comment)
     W->>L: handleCommentCommand(payload)
     L->>SS: isCommentAuthorAllowed(NONE)
     SS-->>L: false
@@ -784,6 +791,59 @@ Dry-run is the recommended first step when enabling the bridge on a
 busy server: watch the dedicated log for a few real PRs, confirm the
 right BuildTypes are matched, then turn it off.
 
+## Scenario 21: PR-metadata gate (title / body phrase + labels)
+
+**Actor**: a developer opens (or pushes to) a PR against a build
+configuration whose GitHub Bridge feature sets one or more of the
+**PR-metadata** fields — `requirePhrase`, `skipPhrase`, `labelFilter`
+(v1.8.0+).
+
+**Expected outcome**: the automatic trigger is **soft-filtered** on the
+PR's title, body and labels before the build is enqueued. When the PR is
+out of scope, the BuildType is **not** enqueued and a **"Skipped: PR
+metadata out of scope"** Check Run is posted (`SkipReason.METADATA_FILTER`).
+Like the branch/path filters these are **soft**: a manual "Run" in the TC
+UI always bypasses them. The gate applies to **PR builds only**.
+
+Three independent rules, evaluated together by `BridgeGate.metadataAllows`:
+
+| Field | Example | Effect |
+|---|---|---|
+| `skipPhrase` | `[skip ci]` | PR titled `Fix typo [skip ci]` → **skipped**; the build is not enqueued and the metadata Check Run is posted. |
+| `requirePhrase` | `/full` | Build runs only if the PR title or body contains `/full`; otherwise → **skipped**. |
+| `labelFilter` | `+:ci` | Build runs only when the PR carries the `ci` label; an unlabelled (or `-:no-ci`-matching) PR → **skipped**. |
+
+```mermaid
+flowchart TD
+    A[pull_request opened/synchronize<br/>PR #189, auto trigger] --> B[BridgeGate.decide]
+    B --> C{manual Run?}
+    C -->|yes| R[ALLOW: metadata bypassed]
+    C -->|no| D{skipPhrase in title/body?}
+    D -->|yes, e.g. [skip ci]| S[SUPPRESS_METADATA]
+    D -->|no| E{requirePhrase set<br/>and absent?}
+    E -->|yes| S
+    E -->|no| F{labelFilter set<br/>and no rule matches labels?}
+    F -->|yes, e.g. labelled no-ci| S
+    F -->|no| G[ALLOW: enqueue build]
+    S --> H[post Skipped: PR metadata out of scope<br/>conclusion=skipped]
+```
+
+On the PR's Checks tab, an excluded build shows:
+
+```
++----------------------------------------------------+
+|  -  TeamCity / Build_LinuxX64_Clang                |
+|     Skipped: PR metadata out of scope             |
+|     (conclusion: skipped)                          |
++----------------------------------------------------+
+```
+
+A common pairing: leave `requirePhrase` blank, set `labelFilter` to
+`+:ci` so an expensive suite runs **only** when a reviewer adds the `ci`
+label, and set `skipPhrase` to `[skip ci]` so a title-tagged PR opts out
+entirely. To force a run anyway, an operator clicks "Run" — the manual
+trigger bypasses all three filters.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |
@@ -807,6 +867,7 @@ right BuildTypes are matched, then turn it off.
 | PR review approved | `handleReviewApproved` enqueues run-on-approval BTs | Gated suites run |
 | Re-run clicked in GitHub Checks UI | `handleRerun` (`ignoreFinished=true`) | Fresh build runs even past a finished one |
 | PR touches only out-of-scope paths | `applyPathFilter` drops the BT, posts Skipped | GitHub PR shows "Skipped: paths out of scope" |
+| PR title/body/labels out of scope (`requirePhrase`/`skipPhrase`/`labelFilter`) | `BridgeGate` returns `SUPPRESS_METADATA`, posts Skipped (auto only) | GitHub PR shows "Skipped: PR metadata out of scope"; manual Run bypasses |
 | PR closed / merged | `cancelQueuedForClosedPr` removes queued builds | Queue drained; running builds finish |
 | External API trigger | `triggerBuild` via `/api/trigger` | Build enqueued (or dry-run no-op) |
 | Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds/Check Runs/comments; log shows intent |

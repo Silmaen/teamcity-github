@@ -99,6 +99,30 @@ class WebhookPayloadParserTest {
     }
 
     @Test
+    fun `parsePullRequestReviewComment accepts a created inline diff comment`() {
+        val json = """
+            {"action":"created",
+             "pull_request":{"number":12},
+             "comment":{"body":"/rebuild please","author_association":"COLLABORATOR","user":{"login":"bob"}},
+             "repository":{"full_name":"acme/widget"}}
+        """.trimIndent()
+        val parsed = WebhookPayloadParser.parsePullRequestReviewComment(json)
+        assertNotNull(parsed)
+        assertTrue(parsed!!.prNumber == 12)
+        assertTrue(parsed.body.contains("/rebuild"))
+        assertTrue(parsed.commenter == "bob")
+    }
+
+    @Test
+    fun `parsePullRequestReviewComment ignores non-created actions`() {
+        assertNull(
+            WebhookPayloadParser.parsePullRequestReviewComment(
+                """{"action":"edited","pull_request":{"number":1},"comment":{"body":"x"},"repository":{"full_name":"a/b"}}"""
+            )
+        )
+    }
+
+    @Test
     fun `parseIssueComment ignores non-PR issues and non-created actions`() {
         // Issue without a pull_request object.
         assertNull(
