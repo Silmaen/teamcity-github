@@ -492,6 +492,44 @@ You should see a `Published queue-removed/finished (failure) Check
 Run ...` (or `completed (failure)`) line for the affected build
 instead of only a `queued` one.
 
+## Symptom: no "Queued" Check Run — it only appears when the build starts
+
+### What you see
+
+An opted-in PR build produces a Check Run only once it **starts**
+(showing "Building"); the earlier **"Queued"** state never shows up on
+GitHub, even though the lifecycle is supposed to post queued →
+in_progress → completed.
+
+### Cause
+
+`buildTypeAddedToQueue` fires the instant the build is enqueued, but
+TeamCity resolves the VCS revision in a background task. At that moment
+`promotion.revisions` is often still empty (particularly for builds the
+plugin enqueues from a webhook), so the publisher had no head SHA and
+skipped the "Queued" Check Run silently. When the build later started,
+`buildStarted` ran with the revision resolved and posted "Building" —
+hence a row that appears only at start.
+
+### Fix
+
+**Upgrade to the version carrying this fix.** The publisher now retries
+the "queued" publish on TeamCity's scheduler (a handful of attempts, a
+fraction of a second apart) until the revision resolves. Each retry
+aborts if the build has meanwhile started or left the queue, so a late
+"Queued" can never overwrite a more advanced `in_progress` / completed
+row (GitHub dedups Check Runs by name + head SHA).
+
+### Verify
+
+```bash
+grep BuildStatusCheckRunPublisher <TC_DATA_DIR>/logs/teamcity-server.log | tail -20
+```
+
+You should see a `Published queued Check Run ...` line shortly after the
+build is enqueued. `Deferring queued Check Run ...; revisions not
+resolved yet` at debug level shows the retry doing its job.
+
 ## Symptom: build container fails on first run
 
 ### What you see

@@ -22,7 +22,9 @@ import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.SQueuedBuild
 import jetbrains.buildServer.serverSide.SRunningBuild
 import jetbrains.buildServer.serverSide.WebLinks
+import jetbrains.buildServer.serverSide.executors.ExecutorServices
 import jetbrains.buildServer.users.User
+import java.util.concurrent.TimeUnit
 
 // Publishes a Check Run to GitHub at every lifecycle transition for
 // an opted-in PR build:
@@ -34,6 +36,10 @@ import jetbrains.buildServer.users.User
 //
 // GitHub dedups Check Runs by (name, head_sha), so every event
 // transitions the same row: queued -> in_progress -> completed.
+//
+// The "queued" publish is retried on a scheduler because the VCS
+// revision (needed for head_sha) is resolved by a background task and
+// is frequently not ready yet when buildTypeAddedToQueue fires.
 class BuildStatusCheckRunPublisher(
     buildServer: SBuildServer,
     private val tokenResolver: TokenResolver,
@@ -43,6 +49,7 @@ class BuildStatusCheckRunPublisher(
     private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
     private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
     private val prSummaryCommenter: PrSummaryCommenter,
+    private val executorServices: ExecutorServices,
 ) : BuildServerAdapter() {
 
     init {
@@ -51,7 +58,7 @@ class BuildStatusCheckRunPublisher(
 
     override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
         try {
-            publishQueued(queuedBuild)
+            attemptPublishQueued(queuedBuild, attempt = 1)
         } catch (e: Exception) {
             LOG.warn("Failed publishing queued Check Run for ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
@@ -101,9 +108,61 @@ class BuildStatusCheckRunPublisher(
         }
     }
 
-    private fun publishQueued(queuedBuild: SQueuedBuild) {
+    // Publishes the "Queued" Check Run. At the instant buildTypeAddedToQueue
+    // fires, TeamCity has often not finished collecting the VCS revisions for
+    // the freshly-enqueued build (especially for builds we enqueue from a
+    // webhook), so promotion.revisions is still empty and resolveContext
+    // cannot resolve the head SHA. Giving up silently there left PR builds
+    // with NO "Queued" row until they actually started — the reported bug.
+    // Instead we retry a few times on TeamCity's shared scheduler until the
+    // revision is resolved.
+    //
+    // GitHub dedups Check Runs by (name, head_sha), so a late "Queued" post
+    // would clobber the "in_progress"/"completed" row a started build already
+    // owns. Every attempt therefore aborts if the build has meanwhile left
+    // the queue.
+    private fun attemptPublishQueued(queuedBuild: SQueuedBuild, attempt: Int) {
         val promotion = queuedBuild.buildPromotion
-        val ctx = resolveContext(promotion.buildType, promotion.revisions) ?: return
+
+        // The build already started/finished — its own lifecycle events own
+        // the row — or it left the queue with no running build (a removal
+        // buildRemovedFromQueue handles). Either way, do not post a stale
+        // "Queued" that would overwrite a more advanced state.
+        if (promotion.associatedBuild != null) return
+        if (promotion.queuedBuild == null) return
+
+        val buildType = promotion.buildType ?: return
+        // Not one of our builds (no bridge feature, or repo not allowed):
+        // never retry — the revision will never make it "ours".
+        val config = BridgeFeatureReader.read(buildType) ?: return
+        if (!serverSettings.isRepoAllowed(config.repo.slug)) return
+
+        val revisionReady = promotion.revisions.firstOrNull()?.revision?.isNotBlank() == true
+        when (decideQueuedAction(revisionReady, attempt)) {
+            QueuedAction.GIVE_UP -> {
+                LOG.debug("Giving up queued Check Run for ${buildType.externalId} (${promotion.branch?.name}): " +
+                    "no VCS revision resolved after $attempt attempts")
+                return
+            }
+            QueuedAction.RETRY -> {
+                LOG.debug("Deferring queued Check Run for ${buildType.externalId}; revisions not resolved yet " +
+                    "(attempt $attempt/$MAX_QUEUED_ATTEMPTS)")
+                executorServices.normalExecutorService.schedule(
+                    Runnable {
+                        try {
+                            attemptPublishQueued(queuedBuild, attempt + 1)
+                        } catch (e: Exception) {
+                            LOG.warn("Deferred queued Check Run failed for ${buildType.externalId}: ${e.message}", e)
+                        }
+                    },
+                    QUEUED_RETRY_DELAY_MS, TimeUnit.MILLISECONDS,
+                )
+                return
+            }
+            QueuedAction.PUBLISH -> Unit // fall through to publish below
+        }
+
+        val ctx = resolveContext(buildType, promotion.revisions) ?: return
         if (willBeSuppressed(queuedBuild, promotion, ctx)) {
             LOG.debug("Skipping queued Check Run for ${ctx.buildType.externalId}; gate says SUPPRESS, cleaner will own the row")
             return
@@ -332,6 +391,25 @@ class BuildStatusCheckRunPublisher(
     companion object {
         private val LOG = Logger.getInstance(BuildStatusCheckRunPublisher::class.java.name)
 
+        // The VCS revision of a freshly-enqueued build is resolved by a
+        // background task, so it may not be ready when buildTypeAddedToQueue
+        // fires. Retry up to this many times, this far apart, before giving
+        // up on the "Queued" Check Run (~a few seconds total). buildStarted
+        // still posts "in_progress" regardless.
+        const val MAX_QUEUED_ATTEMPTS: Int = 8
+        const val QUEUED_RETRY_DELAY_MS: Long = 750L
+
+        // Pure decision for the "queued" publish, given whether the VCS
+        // revision is resolved yet and which attempt this is. Testable
+        // without TC SDK fixtures. Lifecycle aborts (build already started /
+        // left the queue) and the "not our build" gate are handled by the
+        // caller before this is reached.
+        fun decideQueuedAction(revisionReady: Boolean, attempt: Int): QueuedAction = when {
+            revisionReady -> QueuedAction.PUBLISH
+            attempt >= MAX_QUEUED_ATTEMPTS -> QueuedAction.GIVE_UP
+            else -> QueuedAction.RETRY
+        }
+
         // GitHub limits output.summary to 65535 characters. Truncate
         // conservatively to leave headroom for the ellipsis.
         const val SUMMARY_MAX: Int = 60_000
@@ -390,3 +468,7 @@ data class BuildOutcomeMapping(
     val conclusion: CheckRunConclusion,
     val title: String,
 )
+
+// What to do with a "queued" publish attempt whose build is still in the
+// queue and belongs to us: post now, retry later, or give up.
+enum class QueuedAction { PUBLISH, RETRY, GIVE_UP }

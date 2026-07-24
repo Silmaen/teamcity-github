@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - unreleased
+
+### Fixed
+
+- **"Queued" Check Run now appears reliably.** The `buildTypeAddedToQueue`
+  event fires before TeamCity has finished collecting the VCS revision for
+  the freshly-enqueued build (especially for builds enqueued from a
+  webhook). With no head SHA yet, the "Queued" Check Run was skipped
+  silently and only appeared once the build started (as "Building"). The
+  publisher now retries the "queued" publish on TeamCity's scheduler until
+  the revision is resolved, aborting if the build meanwhile starts or
+  leaves the queue (so it never clobbers a later `in_progress` / completed
+  row).
+
 ## [1.8.0] - 2026-06-13
 
 Pull-request metadata gating and a correction to the comment-trigger

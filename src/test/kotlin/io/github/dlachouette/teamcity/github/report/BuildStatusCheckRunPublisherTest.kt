@@ -66,6 +66,37 @@ class BuildStatusCheckRunPublisherTest {
         assertEquals(short, BuildStatusCheckRunPublisher.truncateSummary(short))
     }
 
+    @Test
+    fun `queued action publishes as soon as the revision is resolved`() {
+        assertEquals(QueuedAction.PUBLISH, BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = true, attempt = 1))
+        // A resolved revision publishes even on the last attempt.
+        assertEquals(
+            QueuedAction.PUBLISH,
+            BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = true, attempt = BuildStatusCheckRunPublisher.MAX_QUEUED_ATTEMPTS),
+        )
+    }
+
+    @Test
+    fun `queued action retries while the revision is not resolved yet`() {
+        assertEquals(QueuedAction.RETRY, BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = false, attempt = 1))
+        assertEquals(
+            QueuedAction.RETRY,
+            BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = false, attempt = BuildStatusCheckRunPublisher.MAX_QUEUED_ATTEMPTS - 1),
+        )
+    }
+
+    @Test
+    fun `queued action gives up once the attempt budget is exhausted`() {
+        assertEquals(
+            QueuedAction.GIVE_UP,
+            BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = false, attempt = BuildStatusCheckRunPublisher.MAX_QUEUED_ATTEMPTS),
+        )
+        assertEquals(
+            QueuedAction.GIVE_UP,
+            BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = false, attempt = BuildStatusCheckRunPublisher.MAX_QUEUED_ATTEMPTS + 5),
+        )
+    }
+
     // The opt-in gate moved from buildType.parameters to the
     // "GitHub Bridge integration" BuildFeature in v1.5.0. The
     // equivalent of the previous `isOptedIn` tests now lives in
