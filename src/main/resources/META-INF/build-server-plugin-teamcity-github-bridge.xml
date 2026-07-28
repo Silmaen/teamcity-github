@@ -44,6 +44,7 @@
     <bean class="io.github.dlachouette.teamcity.github.web.AdminConsolePage"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminSettingsController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AdminTestController"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.BridgeBuildsTab"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BridgeProjectSettingsTab"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BridgeProjectSettingsController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.AppManifestController"/>
