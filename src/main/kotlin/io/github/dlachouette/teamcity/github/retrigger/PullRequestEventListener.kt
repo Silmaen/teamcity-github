@@ -47,6 +47,7 @@ class PullRequestEventListener(
     // as the system user so ProjectManager's collection accessors
     // return the real BT set (they filter by current user otherwise).
     fun handle(payload: PrEventPayload) {
+        if (isFork(payload.repo, payload.headRepo, "pull_request.${payload.action.value} #${payload.prNumber}")) return
         securityContext.runAsSystemUnchecked { handleInternal(payload) }
     }
 
@@ -57,6 +58,7 @@ class PullRequestEventListener(
         securityContext.runAsSystemUnchecked {
             if (!serverSettings.isRepoAllowed(payload.repo.slug)) return@runAsSystemUnchecked
             if (payload.draft) return@runAsSystemUnchecked
+            if (isFork(payload.repo, payload.headRepo, "review approval on #${payload.prNumber}")) return@runAsSystemUnchecked
             val branchName = BridgeRefs.prRef(payload.prNumber)
             val targets = findCandidateBuildTypes(payload.repo).filter { (_, config) ->
                 config.runOnApproval && config.prTriggerEnabled &&
@@ -94,6 +96,9 @@ class PullRequestEventListener(
             if (targets.isEmpty()) return@runAsSystemUnchecked
             LOG.info("PR #${payload.prNumber} comment by ${payload.commenter} matched ${targets.size} BT(s) on ${payload.repo.slug}")
             val pr = resolvePrInfo(targets.first(), payload.prNumber)
+            if (pr != null && isFork(payload.repo, pr.headRepo, "comment command on #${payload.prNumber}")) {
+                return@runAsSystemUnchecked
+            }
             targets.forEach { (bt, config) ->
                 enqueueIfAbsent(bt, prBuildRef(config, payload.prNumber, pr?.headRef), pr?.headSha.orEmpty(),
                     "teamcity-github-bridge: comment command '${config.commentTrigger}' by ${payload.commenter}",
@@ -510,6 +515,21 @@ class PullRequestEventListener(
         return matchesBranchAndSha(promo.branch?.name, promo.revisions.map { it.revision }, branchName, headSha)
     }
 
+    // R9 / G19: the bridge is attached to one repository, never to its
+    // forks. A PR whose head branch lives elsewhere is out of scope — and in
+    // branch-source mode it is not even buildable, since that ref does not
+    // exist here.
+    //
+    // Fail-open on a blank head repo: GitHub omits it when the fork has been
+    // deleted, and refusing to act on a missing field would be a silent
+    // regression for anyone whose payloads lack it.
+    private fun isFork(repo: RepoCoords, headRepo: String, what: String): Boolean {
+        if (headRepo.isBlank() || headRepo.equals(repo.slug, ignoreCase = true)) return false
+        LOG.info("Ignoring $what on ${repo.slug}: head lives in fork '$headRepo' (forks are out of scope)")
+        metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.FORK_EVENTS_IGNORED)
+        return true
+    }
+
     // The ref a PR build of `config` runs on: the synthetic `pull/N`, or —
     // in branch-source mode — the PR's own head branch. Falls back to
     // `pull/N` when the head ref is unknown (a payload without it, or a
@@ -586,6 +606,8 @@ data class PrEventPayload(
     val title: String = "",
     val body: String = "",
     val labels: List<String> = emptyList(),
+    // `owner/name` the head branch lives in — see ForkGuard.
+    val headRepo: String = "",
 )
 
 // pull_request_review submitted with state=approved.
@@ -595,6 +617,7 @@ data class ReviewApprovedPayload(
     val headSha: String,
     val headRef: String,
     val draft: Boolean,
+    val headRepo: String = "",
 )
 
 // Result of an external-API build trigger.

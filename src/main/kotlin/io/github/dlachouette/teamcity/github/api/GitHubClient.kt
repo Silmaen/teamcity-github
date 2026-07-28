@@ -492,6 +492,7 @@ open class GitHubClient {
                 labels = node.path("labels").mapNotNull {
                     it.path("name").asText("").takeIf { n -> n.isNotBlank() }
                 },
+                headRepo = head.path("repo").path("full_name").asText(""),
             )
         }
 

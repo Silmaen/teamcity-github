@@ -33,6 +33,10 @@ class BridgeMetrics {
         const val WEBHOOKS_REPLAYED = "webhooks_replayed"
         const val WEBHOOKS_TOO_LARGE = "webhooks_too_large"
 
+        // Events dropped because the PR head lives in a fork (the bridge is
+        // attached to one repository, never to its forks).
+        const val FORK_EVENTS_IGNORED = "fork_events_ignored"
+
         // Check Run publication.
         const val CHECK_RUNS_POSTED = "check_runs_posted"
         const val CHECK_RUNS_FAILED = "check_runs_failed"
