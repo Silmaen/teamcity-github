@@ -109,6 +109,8 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 | `metrics.enabled` | `true` | Metrics endpoint | Expose the metrics endpoint. |
 | `legacyAliases.enabled` | `false` | Publish legacy `teamcity.pullRequest.*` aliases | Also publish the bundled feature's variable names alongside the `teamcity.github.bridge.pullRequest.*` ones. |
 | `prComment.enabled` | `false` | Sticky PR summary comment | Post/update a summary comment on the PR thread. Needs the App's pull-requests/issues **write** permission, hence off by default. |
+| `checkRun.artifactLinks` | `true` | List artifacts in the Check Run and PR comment | Add an **Artifacts** section (top-level artifact files, capped at 10) to the completed Check Run and an `[artifacts]` link to each row of the sticky comment, so a reviewer or a tester reaches the installer/package straight from the PR. Costs one local artifact listing per finished build; no GitHub call. |
+| `rerunAll.onlyFailed` | `false` | "Re-run all checks" re-runs only the failed ones | Restrict `check_suite.rerequested` (the GitHub **Re-run all checks** button) to build configurations whose last build at that commit **failed**. Off = re-run every opted-in build configuration, which is what the button says. A configuration that never ran at that commit has no failure to re-run and is left alone either way. |
 | `branchPrLookup.enabled` | `true` | Attach branch builds to their PR | For a build launched on a plain branch ref (not a `pull/N` ref), resolve the pull request from the built commit (`GET /commits/{sha}/pulls`) so the build gets the PR parameters, the `draft`/`ready` tag and the summary comment. Only **open** PRs whose **head** is that exact commit qualify; the answer (including "no PR") is cached for the PR-info TTL. Off = branch builds stay strictly PR-unaware. |
 
 ### Managed GitHub App (v1.7.0+)
@@ -169,6 +171,7 @@ configure the three opt-in parameters can disable the bundled
 | `teamcity.github.bridge.pullRequest.sourceBranch` | `""` | `"feature/raycast"` | GitHub API |
 | `teamcity.github.bridge.pullRequest.targetBranch` | `""` | `"main"` | GitHub API |
 | `teamcity.github.bridge.pullRequest.headSha` | `""` | `"deadbeef1234..."` | GitHub API |
+| `teamcity.github.bridge.triggerSource` | _absent_ | `command` when the build was started by an explicit GitHub command (PR comment, review approval, Re-run button, `POST /api/trigger`); absent otherwise | set by the bridge on the promotion |
 
 All keys are **always emitted** for opted-in builds, with empty
 strings on non-PR branches, so DSL conditions never fail with
@@ -292,6 +295,7 @@ branches like `main`, `Release/*`) and `prTrigger` (PR branches,
 | `teamcity.github.bridge.branchTrigger.branches` | _empty_ (= all) | Non-PR branch filter | VCS branch-filter syntax (`+:pattern` / `-:pattern` per line, `/regex/` for Java regex). Empty = match every branch. |
 | `teamcity.github.bridge.prTrigger.enabled` | `true` (anything but `false`) | Trigger on pull requests | Project-level kill switch for the PR path. Off = the bridge never triggers PR builds for this project. |
 | `teamcity.github.bridge.prTrigger.branches` | _empty_ (= all) | PR source-branch filter | Matched against the PR's **source** branch name (e.g. `Feature/foo`), not the `pull/N` literal. Empty = match every PR. |
+| `teamcity.github.bridge.prBuildRef` | `pull` | Build PRs on their own branch | Which ref a PR build runs on. `pull` (default) = the synthetic `pull/N` ref, mapped by the VCS root's branch spec — the only option that works for PRs from forks. `branch` = the PR's **own head branch** (e.g. `Feature/foo`): readable in every TeamCity screen, and a push builds **once** instead of twice once a PR exists, because there is no second ref for the same commit. See [Branch-source PR builds](#branch-source-pr-builds-v190) below. |
 
 A BuildType participates only when (a) the surrounding project chain
 provides both `repo` and `connectionId`, **and** (b) the BuildType
@@ -567,6 +571,47 @@ If you only want debug temporarily and do not care about routing:
 ```
 
 Reload via `Administration -> Diagnostics -> Logging` or restart.
+
+## Branch-source PR builds (v1.9.0+)
+
+By default a PR build runs on the synthetic **`pull/N`** ref: TeamCity shows
+`pull/189` in its Branch column, and a work branch that also has a VCS
+trigger builds **twice** per push (once as `Feature/foo`, once as
+`pull/189`) with both builds fighting over the same Check Run row.
+
+Set the project's **Build PRs on their own branch** checkbox
+(`teamcity.github.bridge.prBuildRef = branch`) and the bridge enqueues PR
+builds on the PR's **head branch** instead. Then:
+
+- every TeamCity screen shows the real branch name;
+- a push builds **once** — there is no second ref for the same commit, so a
+  pre-PR build and the PR build are the same build;
+- the PR context is resolved from the built commit, which the mode enables
+  implicitly (it does not depend on `branchPrLookup.enabled`).
+
+**Requirements**
+
+| Requirement | Why |
+|---|---|
+| The head branches are in the VCS root's branch spec (e.g. `+:refs/heads/Feature/*`) | TeamCity must know the branch to build it |
+| Pull requests come from branches of the same repository | A fork's head ref does not exist locally. The bridge **ignores fork PRs** in both modes (see below), so this is a statement of scope, not a risk |
+| The gates you rely on are the PR ones | In this mode the plugin decides "is this a PR build?" from the commit, not from the ref name, so `triggerOnPrDraft`, the PR branch filter and the metadata filters keep applying |
+
+The switch is **per project** and defaults to `pull`, so existing
+installations are unaffected: nothing changes until you tick the box.
+Builds that already ran on `pull/N` stay in the history as builds of a ref
+that stops receiving new ones.
+
+## Forks are out of scope
+
+The bridge is attached to **one repository**, never to its forks: a pull
+request whose head branch lives in another repository is logged, counted
+(`fork_events_ignored`) and dropped — no build, no Check Run. This applies
+in both `prBuildRef` modes and is not configurable.
+
+If GitHub omits the head repository (it does for a deleted fork) the event
+is processed normally rather than dropped: treating a missing field as
+"foreign" would silently stop reporting.
 
 ## Check Run publisher coverage
 

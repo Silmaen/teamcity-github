@@ -8,6 +8,59 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Explicit GitHub commands are no longer undone by the filters.** A build
+  the bridge enqueues from a PR comment, a review approval, the *Re-run*
+  button or `POST /api/trigger` is stamped with
+  `teamcity.github.bridge.triggerSource=command` and gated like a manual
+  Run: HARD blocks still apply, the SOFT ones (branch list, PR-metadata
+  filters) do not. Before, `DraftBuildQueueCleaner` re-evaluated the full
+  gate with `isManual=false` and removed the build again, so every filter
+  that kept a build configuration off the automatic path also killed its
+  on-demand build. This is what makes an on-demand suite, a QA sign-off
+  build and **re-running a "Skipped: …" row from GitHub** work.
+
+- **Branch-source PR builds** (new project setting *Build PRs on their own
+  branch*, `teamcity.github.bridge.prBuildRef = pull | branch`, default
+  `pull`). In branch mode the bridge enqueues PR builds on the PR's **head
+  branch** instead of the synthetic `pull/N`: TeamCity shows a branch name
+  that means something, and a push builds **once** instead of twice once a
+  PR exists, because there is no second ref for the same commit. The PR
+  context is resolved from the built commit, so the PR gates
+  (`triggerOnPrDraft`, PR branch filter, metadata filters) keep applying —
+  `BridgeGate` no longer infers "is this a PR?" from the `pull/` prefix.
+  Requires the head branches in the VCS root's branch spec. See
+  [configuration.md](doc/configuration.md#branch-source-pr-builds-v190).
+
+- **Pull requests from forks are ignored**, and can now be recognised at
+  all: `head.repo.full_name` is parsed from the webhook payloads and from
+  the REST answer (`PrInfo.headRepo`). A PR whose head lives in another
+  repository is logged, counted (`fork_events_ignored`) and dropped — the
+  bridge is attached to one repository, never its forks. A blank head repo
+  (GitHub omits it for a deleted fork) fails open.
+
+- **"Re-run all checks" from GitHub** (`check_suite.rerequested`) re-runs
+  every opted-in build configuration for that head; the event used to be
+  answered *204 unsupported*. New `rerunAll.onlyFailed` setting restricts it
+  to configurations whose last build at that commit **failed**. The managed
+  App now subscribes to `check_suite` — on an App created earlier, *Verify
+  App configuration* reports it as a missing event until you add it.
+
+- **New project tab "Branches & PRs"**: one list of the bridge's builds —
+  queued, running and the last 30 finished per build configuration — with
+  both keys on every row (branch **and** PR number), searchable by either
+  (`189`, `#189`, `Feature/`) and sortable by time, branch or PR. The PR
+  number is persisted as a `pr-<n>` build tag, so the page costs no GitHub
+  API call and TeamCity's own tag filter finds it too. Builds that ran on a
+  work branch **before** its PR existed are back-filled with that tag (and
+  with `draft`/`ready`) when the PR is opened.
+
+- **Artifact links in the Check Run and the PR comment**
+  (`checkRun.artifactLinks`, default on): a completed Check Run lists the
+  build's top-level artifacts and the sticky comment gains an `[artifacts]`
+  cell, so a reviewer or a tester reaches the installer/package straight
+  from the pull request instead of hunting for the build in TeamCity.
+
+
 - **Branch builds are attached to their pull request.** A build launched
   on a plain branch ref (`Feature/x`, not a `pull/N` ref) now resolves the
   pull request from the built commit
@@ -27,7 +80,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   head is that commit shows it, under the same Check Run name as the
   `pull/N` build. Gating is unchanged — a branch build still takes
   `BridgeGate`'s branch path (`triggerOnBranch` +
-  `branchTrigger.branches`), so draft state and the PR-metadata filters do
+  `branchTrigger.branches`) **unless the project opted into branch-source
+  builds**, where the PR gates apply instead; so draft state and the
+  PR-metadata filters do
   not apply to it.
 
 ### Fixed

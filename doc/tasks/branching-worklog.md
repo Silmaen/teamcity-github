@@ -55,19 +55,19 @@ Status values: `open` · `in progress` · **`done (x.y.z)`** · `dropped` ·
 
 | # | Gap | Status | Where |
 |---|---|---|---|
-| G11 | Command-triggered builds are killed by the queue cleaner's soft gates | open | `BridgeGate`, `DraftBuildQueueCleaner`, `BuildStatusCheckRunPublisher`, `PullRequestEventListener` |
-| G19 | Fork PRs are not recognised (`head.repo.full_name` never parsed) | open | `WebhookPayloadParser`, `PullRequestEventListener` |
-| G18 | No branch-source mode (PR builds always on `pull/N`) | open | `BridgeFeatureConfig`, `PullRequestEventListener`, gate call sites |
-| G13 | No `check_suite.rerequested` handling (re-run all / only failed) | open | `WebhookPayloadParser`, `PluginWebhookController`, `PullRequestEventListener` |
-| G12 | No unified branch/PR view searchable by either key | open | new web page |
-| G12b | No retro-association of pre-PR builds | open | `PullRequestEventListener` |
-| G14 | Check Runs and PR comment carry no artifact links | open | `BuildStatusCheckRunPublisher`, `PrSummaryCommenter` |
+| G11 | Command-triggered builds are killed by the queue cleaner's soft gates | **done (1.8.3)** | `BridgeTrigger` (new), `BridgeGate.decide(trigger=…)`, `GateContextResolver` (new), cleaner / start-precondition / publisher, listener enqueue paths |
+| G19 | Fork PRs are not recognised (`head.repo.full_name` never parsed) | **done (1.8.3)** | `WebhookPayloadParser`, `GitHubClient.parsePrInfo`, `PrInfo.headRepo`, `PullRequestEventListener.isFork`, metric `fork_events_ignored` |
+| G18 | No branch-source mode (PR builds always on `pull/N`) | **done (1.8.3)** | `PrBuildRef` + project param `prBuildRef`, project page checkbox, `prBuildRefFor`, `resolvesPrFromCommit`, `PrPromotionTagger` |
+| G13 | No `check_suite.rerequested` handling (re-run all / only failed) | **done (1.8.3)** | `parseCheckSuiteRerequest`, controller route, `handleRerunAll`, setting `rerunAll.onlyFailed`, App subscribes to `check_suite` |
+| G12 | No unified branch/PR view searchable by either key | **done (1.8.3)** | `BridgeBuildsTab` + `project/bridgeBuilds.jsp`, `pr-<n>` build tag |
+| G12b | No retro-association of pre-PR builds | **done (1.8.3)** | `PullRequestEventListener.retroAssociate` on opened/synchronize |
+| G14 | Check Runs and PR comment carry no artifact links | **done (1.8.3)** | `artifactSection` / `joinSections`, `PrSummaryCommenter.Row.artifactsUrl`, setting `checkRun.artifactLinks` |
 | G17 | A red long-life build cannot name the merged PR / author | open | — |
 | G1 | No `pull_request.labeled` / `unlabeled` handling | open | — |
 | G3 | No `pull_request.edited` handling | open | — |
 | G4 | No `pull_request.reopened` handling | open | — |
 | G15 | Nothing warns when the bundled `commitStatusPublisher` is also active | open | — |
-| G16 | "Build the branch only while it has no PR" | superseded by G18 | — |
+| G16 | "Build the branch only while it has no PR" | **superseded** — G18 shipped, there is no second ref left to deduplicate | — |
 | G2 | No base/target-branch filter | open — not needed here (R14) | — |
 | G5 | Comment triggers need a trusted `author_association` | open — moot here (R13) | — |
 | G6 | Post an arbitrary Check Run from outside | dropped (R15) | — |
@@ -85,15 +85,34 @@ row here is complete.
 
 | Gap | `branching-workflows` | `configuration` | `usage-scenarios` | `quickstart` / `troubleshooting` | `CHANGELOG` |
 |---|---|---|---|---|---|
-| G11 | ☐ | ☐ | ☐ | n/a | ☐ |
-| G19 | ☐ | ☐ | ☐ | n/a | ☐ |
-| G18 | ☐ | ☐ | ☐ | ☐ | ☐ |
-| G13 | ☐ | ☐ | ☐ | n/a | ☐ |
-| G12 / G12b | ☐ | ☐ | ☐ | n/a | ☐ |
-| G14 | ☐ | ☐ | ☐ | n/a | ☐ |
+| G11 | ☑ | ☑ (published `triggerSource` param) | ☑ (scenario 23) | n/a | ☑ |
+| G19 | ☑ | ☑ (*Forks are out of scope*) | ☑ (summary table) | n/a | ☑ |
+| G18 | ☑ | ☑ (*Branch-source PR builds* + project param) | ☑ (scenario 22) | n/a — project-level opt-in | ☑ |
+| G13 | ☑ | ☑ (`rerunAll.onlyFailed`) | ☑ (scenario 23) | n/a | ☑ |
+| G12 / G12b | ☑ | ☐ — the tab is self-explanatory, add a section if operators ask | ☑ (summary table) | n/a | ☑ |
+| G14 | ☑ | ☑ (`checkRun.artifactLinks`) | ☑ (summary table) | n/a | ☑ |
 | G10 (R10 warning) | ☑ | ☑ | ☑ | ☑ | n/a — warning not shipped yet (G15) |
 
 ---
+
+## Next up
+
+The batch above closed the agreed sequence. What remains, in the order the
+scenarios argue for:
+
+1. **G17** — name the merged PR (and its author) on a red `<long-life branch>`
+   build, so R16 has tooling behind it. Small: ask GitHub for the PR
+   associated with the merge commit, publish number + author as build
+   parameters.
+2. **G15** — warn when a build configuration carries both the bridge and the
+   bundled `commitStatusPublisher` (R10 is documented, not yet detected).
+3. **G1 / G3 / G4** — react to `labeled`, `edited`, `reopened`, so a label is
+   a trigger and not only a filter.
+4. **G10** — line-level Check Run annotations.
+
+Still open as a *decision*: the pre-PR build policy of F1 — but with G18
+shipped, "automatic on push" no longer costs a second build, so the
+question is now mostly moot.
 
 ## Version staging
 
