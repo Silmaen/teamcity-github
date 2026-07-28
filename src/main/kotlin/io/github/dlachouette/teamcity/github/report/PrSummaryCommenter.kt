@@ -21,7 +21,15 @@ class PrSummaryCommenter(
     private val gitHubClient: GitHubClient,
 ) {
 
-    data class Row(val emoji: String, val text: String, val url: String?)
+    // `artifactsUrl` is what QA asked for: from the PR, one click to the
+    // build's artefacts. Absent in comments written by older versions, so it
+    // must stay optional through the JSON round-trip.
+    data class Row(
+        val emoji: String,
+        val text: String,
+        val url: String?,
+        val artifactsUrl: String? = null,
+    )
 
     fun upsert(
         accessToken: String,
@@ -63,6 +71,7 @@ class PrSummaryCommenter(
                     emoji = v.path("emoji").asText(""),
                     text = v.path("text").asText(""),
                     url = v.path("url").asText("").takeIf { it.isNotBlank() },
+                    artifactsUrl = v.path("artifactsUrl").asText("").takeIf { it.isNotBlank() },
                 )
             }
         } catch (e: Exception) {
@@ -77,11 +86,12 @@ class PrSummaryCommenter(
         return buildString {
             append(MARKER_BEGIN).append('\n').append(json).append('\n').append(MARKER_END).append('\n')
             append("### TeamCity build summary\n\n")
-            append("| Check | Result | |\n|---|---|---|\n")
+            append("| Check | Result | | |\n|---|---|---|---|\n")
             rows.toSortedMap().forEach { (name, r) ->
                 val link = r.url?.let { "[details]($it)" } ?: ""
+                val artifacts = r.artifactsUrl?.let { "[artifacts]($it)" } ?: ""
                 append("| ").append(name).append(" | ").append(r.emoji).append(' ').append(r.text)
-                    .append(" | ").append(link).append(" |\n")
+                    .append(" | ").append(link).append(" | ").append(artifacts).append(" |\n")
             }
         }
     }

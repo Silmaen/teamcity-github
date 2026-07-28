@@ -75,6 +75,12 @@ class BridgeServerSettings(
     // is what the GitHub button says it does.
     fun rerunAllOnlyFailed(): Boolean = boolSetting(KEY_RERUN_ONLY_FAILED, false)
 
+    // List the build's artefacts (with a link to them) in the completed
+    // Check Run and in the sticky PR comment. On by default: it is what makes
+    // a PR a usable hand-off to a reviewer or a tester, and it costs one local
+    // artifact listing per finished build.
+    fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
+
     // Bearer token for the external API. null = API disabled. Stored
     // separately (set/cleared from its own admin form) so a bulk settings
     // save never clears it.
@@ -132,7 +138,7 @@ class BridgeServerSettings(
                 "retry=${httpMaxAttempts()}x@${httpBaseDelayMs()}ms, replay=${replayProtectionEnabled()}, " +
                 "dryRun=${dryRun()}, metrics=${metricsEnabled()}, legacyAliases=${legacyAliasesEnabled()}, " +
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
-                "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, " +
+                "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -171,6 +177,7 @@ class BridgeServerSettings(
         const val KEY_PR_COMMENT_ENABLED: String = "prComment.enabled"
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
+        const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"
         const val DEFAULT_COMMENT_ASSOCIATIONS: String = "OWNER,MEMBER,COLLABORATOR"

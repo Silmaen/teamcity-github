@@ -22,6 +22,7 @@ import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.SQueuedBuild
 import jetbrains.buildServer.serverSide.SRunningBuild
+import jetbrains.buildServer.serverSide.artifacts.BuildArtifactsViewMode
 import jetbrains.buildServer.serverSide.WebLinks
 import jetbrains.buildServer.serverSide.executors.ExecutorServices
 import jetbrains.buildServer.users.User
@@ -229,7 +230,7 @@ class BuildStatusCheckRunPublisher(
             outputTitle = mapping.title,
             outputSummary = truncateSummary(summary),
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
-            outputText = failureDetails(build),
+            outputText = joinSections(failureDetails(build), artifactSection(build)),
         )
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
         maybeUpdatePrComment(build, ctx, mapping)
@@ -254,7 +255,12 @@ class BuildStatusCheckRunPublisher(
             prNumber = prNumber,
             apiBase = ctx.apiBase,
             checkName = checkRunName(ctx.buildType),
-            row = PrSummaryCommenter.Row(emoji, mapping.title, safeUrl { webLinks.getViewResultsUrl(build) }),
+            row = PrSummaryCommenter.Row(
+                emoji = emoji,
+                text = mapping.title,
+                url = safeUrl { webLinks.getViewResultsUrl(build) },
+                artifactsUrl = artifactsUrl(build),
+            ),
         )
     }
 
@@ -387,6 +393,37 @@ class BuildStatusCheckRunPublisher(
         val apiBase: String,
     )
 
+    // Artefact links, so a reviewer or a tester reaches the installer or
+    // the package straight from the PR instead of hunting for the build in
+    // TeamCity. Top-level files only, capped, and skipped entirely when the
+    // build produced nothing.
+    private fun artifactSection(build: SBuild): String? {
+        if (!serverSettings.artifactLinksEnabled()) return null
+        val artifactsUrl = artifactsUrl(build) ?: return null
+        val names = topLevelArtifactNames(build)
+        if (names.isEmpty()) return null
+        return buildString {
+            append("### Artifacts\n\n")
+            names.forEach { append("- [").append(it).append("](").append(artifactsUrl).append(")\n") }
+            if (names.size == MAX_ARTIFACTS) append("- …\n")
+        }
+    }
+
+    private fun artifactsUrl(build: SBuild): String? =
+        if (!build.isArtifactsExists) null else safeUrl { webLinks.getViewArtifactsUrl(build) }
+
+    private fun topLevelArtifactNames(build: SBuild): List<String> = try {
+        build.getArtifacts(BuildArtifactsViewMode.VIEW_DEFAULT).rootArtifact.children
+            .asSequence()
+            .filterNot { it.isDirectory }
+            .map { it.name }
+            .take(MAX_ARTIFACTS)
+            .toList()
+    } catch (e: Exception) {
+        LOG.debug("Could not list artifacts of build ${build.buildId}: ${e.message}")
+        emptyList()
+    }
+
     companion object {
         private val LOG = Logger.getInstance(BuildStatusCheckRunPublisher::class.java.name)
 
@@ -416,6 +453,9 @@ class BuildStatusCheckRunPublisher(
         // Cap how many failure reasons we list in the Check Run body.
         const val MAX_FAILURE_REASONS: Int = 30
 
+        // Top-level artifact files listed in the completed Check Run.
+        const val MAX_ARTIFACTS: Int = 10
+
         fun truncateSummary(text: String): String =
             if (text.length <= SUMMARY_MAX) text
             else text.take(SUMMARY_MAX) + "\n\n... (truncated)"
@@ -424,6 +464,10 @@ class BuildStatusCheckRunPublisher(
         // the Check Run `output.text`. Returns null when there are none
         // (passing builds), so the field is omitted. Each reason is a
         // BuildProblemData carrying a human-readable description.
+        // Concatenate the optional Markdown sections of output.text.
+        fun joinSections(vararg sections: String?): String? =
+            sections.filterNot { it.isNullOrBlank() }.joinToString("\n").takeIf { it.isNotBlank() }
+
         fun failureDetails(build: SBuild): String? {
             val reasons = try {
                 build.failureReasons

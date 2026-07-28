@@ -5,6 +5,7 @@ import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
 import jetbrains.buildServer.messages.Status
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class BuildStatusCheckRunPublisherTest {
@@ -101,4 +102,24 @@ class BuildStatusCheckRunPublisherTest {
     // "GitHub Bridge integration" BuildFeature in v1.5.0. The
     // equivalent of the previous `isOptedIn` tests now lives in
     // BridgeFeatureConfigTest exercising BridgeFeatureReader.fromParams.
+
+    // G14: output.text stitches the optional Markdown sections together.
+    @Test
+    fun `joinSections keeps the non-blank sections in order`() {
+        assertEquals(
+            "### Failure details\n\n- boom\n\n### Artifacts\n\n- [app.zip](u)\n",
+            BuildStatusCheckRunPublisher.joinSections("### Failure details\n\n- boom\n", "### Artifacts\n\n- [app.zip](u)\n"),
+        )
+    }
+
+    @Test
+    fun `joinSections yields null when there is nothing to say`() {
+        assertNull(BuildStatusCheckRunPublisher.joinSections(null, null))
+        assertNull(BuildStatusCheckRunPublisher.joinSections(null, "   "))
+    }
+
+    @Test
+    fun `joinSections passes a single section through`() {
+        assertEquals("only\n", BuildStatusCheckRunPublisher.joinSections(null, "only\n"))
+    }
 }
