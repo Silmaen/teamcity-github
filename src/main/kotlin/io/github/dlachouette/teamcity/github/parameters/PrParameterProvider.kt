@@ -6,6 +6,7 @@ import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.parameters.AbstractBuildParametersProvider
 
@@ -33,7 +34,7 @@ class PrParameterProvider(
             // (= no lookup) when the operator disabled the branch->PR
             // lookup or the revision is not resolved.
             val headSha = build.revisions.firstOrNull()?.revision
-                ?.takeIf { it.isNotBlank() && serverSettings.branchPrLookupEnabled() }
+                ?.takeIf { it.isNotBlank() && config.resolvesPrFromCommit(serverSettings.branchPrLookupEnabled()) }
 
             fun access() = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
 

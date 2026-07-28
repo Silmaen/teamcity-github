@@ -182,6 +182,14 @@ object BridgeFeatureReader {
     }
 }
 
+// Should a build launched on a plain branch ref resolve its PR from the
+// built commit? True when the operator enabled the server-wide lookup, and
+// implicitly in branch-source mode — there, *every* PR build is a branch
+// build, so switching the lookup off would strip PR parameters, tags and
+// comments from all of them.
+fun BridgeFeatureConfig.resolvesPrFromCommit(serverLookupEnabled: Boolean): Boolean =
+    serverLookupEnabled || prBuildRef == PrBuildRef.BRANCH
+
 // Decision the gate produces for a single build (or potential build,
 // from the listener) of an opt-in BT in a given context.
 enum class GateDecision {

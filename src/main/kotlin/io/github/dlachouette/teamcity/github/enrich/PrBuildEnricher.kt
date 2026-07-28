@@ -6,6 +6,8 @@ import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.BridgeRefs
+import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SRunningBuild
@@ -37,17 +39,13 @@ class PrBuildEnricher(
         // branch ref -> the PR (if any) is looked up from the head commit,
         // so a build launched on `Feature/x` is enriched like the `pull/N`
         // build of the same commit.
-        val prNumber = if (branchName.startsWith("pull/")) {
-            branchName.removePrefix("pull/").toIntOrNull() ?: return
-        } else {
-            null
-        }
+        val prNumber = BridgeRefs.prNumberFromRef(branchName)
         val headSha = build.revisions.firstOrNull()?.revision.orEmpty()
-        if (prNumber == null) {
-            if (!serverSettings.branchPrLookupEnabled() || headSha.isBlank()) return
-        }
 
         val config = BridgeFeatureReader.read(buildType) ?: return
+        if (prNumber == null) {
+            if (!config.resolvesPrFromCommit(serverSettings.branchPrLookupEnabled()) || headSha.isBlank()) return
+        }
 
         // TokenResolver already logs the cause (rate-limited).
         val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return

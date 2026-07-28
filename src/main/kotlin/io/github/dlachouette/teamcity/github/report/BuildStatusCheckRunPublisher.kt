@@ -12,6 +12,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.messages.Status
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.BuildRevision
@@ -265,7 +266,7 @@ class BuildStatusCheckRunPublisher(
     private fun resolvePrNumber(build: SBuild, ctx: PrBuildContext): Int? {
         val branch = build.branch?.name ?: return null
         if (branch.startsWith("pull/")) return branch.removePrefix("pull/").toIntOrNull()
-        if (!serverSettings.branchPrLookupEnabled()) return null
+        if (!ctx.config.resolvesPrFromCommit(serverSettings.branchPrLookupEnabled())) return null
         return prInfoCache.getForCommit(ctx.repo, ctx.headSha, ctx.accessToken, ctx.apiBase)?.number
     }
 

@@ -3,6 +3,7 @@ package io.github.dlachouette.teamcity.github.web
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
+import io.github.dlachouette.teamcity.github.feature.PrBuildRef
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SimpleParameter
@@ -14,7 +15,7 @@ import org.springframework.web.servlet.view.RedirectView
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 
-// Backs the form in BridgeProjectSettingsTab. Writes the six project-level
+// Backs the form in BridgeProjectSettingsTab. Writes the project-level
 // parameters as OWN parameters of the target project and persists.
 //
 // Auth: the user must hold EDIT_PROJECT on the target project.
@@ -71,6 +72,14 @@ class BridgeProjectSettingsController(
             applyParam(project, BridgeProjectParams.BRANCH_TRIGGER_BRANCHES, request.getParameter("branchTriggerBranches").orEmpty().trim())
             applyBool(project, BridgeProjectParams.PR_TRIGGER_ENABLED, request.getParameter("prTriggerEnabled") != null)
             applyParam(project, BridgeProjectParams.PR_TRIGGER_BRANCHES, request.getParameter("prTriggerBranches").orEmpty().trim())
+            // Checkbox: ticked = branch-source builds, unticked = the
+            // historical `pull/N` ref. Written explicitly (not cleared) so the
+            // choice is visible in the project's parameter list.
+            applyParam(
+                project, BridgeProjectParams.PR_BUILD_REF,
+                if (request.getParameter("prBuildRefBranch") != null) PrBuildRef.BRANCH.name.lowercase()
+                else PrBuildRef.PULL.name.lowercase(),
+            )
             project.persist()
             LOG.info("GitHub Bridge project settings for ${project.externalId} updated by ${user.username}")
             "saved"
