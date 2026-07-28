@@ -1,6 +1,7 @@
 package io.github.dlachouette.teamcity.github.web
 
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
+import io.github.dlachouette.teamcity.github.feature.PrBuildRef
 import jetbrains.buildServer.controllers.admin.projects.EditProjectTab
 import jetbrains.buildServer.controllers.admin.projects.GroupableEditProjectTab
 import jetbrains.buildServer.web.CSRFFilter
@@ -8,8 +9,8 @@ import jetbrains.buildServer.web.openapi.PagePlaces
 import jetbrains.buildServer.web.openapi.PluginDescriptor
 import javax.servlet.http.HttpServletRequest
 
-// Project-administration tab ("Integrations" group) that gives the six
-// mandatory project-level parameters a real form, instead of making
+// Project-administration tab ("Integrations" group) that gives the
+// project-level parameters a real form, instead of making
 // operators hand-edit raw configuration parameters under
 // Administration -> <project> -> Parameters.
 //
@@ -42,6 +43,7 @@ class BridgeProjectSettingsTab(
         model["branchTriggerBranches"] = params[BridgeProjectParams.BRANCH_TRIGGER_BRANCHES].orEmpty()
         model["prTriggerEnabled"] = params[BridgeProjectParams.PR_TRIGGER_ENABLED] != "false"
         model["prTriggerBranches"] = params[BridgeProjectParams.PR_TRIGGER_BRANCHES].orEmpty()
+        model["prBuildRefBranch"] = PrBuildRef.parse(params[BridgeProjectParams.PR_BUILD_REF]) == PrBuildRef.BRANCH
 
         model["projectExternalId"] = project.externalId
         model["projectId"] = project.projectId

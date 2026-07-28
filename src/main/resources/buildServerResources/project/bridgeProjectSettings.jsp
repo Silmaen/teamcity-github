@@ -96,6 +96,19 @@
             </td>
         </tr>
         <tr>
+            <th><label for="prBuildRefBranch">Build PRs on their own branch:</label></th>
+            <td>
+                <input type="checkbox" id="prBuildRefBranch" name="prBuildRefBranch" <c:if test="${prBuildRefBranch}">checked</c:if>/>
+                <div class="bridge-help">
+                    Off (default): a PR build runs on the synthetic <code>pull/N</code> ref.<br/>
+                    On: it runs on the PR's own head branch (e.g. <code>Feature/foo</code>) — readable in every
+                    TeamCity screen, and a push builds <em>once</em> instead of twice once a PR exists.
+                    Requires the head branches to be in the VCS root's branch spec
+                    (e.g. <code>+:refs/heads/Feature/*</code>); pull requests from forks are ignored either way.
+                </div>
+            </td>
+        </tr>
+        <tr>
             <td></td>
             <td><input type="submit" class="btn btn_primary" value="Save GitHub Bridge settings"/></td>
         </tr>

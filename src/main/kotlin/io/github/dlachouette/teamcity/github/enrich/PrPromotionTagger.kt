@@ -1,9 +1,8 @@
 package io.github.dlachouette.teamcity.github.enrich
 
 import com.intellij.openapi.diagnostic.Logger
-import io.github.dlachouette.teamcity.github.api.TokenResolver
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.GateContextResolver
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
@@ -15,8 +14,7 @@ import jetbrains.buildServer.serverSide.SQueuedBuild
 // only fires on buildStarted, which never happens for held drafts.
 class PrPromotionTagger(
     buildServer: SBuildServer,
-    private val tokenResolver: TokenResolver,
-    private val prInfoCache: PrInfoCache,
+    private val gateContextResolver: GateContextResolver,
 ) : BuildServerAdapter() {
 
     init {
@@ -25,35 +23,28 @@ class PrPromotionTagger(
 
     override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
         try {
-            tag(queuedBuild.buildPromotion)
+            tag(queuedBuild.buildPromotion, queuedBuild.triggeredBy.isTriggeredByUser)
         } catch (e: Exception) {
             LOG.warn("Failed tagging promotion for ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
     }
 
-    private fun tag(promotion: BuildPromotion) {
-        val branchName = promotion.branch?.name ?: return
-        if (!branchName.startsWith("pull/")) return
-
-        val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
+    private fun tag(promotion: BuildPromotion, triggeredByUser: Boolean) {
         val buildType = promotion.buildType ?: return
 
         // Opt-in = presence of the GitHub Bridge feature on the BT
-        // (independent of ignoreDrafts: ALL-scope, draft-friendly
-        // builds still get the visual draft/ready tag).
+        // (independent of the draft flags: draft-friendly builds still get
+        // the visual draft/ready tag).
         val config = BridgeFeatureReader.read(buildType) ?: return
 
-        val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
-
-        val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase)
-        if (pr == null) {
-            LOG.warn("Cannot fetch PR info for ${config.repo.slug}#$prNumber; skipping promotion tag")
-            return
-        }
+        // The resolver knows both PR shapes: the `pull/N` ref and — in
+        // branch-source mode — a head branch whose commit heads an open PR.
+        val ctx = gateContextResolver.resolve(promotion, config, triggeredByUser) ?: return
+        val pr = ctx.pr ?: return
 
         val plan = computePlan(promotion.tags, pr.draft) ?: return
         promotion.setTags(plan.newTags)
-        LOG.info("Tagged promotion for ${config.repo.slug}#$prNumber as ${plan.appliedTag} (buildType=${buildType.externalId})")
+        LOG.info("Tagged promotion for ${config.repo.slug}#${pr.number} as ${plan.appliedTag} (buildType=${buildType.externalId})")
     }
 
     companion object {

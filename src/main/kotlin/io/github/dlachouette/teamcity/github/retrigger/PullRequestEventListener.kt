@@ -67,7 +67,7 @@ class PullRequestEventListener(
             if (targets.isEmpty()) return@runAsSystemUnchecked
             LOG.info("PR #${payload.prNumber} approved: ${targets.size} run-on-approval BT(s) for ${payload.repo.slug}")
             targets.forEach { (bt, config) ->
-                enqueueIfAbsent(bt, prBuildRef(config, payload.prNumber, payload.headRef), payload.headSha,
+                enqueueIfAbsent(bt, prBuildRefFor(config, payload.prNumber, payload.headRef), payload.headSha,
                     "teamcity-github-bridge: PR #${payload.prNumber} approved (run-on-approval)",
                     trigger = BridgeTrigger.COMMAND)
             }
@@ -100,7 +100,7 @@ class PullRequestEventListener(
                 return@runAsSystemUnchecked
             }
             targets.forEach { (bt, config) ->
-                enqueueIfAbsent(bt, prBuildRef(config, payload.prNumber, pr?.headRef), pr?.headSha.orEmpty(),
+                enqueueIfAbsent(bt, prBuildRefFor(config, payload.prNumber, pr?.headRef), pr?.headSha.orEmpty(),
                     "teamcity-github-bridge: comment command '${config.commentTrigger}' by ${payload.commenter}",
                     trigger = BridgeTrigger.COMMAND)
             }
@@ -166,7 +166,7 @@ class PullRequestEventListener(
             // Re-run skips only currently running/queued builds, NOT finished
             // ones (re-running a finished build is exactly the intent).
             val ref = payload.prNumber
-                ?.let { prBuildRef(match.second, it, payload.headBranch) }
+                ?.let { prBuildRefFor(match.second, it, payload.headBranch) }
                 ?: branchName
             enqueueIfAbsent(match.first, ref, payload.headSha,
                 "teamcity-github-bridge: re-run requested from GitHub",
@@ -243,7 +243,7 @@ class PullRequestEventListener(
         candidates.forEach { (bt, config) ->
             when (BridgeGate.decide(
                 config = config,
-                branchName = prBuildRef(config, payload.prNumber, payload.headRef),
+                branchName = prBuildRefFor(config, payload.prNumber, payload.headRef),
                 prNumber = payload.prNumber,
                 prDraft = payload.draft,
                 prHeadRef = payload.headRef,
@@ -285,7 +285,7 @@ class PullRequestEventListener(
         var enqueued = 0
         var skippedExisting = 0
         finalTargets.forEach { (bt, config) ->
-            val branchName = prBuildRef(config, payload.prNumber, payload.headRef)
+            val branchName = prBuildRefFor(config, payload.prNumber, payload.headRef)
             val skipReason = findExistingBuildReason(bt, branchName, payload.headSha)
             if (skipReason != null) {
                 LOG.info("Skipping ${bt.externalId} for ${payload.repo.slug}#${payload.prNumber}: $skipReason")
@@ -358,7 +358,7 @@ class PullRequestEventListener(
         val candidates = findCandidateBuildTypes(payload.repo)
         var removed = 0
         candidates.forEach { (bt, config) ->
-            val branchName = prBuildRef(config, payload.prNumber, payload.headRef)
+            val branchName = prBuildRefFor(config, payload.prNumber, payload.headRef)
             bt.getQueuedBuilds(null)
                 .filter { it.buildPromotion.branch?.name == branchName }
                 .forEach { qb ->
@@ -530,14 +530,6 @@ class PullRequestEventListener(
         return true
     }
 
-    // The ref a PR build of `config` runs on: the synthetic `pull/N`, or —
-    // in branch-source mode — the PR's own head branch. Falls back to
-    // `pull/N` when the head ref is unknown (a payload without it, or a
-    // fork, which G19 rejects earlier anyway).
-    internal fun prBuildRef(config: BridgeFeatureConfig, prNumber: Int, headRef: String?): String =
-        if (config.prBuildRef == PrBuildRef.BRANCH && !headRef.isNullOrBlank()) headRef
-        else BridgeRefs.prRef(prNumber)
-
     private fun enqueue(
         buildType: BuildTypeEx,
         branchName: String,
@@ -562,6 +554,14 @@ class PullRequestEventListener(
         private val LOG = Logger.getInstance(PullRequestEventListener::class.java.name)
 
         private const val HISTORY_SCAN_DEPTH: Int = 50
+
+        // The ref a PR build of `config` runs on: the synthetic `pull/N`, or
+        // — in branch-source mode — the PR's own head branch. Falls back to
+        // `pull/N` when the head ref is unknown (a payload without it, or a
+        // fork, which the fork guard rejects earlier anyway).
+        fun prBuildRefFor(config: BridgeFeatureConfig, prNumber: Int, headRef: String?): String =
+            if (config.prBuildRef == PrBuildRef.BRANCH && !headRef.isNullOrBlank()) headRef
+            else BridgeRefs.prRef(prNumber)
 
         fun matchesRepo(buildTypeRepo: RepoCoords, eventRepo: RepoCoords): Boolean =
             buildTypeRepo.slug.equals(eventRepo.slug, ignoreCase = true)
