@@ -152,6 +152,17 @@ class PluginWebhookController(
                     detail = if (parsed != null) "re-run handled" else "not a rerequest",
                 )
             }
+            "check_suite" -> {
+                val parsed = WebhookPayloadParser.parseCheckSuiteRerequest(String(payload, Charsets.UTF_8))
+                if (parsed != null) pullRequestEventListener.handleRerunAll(parsed)
+                response.status = HttpServletResponse.SC_OK
+                recentEventsLog.record(
+                    event = event, repo = parsed?.repo?.slug, action = "rerequested",
+                    httpStatus = HttpServletResponse.SC_OK,
+                    outcome = if (parsed != null) Outcome.ACCEPTED else Outcome.SKIPPED,
+                    detail = if (parsed != null) "re-run all handled" else "not a rerequest",
+                )
+            }
             else -> {
                 LOG.debug("Ignoring unsupported event: $event")
                 response.status = HttpServletResponse.SC_NO_CONTENT

@@ -69,6 +69,12 @@ class BridgeServerSettings(
     // strictly PR-unaware.
     fun branchPrLookupEnabled(): Boolean = boolSetting(KEY_BRANCH_PR_LOOKUP, true)
 
+    // "Re-run all checks" from GitHub (`check_suite.rerequested`): when on,
+    // only build configurations whose last build at that commit FAILED are
+    // re-run. Default off = re-run every opted-in build configuration, which
+    // is what the GitHub button says it does.
+    fun rerunAllOnlyFailed(): Boolean = boolSetting(KEY_RERUN_ONLY_FAILED, false)
+
     // Bearer token for the external API. null = API disabled. Stored
     // separately (set/cleared from its own admin form) so a bulk settings
     // save never clears it.
@@ -126,6 +132,7 @@ class BridgeServerSettings(
                 "retry=${httpMaxAttempts()}x@${httpBaseDelayMs()}ms, replay=${replayProtectionEnabled()}, " +
                 "dryRun=${dryRun()}, metrics=${metricsEnabled()}, legacyAliases=${legacyAliasesEnabled()}, " +
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
+                "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -163,6 +170,7 @@ class BridgeServerSettings(
         const val KEY_LEGACY_ALIASES: String = "legacyAliases.enabled"
         const val KEY_PR_COMMENT_ENABLED: String = "prComment.enabled"
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
+        const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"
         const val DEFAULT_COMMENT_ASSOCIATIONS: String = "OWNER,MEMBER,COLLABORATOR"

@@ -104,6 +104,7 @@ class AppManager(
             "pull_request_review",
             "pull_request_review_comment",
             "check_run",
+            "check_suite",
         )
 
         // GitHub permission levels are ordered none < read < write < admin.

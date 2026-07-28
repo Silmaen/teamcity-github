@@ -6,6 +6,7 @@ import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.retrigger.CommentCommandPayload
 import io.github.dlachouette.teamcity.github.retrigger.PrAction
 import io.github.dlachouette.teamcity.github.retrigger.PrEventPayload
+import io.github.dlachouette.teamcity.github.retrigger.RerunAllPayload
 import io.github.dlachouette.teamcity.github.retrigger.RerunRequestPayload
 import io.github.dlachouette.teamcity.github.retrigger.ReviewApprovedPayload
 
@@ -161,6 +162,33 @@ object WebhookPayloadParser {
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request_review_comment payload: ${e.message}")
+            null
+        }
+    }
+
+    // Parses a `check_suite` event, returning a payload only for the
+    // `rerequested` action — the "Re-run all checks" button. The suite names
+    // no check run, so the caller re-runs every opted-in build configuration
+    // for that head (optionally only the failed ones).
+    fun parseCheckSuiteRerequest(payload: String): RerunAllPayload? {
+        return try {
+            val node = MAPPER.readTree(payload)
+            if (node.path("action").asText("") != "rerequested") return null
+            val suite = node.path("check_suite")
+            val headSha = suite.path("head_sha").asText("").takeIf { it.isNotBlank() } ?: return null
+            val repoSlug = node.path("repository").path("full_name").asText("")
+            if (repoSlug.isBlank()) return null
+            val prNumber = suite.path("pull_requests").firstOrNull()?.path("number")?.asInt(-1)
+                ?.takeIf { it >= 0 }
+
+            RerunAllPayload(
+                repo = RepoCoords.parse(repoSlug),
+                headSha = headSha,
+                headBranch = suite.path("head_branch").asText("").takeIf { it.isNotBlank() },
+                prNumber = prNumber,
+            )
+        } catch (e: Exception) {
+            LOG.warn("Failed to parse check_suite payload: ${e.message}")
             null
         }
     }

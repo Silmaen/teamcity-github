@@ -71,6 +71,7 @@ class AdminConsolePage(
         model["set_legacyAliases"] = serverSettings.legacyAliasesEnabled()
         model["set_prComment"] = serverSettings.prCommentEnabled()
         model["set_branchPrLookup"] = serverSettings.branchPrLookupEnabled()
+        model["set_rerunAllOnlyFailed"] = serverSettings.rerunAllOnlyFailed()
         model["set_commentAssociations"] = serverSettings.commentTriggerAllowedAssociations().joinToString(",")
         model["apiTokenConfigured"] = serverSettings.isApiEnabled()
 

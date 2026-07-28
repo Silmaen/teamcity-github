@@ -174,6 +174,54 @@ class PullRequestEventListener(
         }
     }
 
+    // "Re-run all checks" was clicked in the GitHub Checks UI: re-run every
+    // opted-in build configuration for that head. With the
+    // `rerunAll.onlyFailed` setting on, only those whose last build at that
+    // commit failed — a build configuration that never ran at this commit has
+    // no failure to re-run, so it is left alone.
+    fun handleRerunAll(payload: RerunAllPayload) {
+        securityContext.runAsSystemUnchecked {
+            if (!serverSettings.isRepoAllowed(payload.repo.slug)) return@runAsSystemUnchecked
+            val onlyFailed = serverSettings.rerunAllOnlyFailed()
+
+            val targets = findCandidateBuildTypes(payload.repo).mapNotNull { (bt, config) ->
+                val ref = refForRerun(config, payload) ?: return@mapNotNull null
+                if (onlyFailed && !lastBuildFailedAt(bt, ref, payload.headSha)) return@mapNotNull null
+                Triple(bt, ref, config)
+            }
+            if (targets.isEmpty()) {
+                LOG.info("check_suite rerequested for ${payload.repo.slug}@${payload.headSha}: " +
+                    "no matching build configuration${if (onlyFailed) " with a failed build" else ""}")
+                return@runAsSystemUnchecked
+            }
+            LOG.info("check_suite rerequested for ${payload.repo.slug}@${payload.headSha}: " +
+                "re-running ${targets.size} build configuration(s)${if (onlyFailed) " (failed only)" else ""}")
+            targets.forEach { (bt, ref, _) ->
+                enqueueIfAbsent(bt, ref, payload.headSha,
+                    "teamcity-github-bridge: re-run all requested from GitHub",
+                    trigger = BridgeTrigger.COMMAND, ignoreFinished = true)
+            }
+        }
+    }
+
+    // The suite gives a head branch and, for a PR, its number; either is
+    // enough to name the ref this build configuration would use.
+    private fun refForRerun(config: BridgeFeatureConfig, payload: RerunAllPayload): String? = when {
+        payload.prNumber != null -> prBuildRefFor(config, payload.prNumber, payload.headBranch)
+        !payload.headBranch.isNullOrBlank() -> payload.headBranch
+        else -> null
+    }
+
+    // True when the most recent finished build of `bt` at (ref, sha) failed.
+    // Cancelled builds are ignored: they carry no verdict.
+    private fun lastBuildFailedAt(bt: BuildTypeEx, branchName: String, headSha: String): Boolean {
+        val build = bt.history.asSequence()
+            .take(HISTORY_SCAN_DEPTH)
+            .firstOrNull { it.canceledInfo == null && buildMatchesBranchAndSha(it, branchName, headSha) }
+            ?: return false
+        return build.buildStatus.isFailed
+    }
+
     // Shared enqueue helper: skips when a matching build is already
     // running/queued (and, unless ignoreFinished, already finished),
     // honours dry-run, and counts the enqueue.
@@ -618,6 +666,16 @@ data class ReviewApprovedPayload(
     val headRef: String,
     val draft: Boolean,
     val headRepo: String = "",
+)
+
+// A "Re-run all checks" click in the GitHub Checks UI
+// (`check_suite.rerequested`). Unlike `check_run.rerequested` it names no
+// build configuration: every opted-in one for that head is a candidate.
+data class RerunAllPayload(
+    val repo: RepoCoords,
+    val headSha: String,
+    val headBranch: String?,
+    val prNumber: Int?,
 )
 
 // Result of an external-API build trigger.
