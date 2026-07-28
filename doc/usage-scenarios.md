@@ -378,13 +378,15 @@ Every Check Run carries a `details_url` so the "Details" link from
 the GitHub Checks tab jumps directly to the relevant TC page
 instead of the server root.
 
-> **Coexistence with the bundled `commitStatusPublisher`**: until
-> you disable the bundled publisher on the opted-in build types,
-> GitHub shows **both** a Commit Status (TC's, generic text) and a
-> Check Run (this plugin's, rich text). Reconfigure branch
-> protection rules to require the Check Run name(s) and treat the
-> Commit Statuses as informational. A future iteration will provide
-> a Build Feature to silence the bundled publisher per buildType.
+> **Disable the bundled `commitStatusPublisher` on opted-in build
+> configurations.** As long as both are enabled, GitHub shows **two**
+> rows per build — a Commit Status (TeamCity's, generic text) and a
+> Check Run (this plugin's, rich text). The plugin never silences the
+> bundled publisher: what reports to GitHub is an operator decision, so
+> it will only **warn** about the conflict. If you choose to keep both,
+> make branch protection require the Check Run name(s) and treat the
+> Commit Statuses as informational. See
+> [configuration.md](configuration.md#choosing-the-right-setup).
 
 ## Scenario 11: operator visits the admin page
 
