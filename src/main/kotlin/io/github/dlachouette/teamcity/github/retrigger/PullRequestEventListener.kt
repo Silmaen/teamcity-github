@@ -9,9 +9,13 @@ import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
+import io.github.dlachouette.teamcity.github.feature.BridgeRefs
+import io.github.dlachouette.teamcity.github.feature.BridgeTrigger
+import io.github.dlachouette.teamcity.github.feature.BridgeTriggerMarker
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.GateDecision
 import io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature
+import io.github.dlachouette.teamcity.github.feature.PrBuildRef
 import io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter
 import io.github.dlachouette.teamcity.github.report.SkipReason
 import io.github.dlachouette.teamcity.github.report.checkRunName
@@ -53,16 +57,17 @@ class PullRequestEventListener(
         securityContext.runAsSystemUnchecked {
             if (!serverSettings.isRepoAllowed(payload.repo.slug)) return@runAsSystemUnchecked
             if (payload.draft) return@runAsSystemUnchecked
-            val branchName = "pull/${payload.prNumber}"
+            val branchName = BridgeRefs.prRef(payload.prNumber)
             val targets = findCandidateBuildTypes(payload.repo).filter { (_, config) ->
                 config.runOnApproval && config.prTriggerEnabled &&
                     config.prTriggerBranches.matches(branchName, payload.headRef)
             }
             if (targets.isEmpty()) return@runAsSystemUnchecked
             LOG.info("PR #${payload.prNumber} approved: ${targets.size} run-on-approval BT(s) for ${payload.repo.slug}")
-            targets.forEach { (bt, _) ->
-                enqueueIfAbsent(bt, branchName, payload.headSha,
-                    "teamcity-github-bridge: PR #${payload.prNumber} approved (run-on-approval)")
+            targets.forEach { (bt, config) ->
+                enqueueIfAbsent(bt, prBuildRef(config, payload.prNumber, payload.headRef), payload.headSha,
+                    "teamcity-github-bridge: PR #${payload.prNumber} approved (run-on-approval)",
+                    trigger = BridgeTrigger.COMMAND)
             }
         }
     }
@@ -82,17 +87,17 @@ class PullRequestEventListener(
                 )
                 return@runAsSystemUnchecked
             }
-            val branchName = "pull/${payload.prNumber}"
             val targets = findCandidateBuildTypes(payload.repo).filter { (_, config) ->
                 config.prTriggerEnabled && config.commentTrigger.isNotBlank() &&
                     payload.body.contains(config.commentTrigger, ignoreCase = true)
             }
             if (targets.isEmpty()) return@runAsSystemUnchecked
             LOG.info("PR #${payload.prNumber} comment by ${payload.commenter} matched ${targets.size} BT(s) on ${payload.repo.slug}")
-            val headSha = resolvePrHeadSha(targets.first(), payload.prNumber).orEmpty()
+            val pr = resolvePrInfo(targets.first(), payload.prNumber)
             targets.forEach { (bt, config) ->
-                enqueueIfAbsent(bt, branchName, headSha,
-                    "teamcity-github-bridge: comment command '${config.commentTrigger}' by ${payload.commenter}")
+                enqueueIfAbsent(bt, prBuildRef(config, payload.prNumber, pr?.headRef), pr?.headSha.orEmpty(),
+                    "teamcity-github-bridge: comment command '${config.commentTrigger}' by ${payload.commenter}",
+                    trigger = BridgeTrigger.COMMAND)
             }
         }
     }
@@ -112,7 +117,7 @@ class PullRequestEventListener(
                 return@runAsSystemUnchecked
             }
             result = try {
-                enqueue(bt, branch, "teamcity-github-bridge: external API trigger")
+                enqueue(bt, branch, "teamcity-github-bridge: external API trigger", BridgeTrigger.COMMAND)
                 metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.BUILDS_ENQUEUED)
                 TriggerResult(true, "queued $externalId on $branch")
             } catch (e: Exception) {
@@ -123,10 +128,13 @@ class PullRequestEventListener(
         return result
     }
 
-    private fun resolvePrHeadSha(target: Pair<BuildTypeEx, BridgeFeatureConfig>, prNumber: Int): String? {
+    private fun resolvePrInfo(
+        target: Pair<BuildTypeEx, BridgeFeatureConfig>,
+        prNumber: Int,
+    ): io.github.dlachouette.teamcity.github.api.PrInfo? {
         val access = tokenResolver.resolveAccessToken(target.first.project, target.second.connectionId, target.second.repo)
             ?: return null
-        return prInfoCache.get(target.second.repo, prNumber, access.token, access.apiBase)?.headSha
+        return prInfoCache.get(target.second.repo, prNumber, access.token, access.apiBase)
     }
 
     // The re-run button was clicked on a TeamCity Check Run: map it back
@@ -136,7 +144,7 @@ class PullRequestEventListener(
         securityContext.runAsSystemUnchecked {
             if (!serverSettings.isRepoAllowed(payload.repo.slug)) return@runAsSystemUnchecked
             val branchName = when {
-                payload.prNumber != null -> "pull/${payload.prNumber}"
+                payload.prNumber != null -> BridgeRefs.prRef(payload.prNumber)
                 !payload.headBranch.isNullOrBlank() -> payload.headBranch
                 else -> {
                     LOG.info("check_run rerequested for ${payload.repo.slug} but no PR number/head branch; ignoring")
@@ -152,8 +160,12 @@ class PullRequestEventListener(
             }
             // Re-run skips only currently running/queued builds, NOT finished
             // ones (re-running a finished build is exactly the intent).
-            enqueueIfAbsent(match.first, branchName, payload.headSha,
-                "teamcity-github-bridge: re-run requested from GitHub", ignoreFinished = true)
+            val ref = payload.prNumber
+                ?.let { prBuildRef(match.second, it, payload.headBranch) }
+                ?: branchName
+            enqueueIfAbsent(match.first, ref, payload.headSha,
+                "teamcity-github-bridge: re-run requested from GitHub",
+                trigger = BridgeTrigger.COMMAND, ignoreFinished = true)
         }
     }
 
@@ -165,6 +177,7 @@ class PullRequestEventListener(
         branchName: String,
         headSha: String,
         triggerSource: String,
+        trigger: BridgeTrigger = BridgeTrigger.AUTO,
         ignoreFinished: Boolean = false,
     ) {
         val running = bt.runningBuilds.any { buildMatchesBranchAndSha(it, branchName, headSha) }
@@ -179,7 +192,7 @@ class PullRequestEventListener(
             return
         }
         try {
-            enqueue(bt, branchName, triggerSource)
+            enqueue(bt, branchName, triggerSource, trigger)
             metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.BUILDS_ENQUEUED)
         } catch (e: Exception) {
             LOG.warn("Failed to enqueue ${bt.externalId} on $branchName: ${e.message}")
@@ -210,7 +223,6 @@ class PullRequestEventListener(
             return
         }
 
-        val branchName = "pull/${payload.prNumber}"
         val candidates = findCandidateBuildTypes(payload.repo)
         if (candidates.isEmpty()) {
             LOG.info("No build types found for ${payload.repo.slug} - nothing to retrigger")
@@ -226,10 +238,11 @@ class PullRequestEventListener(
         candidates.forEach { (bt, config) ->
             when (BridgeGate.decide(
                 config = config,
-                branchName = branchName,
+                branchName = prBuildRef(config, payload.prNumber, payload.headRef),
+                prNumber = payload.prNumber,
                 prDraft = payload.draft,
                 prHeadRef = payload.headRef,
-                isManualTrigger = false,
+                trigger = BridgeTrigger.AUTO,
                 prTitle = payload.title,
                 prBody = payload.body,
                 prLabels = payload.labels,
@@ -266,7 +279,8 @@ class PullRequestEventListener(
         )
         var enqueued = 0
         var skippedExisting = 0
-        finalTargets.forEach { (bt, _) ->
+        finalTargets.forEach { (bt, config) ->
+            val branchName = prBuildRef(config, payload.prNumber, payload.headRef)
             val skipReason = findExistingBuildReason(bt, branchName, payload.headSha)
             if (skipReason != null) {
                 LOG.info("Skipping ${bt.externalId} for ${payload.repo.slug}#${payload.prNumber}: $skipReason")
@@ -335,11 +349,11 @@ class PullRequestEventListener(
     // across all candidate BTs, so closing a PR mid-build stops burning
     // agent minutes. Honours dry-run.
     private fun cancelQueuedForClosedPr(payload: PrEventPayload) {
-        val branchName = "pull/${payload.prNumber}"
         val verb = if (payload.merged) "merged" else "closed"
         val candidates = findCandidateBuildTypes(payload.repo)
         var removed = 0
-        candidates.forEach { (bt, _) ->
+        candidates.forEach { (bt, config) ->
+            val branchName = prBuildRef(config, payload.prNumber, payload.headRef)
             bt.getQueuedBuilds(null)
                 .filter { it.buildPromotion.branch?.name == branchName }
                 .forEach { qb ->
@@ -496,9 +510,27 @@ class PullRequestEventListener(
         return matchesBranchAndSha(promo.branch?.name, promo.revisions.map { it.revision }, branchName, headSha)
     }
 
-    private fun enqueue(buildType: BuildTypeEx, branchName: String, triggerSource: String) {
+    // The ref a PR build of `config` runs on: the synthetic `pull/N`, or —
+    // in branch-source mode — the PR's own head branch. Falls back to
+    // `pull/N` when the head ref is unknown (a payload without it, or a
+    // fork, which G19 rejects earlier anyway).
+    internal fun prBuildRef(config: BridgeFeatureConfig, prNumber: Int, headRef: String?): String =
+        if (config.prBuildRef == PrBuildRef.BRANCH && !headRef.isNullOrBlank()) headRef
+        else BridgeRefs.prRef(prNumber)
+
+    private fun enqueue(
+        buildType: BuildTypeEx,
+        branchName: String,
+        triggerSource: String,
+        trigger: BridgeTrigger = BridgeTrigger.AUTO,
+    ) {
         val customizer = buildType.createBuildCustomizer(null)
         customizer.setDesiredBranchName(branchName)
+        // Stamp explicit commands so the queue-time gate sites treat them
+        // like a manual Run and do not undo them (see BridgeTriggerMarker).
+        if (trigger != BridgeTrigger.AUTO) {
+            customizer.setParameters(BridgeTriggerMarker.parametersFor(trigger))
+        }
         // Note: setBuildComment throws on TC 2026.1 when the customizer
         // was created with a null user. The `triggerSource` argument
         // to addToQueue carries the relevant info instead.
