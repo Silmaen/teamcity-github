@@ -18,11 +18,35 @@ object BridgeProjectParams {
     const val REPO: String = "teamcity.github.bridge.repo"
     const val CONNECTION_ID: String = "teamcity.github.bridge.connectionId"
 
+    // Which ref a PR build runs on — see `PrBuildRef`.
+    const val PR_BUILD_REF: String = "teamcity.github.bridge.prBuildRef"
+
     const val BRANCH_TRIGGER_ENABLED: String = "teamcity.github.bridge.branchTrigger.enabled"
     const val BRANCH_TRIGGER_BRANCHES: String = "teamcity.github.bridge.branchTrigger.branches"
 
     const val PR_TRIGGER_ENABLED: String = "teamcity.github.bridge.prTrigger.enabled"
     const val PR_TRIGGER_BRANCHES: String = "teamcity.github.bridge.prTrigger.branches"
+}
+
+// Which ref the bridge enqueues a PR build on.
+enum class PrBuildRef {
+    // `pull/N` — the GitHub PR ref, mapped by the VCS root's branch spec.
+    // The only option that works for PRs from forks, hence the default.
+    PULL,
+
+    // The PR's own head branch (e.g. `Feature/toto`). Readable in every
+    // TeamCity screen, and there is no second ref for the same commit — so a
+    // pre-PR branch build and the PR build are one build. Requires the head
+    // branch to be in the VCS root's branch spec, and forks to be out of
+    // scope (a fork's head ref does not exist in this repository).
+    BRANCH;
+
+    companion object {
+        // Anything unrecognised (including blank) keeps the historical
+        // behaviour: a project that says nothing keeps building `pull/N`.
+        fun parse(raw: String?): PrBuildRef =
+            if (raw?.trim().equals(BRANCH.name, ignoreCase = true)) BRANCH else PULL
+    }
 }
 
 // Fully resolved configuration of the GitHub Bridge for a given BT.
@@ -62,6 +86,9 @@ data class BridgeFeatureConfig(
     val requirePhrase: String = "",
     val skipPhrase: String = "",
     val labelFilter: BranchSpecMatcher = BranchSpecMatcher.parse(null),
+    // Project-level choice of the ref PR builds run on. Defaults to the
+    // historical `pull/N`.
+    val prBuildRef: PrBuildRef = PrBuildRef.PULL,
 )
 
 object BridgeFeatureReader {
@@ -150,6 +177,7 @@ object BridgeFeatureReader {
             requirePhrase = featureParams[GitHubBridgeBuildFeature.PARAM_REQUIRE_PHRASE]?.trim().orEmpty(),
             skipPhrase = featureParams[GitHubBridgeBuildFeature.PARAM_SKIP_PHRASE]?.trim().orEmpty(),
             labelFilter = BranchSpecMatcher.parse(featureParams[GitHubBridgeBuildFeature.PARAM_LABEL_FILTER]),
+            prBuildRef = PrBuildRef.parse(projectParams[BridgeProjectParams.PR_BUILD_REF]),
         )
     }
 }
@@ -187,36 +215,36 @@ object BridgeGate {
 
     // Decide for a given (BT config, branch, optional PR info, trigger source).
     //
-    // `prDraft` and `prHeadRef` are null for non-PR contexts. For PR
-    // builds, the branch name starts with `pull/N` and the headRef
-    // is the PR's source branch.
+    // `prNumber` is what makes this a PR context: non-null means "this
+    // build belongs to PR #n", whatever the ref it runs on. The caller
+    // knows — from the `pull/N` ref, or (in branch-source mode) from the
+    // commit → PR lookup — so the gate never parses branch names.
+    // `prDraft` / `prHeadRef` are null outside a PR context.
     //
-    // `isManualTrigger`:
-    //   - true  => operator clicked Run in the TC UI. HARD blocks
-    //              still apply; SOFT (branch lists) are bypassed.
-    //   - false => any non-manual path (VCS trigger, listener, etc.).
-    //              All blocks apply.
+    // `trigger`:
+    //   - AUTO             => every block applies.
+    //   - COMMAND / MANUAL => explicit request: HARD blocks still apply,
+    //                         SOFT ones (branch list, PR metadata) do not.
     fun decide(
         config: BridgeFeatureConfig,
         branchName: String,
+        prNumber: Int?,
         prDraft: Boolean?,
         prHeadRef: String?,
-        isManualTrigger: Boolean,
+        trigger: BridgeTrigger,
         prTitle: String = "",
         prBody: String = "",
         prLabels: List<String> = emptyList(),
-    ): GateDecision {
-        val isPr = branchName.startsWith("pull/")
-        return if (isPr) decidePr(config, branchName, prDraft, prHeadRef, isManualTrigger, prTitle, prBody, prLabels)
-        else decideBranch(config, branchName, isManualTrigger)
-    }
+    ): GateDecision =
+        if (prNumber != null) decidePr(config, branchName, prDraft, prHeadRef, trigger, prTitle, prBody, prLabels)
+        else decideBranch(config, branchName, trigger)
 
     private fun decidePr(
         config: BridgeFeatureConfig,
         branchName: String,
         prDraft: Boolean?,
         prHeadRef: String?,
-        isManualTrigger: Boolean,
+        trigger: BridgeTrigger,
         prTitle: String,
         prBody: String,
         prLabels: List<String>,
@@ -225,13 +253,15 @@ object BridgeGate {
         if (!config.prTriggerEnabled) return GateDecision.SUPPRESS_HARD
         // BT not for PRs at all. HARD: applies to manual too.
         if (!config.triggerOnPrReady) return GateDecision.SUPPRESS_HARD
-        // Draft state but BT skips drafts. HARD if manual; otherwise
-        // SOFT-like SUPPRESS_DRAFT (post Skipped CR).
+        // Draft state but BT skips drafts. An explicit request cannot
+        // override that declaration — the build simply does not run on
+        // drafts — but it stays silent on GitHub (HARD) instead of posting
+        // a "Skipped: draft PR" row nobody asked for.
         if (prDraft == true && !config.triggerOnPrDraft) {
-            return if (isManualTrigger) GateDecision.SUPPRESS_HARD else GateDecision.SUPPRESS_DRAFT
+            return if (trigger.isExplicit) GateDecision.SUPPRESS_HARD else GateDecision.SUPPRESS_DRAFT
         }
-        // Manual bypasses the SOFT filters (branch + metadata).
-        if (isManualTrigger) return GateDecision.ALLOW
+        // An explicit request bypasses the SOFT filters (branch + metadata).
+        if (trigger.isExplicit) return GateDecision.ALLOW
         // Branch filter (matched against headRef for `pull/*`).
         if (!config.prTriggerBranches.matches(branchName, prHeadRef)) {
             return GateDecision.SUPPRESS_BRANCH_PR
@@ -267,11 +297,11 @@ object BridgeGate {
     private fun decideBranch(
         config: BridgeFeatureConfig,
         branchName: String,
-        isManualTrigger: Boolean,
+        trigger: BridgeTrigger,
     ): GateDecision {
         if (!config.branchTriggerEnabled) return GateDecision.SUPPRESS_HARD
         if (!config.triggerOnBranch) return GateDecision.SUPPRESS_HARD
-        if (isManualTrigger) return GateDecision.ALLOW
+        if (trigger.isExplicit) return GateDecision.ALLOW
         if (!config.branchTriggerBranches.matches(branchName)) {
             return GateDecision.SUPPRESS_BRANCH_NON_PR
         }

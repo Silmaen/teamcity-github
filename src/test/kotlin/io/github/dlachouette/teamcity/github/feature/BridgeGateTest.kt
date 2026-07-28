@@ -6,6 +6,10 @@ import org.junit.jupiter.api.Test
 
 class BridgeGateTest {
 
+    private val auto = BridgeTrigger.AUTO
+    private val manual = BridgeTrigger.MANUAL
+    private val command = BridgeTrigger.COMMAND
+
     private fun config(
         branchTriggerEnabled: Boolean = true,
         prTriggerEnabled: Boolean = true,
@@ -17,6 +21,7 @@ class BridgeGateTest {
         requirePhrase: String = "",
         skipPhrase: String = "",
         labelSpec: String = "",
+        prBuildRef: PrBuildRef = PrBuildRef.PULL,
     ) = BridgeFeatureConfig(
         repo = RepoCoords.parse("acme/widget"),
         connectionId = "CID_abc",
@@ -30,6 +35,7 @@ class BridgeGateTest {
         requirePhrase = requirePhrase,
         skipPhrase = skipPhrase,
         labelFilter = BranchSpecMatcher.parse(labelSpec),
+        prBuildRef = prBuildRef,
     )
 
     // --- Non-PR branch context ---
@@ -38,27 +44,27 @@ class BridgeGateTest {
     fun `non-PR branch allowed when triggers and branch list match`() {
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(config(), branchName = "main", prDraft = null, prHeadRef = null, isManualTrigger = false),
+            BridgeGate.decide(config(), branchName = "main", prNumber = null, prDraft = null, prHeadRef = null, trigger = auto),
         )
     }
 
     @Test
     fun `non-PR branch HARD-blocked when project disables branch trigger`() {
         // Even manual is blocked.
-        listOf(false, true).forEach { manual ->
+        BridgeTrigger.entries.forEach { manual ->
             assertEquals(
                 GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(branchTriggerEnabled = false), "main", null, null, manual),
+                BridgeGate.decide(config(branchTriggerEnabled = false), "main", null, null, null, manual),
             )
         }
     }
 
     @Test
     fun `non-PR branch HARD-blocked when BT triggerOnBranch is false`() {
-        listOf(false, true).forEach { manual ->
+        BridgeTrigger.entries.forEach { manual ->
             assertEquals(
                 GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, manual),
+                BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, manual),
             )
         }
     }
@@ -67,7 +73,7 @@ class BridgeGateTest {
     fun `non-PR branch out of list is suppressed silently on auto`() {
         assertEquals(
             GateDecision.SUPPRESS_BRANCH_NON_PR,
-            BridgeGate.decide(config(branchTriggerSpec = "+:main"), "Release/2026Q2", null, null, isManualTrigger = false),
+            BridgeGate.decide(config(branchTriggerSpec = "+:main"), "Release/2026Q2", null, null, null, auto),
         )
     }
 
@@ -75,7 +81,7 @@ class BridgeGateTest {
     fun `non-PR branch out of list passes for manual trigger`() {
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(config(branchTriggerSpec = "+:main"), "Release/2026Q2", null, null, isManualTrigger = true),
+            BridgeGate.decide(config(branchTriggerSpec = "+:main"), "Release/2026Q2", null, null, null, manual),
         )
     }
 
@@ -85,26 +91,26 @@ class BridgeGateTest {
     fun `PR-ready allowed when triggers and branch list match`() {
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(config(), "pull/42", prDraft = false, prHeadRef = "Feature/foo", isManualTrigger = false),
+            BridgeGate.decide(config(), "pull/42", prNumber = 42, prDraft = false, prHeadRef = "Feature/foo", trigger = auto),
         )
     }
 
     @Test
     fun `PR-ready HARD-blocked when project disables PR trigger`() {
-        listOf(false, true).forEach { manual ->
+        BridgeTrigger.entries.forEach { manual ->
             assertEquals(
                 GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(prTriggerEnabled = false), "pull/42", false, "Feature/foo", manual),
+                BridgeGate.decide(config(prTriggerEnabled = false), "pull/42", 42, false, "Feature/foo", manual),
             )
         }
     }
 
     @Test
     fun `PR-ready HARD-blocked when BT triggerOnPrReady is false`() {
-        listOf(false, true).forEach { manual ->
+        BridgeTrigger.entries.forEach { manual ->
             assertEquals(
                 GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", false, "Feature/foo", manual),
+                BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", 42, false, "Feature/foo", manual),
             )
         }
     }
@@ -115,7 +121,7 @@ class BridgeGateTest {
             GateDecision.SUPPRESS_BRANCH_PR,
             BridgeGate.decide(
                 config(prTriggerSpec = "+:Feature/*"),
-                "pull/42", false, "Release/2026Q2", isManualTrigger = false,
+                "pull/42", 42, false, "Release/2026Q2", auto,
             ),
         )
     }
@@ -126,7 +132,7 @@ class BridgeGateTest {
             GateDecision.ALLOW,
             BridgeGate.decide(
                 config(prTriggerSpec = "+:Feature/*"),
-                "pull/42", false, "Release/2026Q2", isManualTrigger = true,
+                "pull/42", 42, false, "Release/2026Q2", manual,
             ),
         )
     }
@@ -137,7 +143,7 @@ class BridgeGateTest {
     fun `PR-draft allowed when triggerOnPrDraft is true and branch matches`() {
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(config(), "pull/42", prDraft = true, prHeadRef = "Feature/foo", isManualTrigger = false),
+            BridgeGate.decide(config(), "pull/42", prNumber = 42, prDraft = true, prHeadRef = "Feature/foo", trigger = auto),
         )
     }
 
@@ -147,7 +153,7 @@ class BridgeGateTest {
             GateDecision.SUPPRESS_DRAFT,
             BridgeGate.decide(
                 config(triggerOnPrDraft = false),
-                "pull/42", true, "Feature/foo", isManualTrigger = false,
+                "pull/42", 42, true, "Feature/foo", auto,
             ),
         )
     }
@@ -159,21 +165,21 @@ class BridgeGateTest {
             GateDecision.SUPPRESS_HARD,
             BridgeGate.decide(
                 config(triggerOnPrDraft = false),
-                "pull/42", true, "Feature/foo", isManualTrigger = true,
+                "pull/42", 42, true, "Feature/foo", manual,
             ),
         )
     }
 
     @Test
     fun `PR-draft on a BT that does not run on PRs at all is HARD-blocked`() {
-        listOf(false, true).forEach { manual ->
+        BridgeTrigger.entries.forEach { manual ->
             // triggerOnPrReady=false => the gate clamps Draft to false
             // via the config builder; the BT is "not for PRs at all"
             // (HARD block for both ready and draft PRs).
             val cfg = config(triggerOnPrReady = false, triggerOnPrDraft = false)
             assertEquals(
                 GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(cfg, "pull/42", true, "Feature/foo", manual),
+                BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", manual),
             )
         }
     }
@@ -185,15 +191,15 @@ class BridgeGateTest {
         val cfg = config(skipPhrase = "[skip ci]")
         assertEquals(
             GateDecision.SUPPRESS_METADATA,
-            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = false, prTitle = "Fix bug [skip ci]"),
+            BridgeGate.decide(cfg, "pull/7", 7, false, "feature/x", auto, prTitle = "Fix bug [skip ci]"),
         )
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = true, prTitle = "Fix bug [skip ci]"),
+            BridgeGate.decide(cfg, "pull/7", 7, false, "feature/x", manual, prTitle = "Fix bug [skip ci]"),
         )
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(cfg, "pull/7", false, "feature/x", isManualTrigger = false, prTitle = "Fix bug"),
+            BridgeGate.decide(cfg, "pull/7", 7, false, "feature/x", auto, prTitle = "Fix bug"),
         )
     }
 
@@ -202,11 +208,11 @@ class BridgeGateTest {
         val cfg = config(requirePhrase = "/fulltest")
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(cfg, "pull/7", false, "feature/x", false, prTitle = "t", prBody = "please /fulltest"),
+            BridgeGate.decide(cfg, "pull/7", 7, false, "feature/x", auto, prTitle = "t", prBody = "please /fulltest"),
         )
         assertEquals(
             GateDecision.SUPPRESS_METADATA,
-            BridgeGate.decide(cfg, "pull/7", false, "feature/x", false, prTitle = "t", prBody = "nothing here"),
+            BridgeGate.decide(cfg, "pull/7", 7, false, "feature/x", auto, prTitle = "t", prBody = "nothing here"),
         )
     }
 
@@ -215,21 +221,21 @@ class BridgeGateTest {
         val include = config(labelSpec = "+:ci")
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(include, "pull/7", false, "feature/x", false, prLabels = listOf("ci", "bug")),
+            BridgeGate.decide(include, "pull/7", 7, false, "feature/x", auto, prLabels = listOf("ci", "bug")),
         )
         assertEquals(
             GateDecision.SUPPRESS_METADATA,
-            BridgeGate.decide(include, "pull/7", false, "feature/x", false, prLabels = listOf("bug")),
+            BridgeGate.decide(include, "pull/7", 7, false, "feature/x", auto, prLabels = listOf("bug")),
         )
 
         val exclude = config(labelSpec = "-:no-ci")
         assertEquals(
             GateDecision.SUPPRESS_METADATA,
-            BridgeGate.decide(exclude, "pull/7", false, "feature/x", false, prLabels = listOf("no-ci")),
+            BridgeGate.decide(exclude, "pull/7", 7, false, "feature/x", auto, prLabels = listOf("no-ci")),
         )
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(exclude, "pull/7", false, "feature/x", false, prLabels = listOf("ready")),
+            BridgeGate.decide(exclude, "pull/7", 7, false, "feature/x", auto, prLabels = listOf("ready")),
         )
     }
 
@@ -237,7 +243,126 @@ class BridgeGateTest {
     fun `no metadata filters means allow`() {
         assertEquals(
             GateDecision.ALLOW,
-            BridgeGate.decide(config(), "pull/7", false, "feature/x", false, prTitle = "anything", prLabels = listOf("x")),
+            BridgeGate.decide(config(), "pull/7", 7, false, "feature/x", auto, prTitle = "anything", prLabels = listOf("x")),
+        )
+    }
+
+    // --- Explicit commands (G11): a comment / approval / re-run / API
+    // trigger must not be undone by the filters that keep the automatic
+    // path narrow. Same treatment as a manual Run.
+
+    @Test
+    fun `a command bypasses the PR branch filter`() {
+        val cfg = config(prTriggerSpec = "+:Release/*")
+        assertEquals(
+            GateDecision.SUPPRESS_BRANCH_PR,
+            BridgeGate.decide(cfg, "pull/42", 42, false, "Feature/foo", auto),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "pull/42", 42, false, "Feature/foo", command),
+        )
+    }
+
+    @Test
+    fun `a command bypasses the metadata filters`() {
+        val skip = config(skipPhrase = "[skip ci]")
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(skip, "pull/7", 7, false, "feature/x", auto, prTitle = "Fix typo [skip ci]"),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(skip, "pull/7", 7, false, "feature/x", command, prTitle = "Fix typo [skip ci]"),
+        )
+
+        // The label filter is the shape used to keep an on-demand suite off
+        // the automatic path; a command must still get through.
+        val labelled = config(labelSpec = "+:ci-full")
+        assertEquals(
+            GateDecision.SUPPRESS_METADATA,
+            BridgeGate.decide(labelled, "pull/7", 7, false, "feature/x", auto, prLabels = emptyList()),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(labelled, "pull/7", 7, false, "feature/x", command, prLabels = emptyList()),
+        )
+    }
+
+    @Test
+    fun `a command bypasses the non-PR branch filter`() {
+        val cfg = config(branchTriggerSpec = "+:main")
+        assertEquals(
+            GateDecision.SUPPRESS_BRANCH_NON_PR,
+            BridgeGate.decide(cfg, "Experiment/spike", null, null, null, auto),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "Experiment/spike", null, null, null, command),
+        )
+    }
+
+    @Test
+    fun `a command cannot override a HARD block`() {
+        listOf(
+            config(prTriggerEnabled = false),
+            config(triggerOnPrReady = false),
+        ).forEach { cfg ->
+            assertEquals(
+                GateDecision.SUPPRESS_HARD,
+                BridgeGate.decide(cfg, "pull/42", 42, false, "Feature/foo", command),
+            )
+        }
+        assertEquals(
+            GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, command),
+        )
+    }
+
+    @Test
+    fun `a command on a draft PR is silent when the BT skips drafts`() {
+        val cfg = config(triggerOnPrDraft = false)
+        // Automatic: the operator gets a "Skipped: draft PR" row.
+        assertEquals(
+            GateDecision.SUPPRESS_DRAFT,
+            BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", auto),
+        )
+        // Explicit: the build still does not run (the BT declared it does
+        // not build drafts) but no unsolicited row is posted.
+        assertEquals(
+            GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", command),
+        )
+    }
+
+    // --- PR context comes from the PR number, not from the ref name (G18)
+
+    @Test
+    fun `a build on the head ref is gated as a PR when the PR number is known`() {
+        val cfg = config(triggerOnPrDraft = false, prBuildRef = PrBuildRef.BRANCH)
+        // Branch-source mode: the ref is `Feature/foo`, yet the draft rule
+        // of the PR path applies because the caller resolved PR #42.
+        assertEquals(
+            GateDecision.SUPPRESS_DRAFT,
+            BridgeGate.decide(cfg, "Feature/foo", 42, true, "Feature/foo", auto),
+        )
+        // Same ref, no PR resolved: plain branch rules, drafts irrelevant.
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "Feature/foo", null, null, null, auto),
+        )
+    }
+
+    @Test
+    fun `the PR branch filter matches the head ref in branch-source mode`() {
+        val cfg = config(prTriggerSpec = "+:Release/*", prBuildRef = PrBuildRef.BRANCH)
+        assertEquals(
+            GateDecision.SUPPRESS_BRANCH_PR,
+            BridgeGate.decide(cfg, "Feature/foo", 42, false, "Feature/foo", auto),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(cfg, "Release/26.06", 42, false, "Release/26.06", auto),
         )
     }
 }

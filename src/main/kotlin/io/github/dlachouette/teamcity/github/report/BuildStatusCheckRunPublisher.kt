@@ -46,6 +46,7 @@ class BuildStatusCheckRunPublisher(
     private val gitHubClient: GitHubClient,
     private val webLinks: WebLinks,
     private val prInfoCache: PrInfoCache,
+    private val gateContextResolver: io.github.dlachouette.teamcity.github.feature.GateContextResolver,
     private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
     private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
     private val prSummaryCommenter: PrSummaryCommenter,
@@ -185,26 +186,12 @@ class BuildStatusCheckRunPublisher(
     // HARD-block cases). Mirrors the cleaner's decision via
     // `BridgeGate.decide`.
     private fun willBeSuppressed(queuedBuild: SQueuedBuild, promotion: BuildPromotion, ctx: PrBuildContext): Boolean {
-        val branchName = promotion.branch?.name ?: return false
-        val isManual = queuedBuild.triggeredBy.isTriggeredByUser
-        val prDraft: Boolean?
-        val prHeadRef: String?
-        var prTitle = ""
-        var prBody = ""
-        var prLabels = emptyList<String>()
-        if (branchName.startsWith("pull/")) {
-            val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return false
-            val pr = prInfoCache.get(ctx.repo, prNumber, ctx.accessToken, ctx.apiBase) ?: return false
-            prDraft = pr.draft
-            prHeadRef = pr.headRef
-            prTitle = pr.title
-            prBody = pr.body
-            prLabels = pr.labels
-        } else {
-            prDraft = null
-            prHeadRef = null
-        }
-        return BridgeGate.decide(ctx.config, branchName, prDraft, prHeadRef, isManual, prTitle, prBody, prLabels) != GateDecision.ALLOW
+        val gate = gateContextResolver.resolve(promotion, ctx.config, queuedBuild.triggeredBy.isTriggeredByUser)
+            ?: return false
+        return BridgeGate.decide(
+            ctx.config, gate.branchName, gate.prNumber, gate.pr?.draft, gate.pr?.headRef, gate.trigger,
+            gate.pr?.title.orEmpty(), gate.pr?.body.orEmpty(), gate.pr?.labels.orEmpty(),
+        ) != GateDecision.ALLOW
     }
 
     private fun publishInProgress(build: SBuild) {
