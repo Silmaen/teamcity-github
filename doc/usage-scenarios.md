@@ -846,6 +846,58 @@ label, and set `skipPhrase` to `[skip ci]` so a title-tagged PR opts out
 entirely. To force a run anyway, an operator clicks "Run" — the manual
 trigger bypasses all three filters.
 
+## Scenario 22: a project builds PRs on their own branch
+
+**Actor**: an operator ticks **Build PRs on their own branch** on the
+project's GitHub Bridge tab (`prBuildRef=branch`, v1.9.0+).
+
+**Expected outcome**: PR builds run on the PR's head branch instead of
+`pull/N`. TeamCity's Branch column shows `Feature/raycast`, and a push to
+a branch that already has a PR produces **one** build rather than two.
+
+```mermaid
+flowchart TD
+    A["push on Feature/raycast<br/>(PR #189 is open)"] --> B{"prBuildRef?"}
+    B -->|"pull (default)"| C["bridge enqueues pull/189"]
+    C --> D["a VCS trigger on Feature/* also builds<br/>the branch: two builds, one Check Run row"]
+    B -->|branch| E["bridge enqueues Feature/raycast"]
+    E --> F["one build; PR resolved from the commit,<br/>so PR params, draft/ready tag and the<br/>PR gates all still apply"]
+```
+
+The PR gates are unchanged: the plugin decides "is this a PR build?" from
+the built commit, not from the ref name, so `triggerOnPrDraft`, the PR
+branch filter and the metadata filters keep working. The head branches
+must be in the VCS root's branch spec, and pull requests from forks are
+ignored (they always are — see
+[configuration.md](configuration.md#forks-are-out-of-scope)).
+
+## Scenario 23: "Re-run all checks" and re-running a skipped row
+
+**Actor**: a developer clicks **Re-run all checks** on the PR, or **Re-run**
+on a row that reads "Skipped: paths out of scope".
+
+**Expected outcome**: both work (v1.9.0+).
+
+| Click | GitHub event | Plugin action |
+|---|---|---|
+| **Re-run** on one check (passed, failed or **skipped**) | `check_run.rerequested` | maps the Check Run name back to its build configuration and enqueues a fresh build, even past a finished one |
+| **Re-run all checks** | `check_suite.rerequested` | enqueues every opted-in build configuration for that head |
+
+Re-running a **skipped** row now actually starts a build: an explicit
+GitHub command is treated like a manual Run, so the branch, path and
+metadata filters that skipped the build in the first place no longer
+suppress it. HARD blocks (`triggerOnPrReady=false`, a project-level kill
+switch) still apply, and a build configuration that declares it does not
+build drafts still does not.
+
+With the **`rerunAll.onlyFailed`** setting on, "Re-run all checks" is
+restricted to build configurations whose last build at that commit failed.
+
+> The managed App subscribes to `check_suite` as of v1.9.0. On an App
+> created earlier, **Verify App configuration** on the admin page reports
+> `check_suite` as a missing event — add it in the App's webhook settings,
+> otherwise the "Re-run all checks" button stays silent.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |
@@ -871,6 +923,10 @@ trigger bypasses all three filters.
 | PR touches only out-of-scope paths | `applyPathFilter` drops the BT, posts Skipped | GitHub PR shows "Skipped: paths out of scope" |
 | PR title/body/labels out of scope (`requirePhrase`/`skipPhrase`/`labelFilter`) | `BridgeGate` returns `SUPPRESS_METADATA`, posts Skipped (auto only) | GitHub PR shows "Skipped: PR metadata out of scope"; manual Run bypasses |
 | PR closed / merged | `cancelQueuedForClosedPr` removes queued builds | Queue drained; running builds finish |
+| PR from a fork | Event dropped (logged, `fork_events_ignored`) | Nothing runs — the bridge serves one repository, never its forks |
+| Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: SOFT filters bypassed, HARD blocks kept | The build actually runs (no "Skipped" row comes back to undo it) |
+| "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |
+| Build finishes with artifacts | Check Run `output.text` lists them; sticky comment gains an `[artifacts]` link | One click from the PR to the installer/package |
 | External API trigger | `triggerBuild` via `/api/trigger` | Build enqueued (or dry-run no-op) |
 | Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds/Check Runs/comments; log shows intent |
 

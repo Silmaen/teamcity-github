@@ -1,9 +1,10 @@
 # Branching workflows: how code travels between GitHub and TeamCity
 
 **Status:** requirements settled with the team on 2026-07-28 (R1–R19, see
-§0 and the audit trail in §9). One implementation choice is still open (the
-pre-PR build policy of F1, largely absorbed by F28); the gap list of §8 is
-the backlog all of this produces.
+§0 and the audit trail in §9). The agreed first batch — **G11, G19, G18,
+G13, G12/G12b, G14** — is **implemented in 1.8.3** (released as 1.9.0);
+[tasks/branching-worklog.md](tasks/branching-worklog.md) is the living
+record of what is in the code and what is left.
 
 Where [usage-scenarios.md](usage-scenarios.md) answers *"this webhook
 arrives, what does the plugin do?"*, this page answers the other
@@ -262,11 +263,11 @@ commit SHA under the **same name** (`TeamCity / <BT>`), so they overwrite
 each other's row on GitHub — last writer wins, and the row may flip
 between the two builds' results.
 
-**The real fix is F28 (branch-source mode):** if PR builds run on the head
-ref instead of `pull/N`, there is no second ref and no second build, so the
-automatic policy becomes free. Until then the mitigations are: (a) keep the
-on-demand policy, (b) a distinct BT for pre-PR builds so the two Check Run
-names differ, or (c) G16.
+**Fixed by branch-source mode (F28, shipped in 1.8.3):** with PR builds
+running on the head ref there is no second ref and no second build, so the
+automatic policy is free. In `pull` mode the effect still applies — mitigate
+by keeping the on-demand policy or by using a distinct build configuration
+for pre-PR builds.
 
 **GitHub feedback:** with `branchPrLookup` on, a pre-PR build still gets
 its Check Run at the commit; the moment a PR exists for that head, the
@@ -385,8 +386,9 @@ Three mechanisms, combinable, for A3:
 the build from the normal `opened`/`synchronize` path. A BT with only
 `runOnApproval=true` still runs on every PR push. To make A3 genuinely
 on-demand you must *also* filter it out of the automatic path
-(`labelFilter`, `requirePhrase`, or a PR branch filter) — and that
-combination runs into **G11** below. Read G11 before designing A3 or A9.
+(`labelFilter`, `requirePhrase`, or a PR branch filter). Since **1.8.3 that
+combination works**: the comment/approval enqueue is stamped as an explicit
+command and the queue cleaner no longer undoes it (G11).
 
 **Known limitation:** the plugin does **not** react to
 `pull_request.labeled` or `pull_request.edited`. Adding the `ci-full`
@@ -691,17 +693,16 @@ commit **automatically invalidates the sign-off** — the new SHA has no
 `QA_Signoff` row, and the required check blocks the merge again. That is
 exactly the semantics you want for manual QA.
 
-**The catch (verified in the code — this is G11).** A9 must *not* be
-enqueued by the normal PR path, otherwise it reports success before
-anyone has tested. But every mechanism that keeps it out of the
-automatic path also kills the comment-triggered build:
-`handleCommentCommand` skips the gate at enqueue time, yet
-`DraftBuildQueueCleaner` re-evaluates the **full** gate on
-`buildTypeAddedToQueue` with `isManual=false` (a bridge enqueue is not
-a user trigger), and removes the build — posting a "Skipped: …" Check
-Run on top of it.
+**The catch that used to make this impossible — fixed in 1.8.3 (G11).** A9
+must *not* be enqueued by the normal PR path, otherwise it reports success
+before anyone has tested; but every mechanism that kept it off the automatic
+path also killed the comment-triggered build, because the queue cleaner
+re-evaluated the full gate with `isManual=false`. Commands are now stamped
+and gated like a manual Run, so the clean shape works:
+`triggerOnPrReady=on` + `requirePhrase=<never present>` +
+`commentTrigger=/qa-ok`.
 
-**The one combination that works today** — a *label* the tester sets
+**The pre-1.8.3 workaround**, kept for reference — a *label* the tester sets
 before commenting:
 
 ```
@@ -850,13 +851,13 @@ default*, not just this team's policy.
 - there is no "untrusted code builds with our credentials" problem — the
   classic reason CI systems refuse to run fork PRs automatically.
 
-**But it is not implemented yet — G19.** Today the plugin cannot even *tell*:
-`WebhookPayloadParser` reads `head.sha` and `head.ref` but never
-`head.repo.full_name`, so a fork PR looks exactly like a local-branch PR and
-gets built through its `pull/N` ref. Making R9 real means parsing the head
-repo, comparing it with `repository.full_name`, and dropping the event when
-they differ (logged and counted). Small — and a **prerequisite for F28**,
-since a fork's head ref does not exist locally and could not be built at all.
+**Implemented in 1.8.3 (G19).** The head repository is parsed from the
+`pull_request` / `pull_request_review` payloads and from the REST answer
+(`PrInfo.headRepo`, which covers the comment path); an event whose head lives
+elsewhere is logged, counted (`fork_events_ignored`) and dropped. A blank head
+repo — GitHub omits it for a deleted fork — fails open rather than being
+treated as foreign. This was the prerequisite for F28: a fork's head ref does
+not exist locally and could not be built at all.
 
 **If forks are ever allowed later:** revisit this list first — it is the
 shortest path to a security review — and keep those projects on the `pull/N`
@@ -928,7 +929,7 @@ flowchart TD
 | From `Feature/x` (plain branch build) → PR number | the `branchPrLookup` setting resolves the open PR whose head is the built commit (`GET /commits/{sha}/pulls`), caches it for the PR-info TTL, and then enriches the build exactly like a `pull/N` build: PR parameters, `draft`/`ready` tag, summary comment |
 | PR number as a build **parameter** | `teamcity.github.bridge.pullRequest.number` — usable in a TC build-list filter or a custom column via parameters |
 | `draft` / `ready` **tags** on the promotion | rendered as coloured pills (`BranchEnrichmentPageExtension`) |
-| A **sortable branch/PR view** | **missing** — see G12 |
+| A **unified searchable view** | **shipped in 1.8.3** — project tab *Branches & PRs* (G12), with the PR number persisted as a `pr-<n>` build tag |
 
 **Why not just fix TeamCity's list:** its "Branch" column has no public
 override hook (roadmap Item 2 documents the SDK dead end), so bending it is a
@@ -1024,15 +1025,15 @@ exists** at that SHA (`ignoreFinished=true`). That covers re-running a
 
 | Wish | Why it fails now | Fix |
 |---|---|---|
-| Re-run a **skipped** row (start a build that was filtered out) | the name maps correctly and the build *is* enqueued — then `DraftBuildQueueCleaner` re-applies the gate with `isManual=false` and removes it again, re-posting the same "Skipped" row | **G11** — treat an explicit GitHub command as a manual trigger for the soft gates |
-| **Re-run all** checks | GitHub sends `check_suite.rerequested` for "Re-run all checks"; the controller ignores the whole `check_suite` event (it is even in the App's subscription list — G8) | **G13** — handle it: re-enqueue every opted-in BT for that head SHA |
-| **Re-run only the failed** ones | no such GitHub event for third-party apps; it has to be *our* semantics | **G13** — on `check_suite.rerequested`, optionally restrict to BTs whose last build at that SHA failed (TeamCity knows this); or expose it as a comment command (`/rerun-failed`) |
+| Re-run a **skipped** row | the build was enqueued, then the queue cleaner re-applied the gate with `isManual=false` and removed it again | **fixed (G11, 1.8.3)** — commands are gated like a manual Run |
+| **Re-run all** checks | `check_suite.rerequested` was answered "204 unsupported event" | **fixed (G13, 1.8.3)** — every opted-in build configuration at that head is re-run |
+| **Re-run only the failed** ones | no such GitHub event for third-party apps; it had to be *our* semantics | **fixed (G13, 1.8.3)** — `rerunAll.onlyFailed` restricts the re-run to configurations whose last build at that commit failed |
 
-**Note on the skipped case:** it is the single most valuable of the three,
+**Note on the skipped case:** it was the most valuable of the three,
 because it turns every "Skipped: …" row into a one-click escape hatch —
 exactly what an operator wants when a path filter or a label rule was too
-aggressive. It is also the same fix as the on-demand build configurations
-of F5/F17, which makes G11 the highest-leverage item on the list.
+aggressive. It came for free with the same fix as the on-demand build
+configurations of F5/F17.
 
 ### F28 — Branch-source builds instead of `pull/N` (R19, decided)
 
@@ -1094,11 +1095,9 @@ flowchart LR
 - **R18 is honoured by construction** — we validate the branch, which is
   what we always did.
 
-**What it costs — this is a code change, not a setting:**
-
-The string `pull/` is the *"am I in a PR context?"* discriminator in several
-places, and all of them must switch to "does this commit have an open PR?"
-(information `branchPrLookup` already provides):
+**What it cost — this was a code change, not a setting.** Shipped in 1.8.3;
+the table records what moved, because the same reasoning applies to anything
+else that used to key on the ref name:
 
 | Site | Today | Needed |
 |---|---|---|
@@ -1109,18 +1108,15 @@ places, and all of them must switch to "does this commit have an open PR?"
 | `PrPromotionTagger` | `pull/`-only (queue-time promotion tag) | same PR-presence lookup, or drop it in favour of `PrBuildEnricher`, which already tags the running build for both cases — that is why the `draft` pill appeared on the `Feature/toto` run |
 | `DraftBuildQueueCleaner`, `BuildStatusCheckRunPublisher.willBeSuppressed` | reuse the gate | follow the gate change |
 
-**Prerequisite: the fork guard (G19).** In branch-source mode a fork PR is
-unbuildable — its head ref does not exist locally — so it must be
-*recognised and ignored*, which the plugin cannot do today:
-`WebhookPayloadParser` reads `head.sha` and `head.ref` but never
-`head.repo.full_name`. Comparing it with `repository.full_name` and dropping
-the event when they differ is a few lines, and it is what makes R9 a real
-behaviour instead of an assumption.
+**Prerequisite: the fork guard (G19), shipped first.** In branch-source mode
+a fork PR is unbuildable — its head ref does not exist locally — so it must be
+recognised and ignored, which is what G19 added.
 
-**Migration note:** the two models cannot coexist on one build
-configuration without double-building, so the switch must be a **per-project
-setting** (`prBuildRef = pull | branch`), defaulting to `pull` for existing
-installations and for any deployment that allows forks.
+**Migration:** the switch is the **per-project setting**
+`teamcity.github.bridge.prBuildRef = pull | branch` (project page: *Build PRs
+on their own branch*), defaulting to `pull` for existing installations and for
+any deployment that allows forks. See
+[configuration.md](configuration.md#branch-source-pr-builds-v190).
 
 **Open question:** what happens to the history of `pull/N` builds when a
 project switches? Nothing breaks — TeamCity keeps them as builds of a
@@ -1163,17 +1159,15 @@ probably show both, keyed by SHA rather than by ref.
 Verified against the current code (v1.9.0). Ordered by how much they hurt
 the workflow above.
 
-**Agreed priority.** **G11** first — it unlocks the on-demand suites (F5),
-the re-run of skipped rows (F27) and the sign-off pattern (F17) with one
-small change. Then **G13** (re-run all / only failed), then **G12 + G12b**
-(unified searchable branch/PR view), then **G14** (artifact links — the QA
-deliverable of F26). **G17** rides along with R16 and is cheap.
+**The agreed batch `G11 → G19 → G18 → G13 → G12/G12b → G14` shipped in
+1.8.3** — the rows below are struck through and
+[tasks/branching-worklog.md](tasks/branching-worklog.md) records where each
+one lives in the code.
 
-**Added 2026-07-28, after the `Feature/toto` experiment:** **G19** (fork
-guard) then **G18** (branch-source mode) — see F28. G19 is small and stands
-on its own (it makes R9 real); G18 subsumes **G16**, simplifies **G12/G12b**
-and answers the last open question of §9, so the working order is
-**G11 → G19 → G18 → G13 → G12/G12b → G14**, with G17 riding along.
+**What is left**, in the order the scenarios argue for: **G17** (name the
+merged PR on a red long-life build, so R16 has tooling), **G15** (warn on a
+double publisher), then **G1 / G3 / G4** (labels and edits as triggers) and
+**G10** (annotations).
 
 **Dropped for this project:** **G6** (no external QA tooling, R15) and the
 DOM rewrite of the Branch column (cosmetic; F28 removes the need).
@@ -1182,17 +1176,17 @@ deployments.
 
 | # | Gap | Impact here | Fix shape |
 |---|---|---|---|
-| G11 | **On-demand-only build configurations are not expressible.** The command paths (comment, approval, re-run, external API) skip the gate at enqueue, but `DraftBuildQueueCleaner` re-applies it with `isManual=false` and removes the build. So any filter that keeps a BT off the automatic path also kills its on-demand build. | Blocks the clean A3 and A9 patterns (F5, F17); forces the fragile label dance | Carry the trigger source on the promotion (or a promotion attribute) when the bridge enqueues from an explicit command, and have the cleaner treat it like a manual trigger for the SOFT decisions (branch / path / metadata) while keeping HARD blocks. Small. |
-| G18 | No **branch-source mode**: PR builds always run on a synthetic `pull/N` ref | R19/F28 — unreadable branch names everywhere in TeamCity, and a second build per commit once a PR exists (G16) | Per-project setting `prBuildRef = pull \| branch`; enqueue on the PR head ref and make the gate/dedup/tagger key on *PR presence* instead of the `pull/` prefix. Medium — it touches the gate, so it needs care. |
-| G19 | **Fork PRs are not recognised.** `WebhookPayloadParser` never reads `head.repo.full_name`, so a PR from a fork is indistinguishable from a local-branch PR | R9 says the bridge is attached to one repository, never its forks; and in branch-source mode a fork's head ref does not exist locally, so it *must* be ignored | Parse the head repo, compare (case-insensitive) with `repository.full_name`, ignore the event when they differ; log it and count it. Small — and a prerequisite for G18. |
-| G13 | No `check_suite.rerequested` handling | "Re-run all checks" from GitHub does nothing; "only failed" has no implementation at all (F27) | Handle the event: re-enqueue every opted-in BT at that head SHA, with an option to restrict to BTs whose last build at that SHA failed. Small–medium (the event is already in the App's subscription list). |
+| ~~G11~~ | ~~On-demand-only build configurations are not expressible~~ | **DONE (1.8.3)** — an explicit command is stamped on the promotion (`teamcity.github.bridge.triggerSource=command`) and gated like a manual Run: HARD blocks apply, SOFT ones do not. A3 and A9 are now expressible, and a *skipped* row can be re-run from GitHub. | — |
+| ~~G18~~ | ~~No branch-source mode~~ | **DONE (1.8.3)** — project setting `prBuildRef = pull \| branch` (default `pull`); in branch mode the bridge enqueues on the PR head ref and PR-ness comes from the commit, not the ref name. | — |
+| ~~G19~~ | ~~Fork PRs are not recognised~~ | **DONE (1.8.3)** — the head repository is parsed from the payload and from the REST answer; a foreign head is logged, counted (`fork_events_ignored`) and dropped. Blank head repo (deleted fork) fails open. | — |
+| ~~G13~~ | ~~No `check_suite.rerequested` handling~~ | **DONE (1.8.3)** — "Re-run all checks" re-runs every opted-in build configuration at that head, with the `rerunAll.onlyFailed` setting to restrict it to the failed ones. The managed App now subscribes to `check_suite`. | — |
 | G17 | A failed build on a `<long-life branch>` cannot name **the merged PR / its author** | R16 makes the PR author responsible for investigating, but nothing links a merge-commit build back to the PR: `branchPrLookup` matches only *open* PRs whose head is the commit (F9) | Ask GitHub for the PR associated with the merge commit (the same endpoint returns merged PRs), then publish the number/author as build parameters and optionally comment on the merged PR. Small. |
-| G12b | No **retro-association** of pre-PR builds | A build that ran on `Feature/x` before the PR existed keeps no PR link (R12/F25 answer 10 asks for it) | On `pull_request.opened` (and first `synchronize`), re-resolve and attach the PR number to already-finished promotions at that head SHA. Small, pairs with G12. |
-| G12 | No **unified, searchable** branch/PR view (search by PR number *or* branch name) | R12 / F25: the association exists in the data (`branchPrLookup`, PR parameters, tags) but there is no place to *see* it; TC's Branch column has no public override hook (roadmap Item 2) | A plugin-owned project tab listing builds with Branch / PR / state / Check Run columns, sorted server-side. Medium, and it sidesteps the SDK dead end. |
-| G14 | Check Runs and the PR comment carry **no artifact links** | F26: QA has to go into TeamCity to find the installer/package; GitHub only offers a "details" link to the build page | Add artifact URLs to `output.text` and to the sticky comment rows. Small, high value. |
+| ~~G12b~~ | ~~No retro-association of pre-PR builds~~ | **DONE (1.8.3)** — `pull_request.opened` / `synchronize` back-fill the `pr-<n>` and draft/ready tags on builds already at that head, without any extra API call. | — |
+| ~~G12~~ | ~~No unified, searchable branch/PR view~~ | **DONE (1.8.3)** — project tab **Branches & PRs**: one list of queued/running/recent builds carrying both keys, searchable by branch name or PR number, sortable by time/branch/PR. The PR number is persisted as a `pr-<n>` build tag, so the page costs no API call. | — |
+| ~~G14~~ | ~~Check Runs and the PR comment carry no artifact links~~ | **DONE (1.8.3)** — the completed Check Run lists the build's top-level artifacts and the sticky comment gains an `[artifacts]` link per row (`checkRun.artifactLinks`, on by default). This is the QA hand-off of F26. | — |
 | G14b | No GitHub **Deployments / environments** support | F26: no idiomatic "deployed to QA, here is the URL" box on the PR | Post deployment + deployment_status through the API when a deploy BT finishes. Medium–large. |
 | G15 | Nothing detects a build configuration carrying **both** the bridge and the bundled `commitStatusPublisher` | R10 / F24: a mistake shows up as duplicate, competing statuses on GitHub, and nothing tells the operator | `WARN` log line once per buildType per server start + a self-test row listing offenders, read from `resolvedSettings` so template-inherited publishers are caught. **Warn only, never act** — decided; see roadmap Item 4. Small. |
-| ~~G16~~ | ~~No "build the branch only while it has no PR" condition~~ | **Superseded by G18**: in branch-source mode there is no second ref, so the double-build effect of F1 cannot happen. Keep only as the fallback if G18 is not done. | — |
+| ~~G16~~ | ~~No "build the branch only while it has no PR" condition~~ | **Superseded** — G18 shipped, so there is no second ref left to deduplicate. | — |
 | G1 | No `pull_request.labeled` / `unlabeled` handling | Labels are a *filter*, never a *trigger*: adding `ci-full` does nothing until the next push/comment/approval (F5, F13) | Handle `labeled` in `PluginWebhookController` + re-evaluate candidates. Small. |
 | G2 | No **base/target-branch** filter | **Not needed here** (R14: one single required set, F7) — kept for other deployments that gate release PRs differently | Add a `targetBranchFilter` to the build feature, matched on the PR's `base.ref`. Small–medium. |
 | G3 | No `pull_request.edited` handling | Editing the title to add/remove `[skip ci]` or `/full` has no effect until the next event | Same shape as G1. Small. |
