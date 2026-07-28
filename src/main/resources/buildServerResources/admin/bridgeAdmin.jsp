@@ -322,6 +322,7 @@
                     <label style="display:block;"><input type="checkbox" name="legacyAliases" <c:if test="${set_legacyAliases}">checked</c:if>/> Publish legacy <code>teamcity.pullRequest.*</code> aliases</label>
                     <label style="display:block;"><input type="checkbox" name="prComment" <c:if test="${set_prComment}">checked</c:if>/> Sticky PR summary comment <span style="color:#888;">(needs the App's pull-requests write permission)</span></label>
                     <label style="display:block;"><input type="checkbox" name="branchPrLookup" <c:if test="${set_branchPrLookup}">checked</c:if>/> Attach branch builds to their PR <span style="color:#888;">(look the PR up from the built commit, for builds launched on a plain branch)</span></label>
+                    <label style="display:block;"><input type="checkbox" name="rerunAllOnlyFailed" <c:if test="${set_rerunAllOnlyFailed}">checked</c:if>/> "Re-run all checks" re-runs only the failed ones <span style="color:#888;">(off = re-run every opted-in build configuration for that commit)</span></label>
                 </td>
             </tr>
             <tr>

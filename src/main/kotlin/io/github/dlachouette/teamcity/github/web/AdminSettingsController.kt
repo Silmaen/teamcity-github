@@ -150,6 +150,7 @@ class AdminSettingsController(
             putBool(BridgeServerSettings.KEY_LEGACY_ALIASES, request.getParameter("legacyAliases") != null)
             putBool(BridgeServerSettings.KEY_PR_COMMENT_ENABLED, request.getParameter("prComment") != null)
             putBool(BridgeServerSettings.KEY_BRANCH_PR_LOOKUP, request.getParameter("branchPrLookup") != null)
+            putBool(BridgeServerSettings.KEY_RERUN_ONLY_FAILED, request.getParameter("rerunAllOnlyFailed") != null)
 
             serverSettings.applyTo(gitHubClient, prInfoCache)
             LOG.info("GitHub Bridge server settings updated by ${user.username}")
