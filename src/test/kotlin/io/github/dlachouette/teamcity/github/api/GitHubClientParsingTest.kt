@@ -63,4 +63,53 @@ class GitHubClientParsingTest {
     fun `parse returns null on invalid JSON`() {
         assertNull(GitHubClient.parsePrInfo("not json {"))
     }
+
+    // ----- GET /commits/{sha}/pulls (branch -> PR lookup) -----
+
+    @Test
+    fun `parse the PR array returned for a commit`() {
+        val json = """
+            [
+              {
+                "number": 189,
+                "title": "Add raycast shadows",
+                "state": "open",
+                "draft": false,
+                "user": {"login": "alice"},
+                "head": {"ref": "Feature/raycast-shadows", "sha": "abc1234"},
+                "base": {"ref": "main"}
+              },
+              {
+                "number": 42,
+                "title": "Older attempt",
+                "state": "closed",
+                "user": {"login": "bob"},
+                "head": {"ref": "Feature/old", "sha": "abc1234"},
+                "base": {"ref": "main"}
+              }
+            ]
+        """.trimIndent()
+
+        val prs = GitHubClient.parsePrList(json)
+        assertEquals(2, prs.size)
+        assertEquals(189, prs[0].number)
+        assertEquals("Feature/raycast-shadows", prs[0].headRef)
+        assertEquals("open", prs[0].state)
+        assertEquals("closed", prs[1].state)
+    }
+
+    @Test
+    fun `parse PR array drops unparseable elements`() {
+        val json = """[{"title": "no number"}, {"number": 7, "head": {}, "base": {}}]"""
+        val prs = GitHubClient.parsePrList(json)
+        assertEquals(1, prs.size)
+        assertEquals(7, prs[0].number)
+    }
+
+    @Test
+    fun `parse PR array tolerates an empty array, an object and garbage`() {
+        assertTrue(GitHubClient.parsePrList("[]").isEmpty())
+        assertTrue(GitHubClient.parsePrList("""{"number": 1}""").isEmpty())
+        assertTrue(GitHubClient.parsePrList("not json [").isEmpty())
+    }
 }

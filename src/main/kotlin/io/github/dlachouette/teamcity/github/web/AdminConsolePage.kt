@@ -70,6 +70,7 @@ class AdminConsolePage(
         model["set_metricsEnabled"] = serverSettings.metricsEnabled()
         model["set_legacyAliases"] = serverSettings.legacyAliasesEnabled()
         model["set_prComment"] = serverSettings.prCommentEnabled()
+        model["set_branchPrLookup"] = serverSettings.branchPrLookupEnabled()
         model["set_commentAssociations"] = serverSettings.commentTriggerAllowedAssociations().joinToString(",")
         model["apiTokenConfigured"] = serverSettings.isApiEnabled()
 

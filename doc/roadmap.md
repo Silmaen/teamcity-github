@@ -12,6 +12,13 @@ described in [README.md](../README.md) and detailed in
 
 ## Shipped since 1.0
 
+- v1.9.0 — builds launched on a plain branch ref are attached to their
+  pull request: the PR is resolved from the built commit
+  (`GET /commits/{sha}/pulls`, open PRs whose head is that commit only),
+  so such a build gets the `teamcity.github.bridge.pullRequest.*`
+  parameters, the `draft`/`ready` tag and the sticky summary comment.
+  New `branchPrLookup.enabled` feature flag (default on). Gating is
+  untouched — a branch build still takes the gate's branch path.
 - v1.8.0 — PR-metadata build gate (per-build-configuration
   `requirePhrase` / `skipPhrase` / `labelFilter` over the PR title,
   body and labels; SOFT, manual bypasses, "Skipped: PR metadata out of

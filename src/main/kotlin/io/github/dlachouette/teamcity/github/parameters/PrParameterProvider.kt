@@ -29,13 +29,23 @@ class PrParameterProvider(
             val buildType = build.buildType ?: return emptyMap()
             val config = BridgeFeatureReader.read(buildType) ?: return emptyMap()
 
+            // Only needed for builds launched on a plain branch ref; null
+            // (= no lookup) when the operator disabled the branch->PR
+            // lookup or the revision is not resolved.
+            val headSha = build.revisions.firstOrNull()?.revision
+                ?.takeIf { it.isNotBlank() && serverSettings.branchPrLookupEnabled() }
+
+            fun access() = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
+
             computeParams(
                 branchName = build.branch?.name,
                 legacyAliases = serverSettings.legacyAliasesEnabled(),
+                headSha = headSha,
+                prByCommitResolver = { sha ->
+                    access()?.let { prInfoCache.getForCommit(config.repo, sha, it.token, it.apiBase) }
+                },
                 resolver = { number ->
-                    val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo)
-                        ?: return@computeParams null
-                    prInfoCache.get(config.repo, number, access.token, access.apiBase)
+                    access()?.let { prInfoCache.get(config.repo, number, it.token, it.apiBase) }
                 },
             )
         } catch (e: Exception) {
@@ -103,18 +113,33 @@ class PrParameterProvider(
         private val LOG = Logger.getInstance(PrParameterProvider::class.java.name)
 
         // Pure helper - testable without TC SDK fixtures.
-        // - Non-PR branches -> DEFAULT_NON_PR_PARAMS (isPullRequest=false, everything else empty).
-        // - PR branches with resolved PrInfo -> all fields populated.
+        // - PR branches (`pull/N`) with resolved PrInfo -> all fields populated.
         // - PR branches whose PrInfo could not be resolved -> we still
         //   know isPullRequest=true and the number (parsed from the
         //   branch name); the rest defaults to empty for fail-safety.
+        // - Plain branch refs with a `headSha`: the PR whose head is that
+        //   commit (if any) populates the same fields, so a build launched
+        //   on `Feature/x` sees the same parameters as the `pull/N` build
+        //   of the same commit. `headSha` is null when the caller has no
+        //   revision or the branch->PR lookup is disabled.
+        // - Anything else -> DEFAULT_NON_PR_PARAMS (isPullRequest=false,
+        //   everything else empty).
         fun computeParams(
             branchName: String?,
             legacyAliases: Boolean = false,
+            headSha: String? = null,
+            prByCommitResolver: (String) -> PrInfo? = { null },
             resolver: (Int) -> PrInfo?,
         ): Map<String, String> {
             if (branchName == null || !branchName.startsWith("pull/")) {
-                return DEFAULT_NON_PR_PARAMS
+                val pr = headSha?.takeIf { it.isNotBlank() }?.let { sha ->
+                    try {
+                        prByCommitResolver(sha)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                } ?: return DEFAULT_NON_PR_PARAMS
+                return params(pr.number, pr, legacyAliases)
             }
             val prNumber = branchName.removePrefix("pull/").toIntOrNull()
                 ?: return DEFAULT_NON_PR_PARAMS
@@ -124,6 +149,12 @@ class PrParameterProvider(
             } catch (_: Throwable) {
                 null
             }
+            return params(prNumber, pr, legacyAliases)
+        }
+
+        // The PR-context parameter map. `pr` is null when the number is
+        // known (from the branch name) but the GitHub lookup failed.
+        private fun params(prNumber: Int, pr: PrInfo?, legacyAliases: Boolean): Map<String, String> {
             val params = mutableMapOf(
                 PARAM_IS_PULL_REQUEST to "true",
                 PARAM_IS_DRAFT to (pr?.draft == true).toString(),

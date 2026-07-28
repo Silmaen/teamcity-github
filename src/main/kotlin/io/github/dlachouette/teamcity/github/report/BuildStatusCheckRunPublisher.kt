@@ -247,14 +247,13 @@ class BuildStatusCheckRunPublisher(
         maybeUpdatePrComment(build, ctx, mapping)
     }
 
-    // Optional sticky PR summary comment (off by default). Only for PR
-    // builds; skipped in dry-run. Reuses the build's installation token,
-    // which must carry the App's pull-requests write permission.
+    // Optional sticky PR summary comment (off by default). Only for builds
+    // that belong to a PR; skipped in dry-run. Reuses the build's
+    // installation token, which must carry the App's pull-requests write
+    // permission.
     private fun maybeUpdatePrComment(build: SBuild, ctx: PrBuildContext, mapping: BuildOutcomeMapping) {
         if (!serverSettings.prCommentEnabled() || serverSettings.dryRun()) return
-        val branch = build.branch?.name ?: return
-        if (!branch.startsWith("pull/")) return
-        val prNumber = branch.removePrefix("pull/").toIntOrNull() ?: return
+        val prNumber = resolvePrNumber(build, ctx) ?: return
         val emoji = when (mapping.conclusion) {
             CheckRunConclusion.SUCCESS -> "✅"
             CheckRunConclusion.FAILURE, CheckRunConclusion.TIMED_OUT -> "❌"
@@ -269,6 +268,18 @@ class BuildStatusCheckRunPublisher(
             checkName = checkRunName(ctx.buildType),
             row = PrSummaryCommenter.Row(emoji, mapping.title, safeUrl { webLinks.getViewResultsUrl(build) }),
         )
+    }
+
+    // The PR this build reports into, if any: straight from the `pull/N`
+    // ref, or — for a build launched on a plain branch ref — the open PR
+    // whose head is the built commit. The Check Run itself needs none of
+    // this (GitHub attaches it to the commit, and every PR whose head is
+    // that commit shows it); only the comment needs an issue number.
+    private fun resolvePrNumber(build: SBuild, ctx: PrBuildContext): Int? {
+        val branch = build.branch?.name ?: return null
+        if (branch.startsWith("pull/")) return branch.removePrefix("pull/").toIntOrNull()
+        if (!serverSettings.branchPrLookupEnabled()) return null
+        return prInfoCache.getForCommit(ctx.repo, ctx.headSha, ctx.accessToken, ctx.apiBase)?.number
     }
 
     private fun publishQueueRemoved(queuedBuild: SQueuedBuild, user: User?, comment: String) {

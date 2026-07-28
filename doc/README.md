@@ -16,6 +16,7 @@ GitHub App → configure a project → see a Check Run.
 | Configure the webhook (manual path only) | [webhook-setup.md](webhook-setup.md) |
 | Know every setting and where it lives | [configuration.md](configuration.md) |
 | See concrete end-to-end walkthroughs | [usage-scenarios.md](usage-scenarios.md) |
+| Map our branch model (main / `Release/*` / cascade / QA) onto pipelines | [branching-workflows.md](branching-workflows.md) |
 | Call the plugin's HTTP API from another app | [api-reference.md](api-reference.md) |
 | Understand the security/trust model | [security.md](security.md) |
 | Diagnose a problem | [troubleshooting.md](troubleshooting.md) |

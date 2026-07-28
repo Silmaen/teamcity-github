@@ -84,6 +84,28 @@ open class GitHubClient {
         return files
     }
 
+    // GET /repos/{slug}/commits/{sha}/pulls -> every pull request whose
+    // branch contains this commit (open and closed alike, newest first).
+    // Used to attach a build launched on a plain branch ref (not a
+    // `pull/N` ref) to the pull request that branch belongs to, so such
+    // builds still get PR parameters, tags and the summary comment.
+    // Callers filter the result via `PrInfoCache.selectForCommit`.
+    open fun listPrsForCommit(
+        accessToken: String,
+        repo: RepoCoords,
+        sha: String,
+        apiBase: String = DEFAULT_API_BASE,
+    ): List<PrInfo> {
+        val resp = request("GET", "$apiBase/repos/${repo.slug}/commits/$sha/pulls?per_page=100", accessToken)
+            ?: return emptyList()
+        return if (resp.isSuccess) {
+            parsePrList(resp.body)
+        } else {
+            LOG.warn("GET commits/$sha/pulls returned ${resp.code} for ${repo.slug}: ${resp.body}")
+            emptyList()
+        }
+    }
+
     // ----- GitHub App management (manifest creation + verification) -----
 
     // POST /app-manifests/{code}/conversions — exchanges the temporary
@@ -436,6 +458,20 @@ open class GitHubClient {
             } catch (e: Exception) {
                 LOG.warn("Failed to parse PR JSON: ${e.message}")
                 null
+            }
+        }
+
+        // Public for testing — parses an ARRAY of PR objects (the shape
+        // returned by GET /commits/{sha}/pulls). Elements that don't parse
+        // are dropped rather than failing the whole list.
+        fun parsePrList(json: String): List<PrInfo> {
+            return try {
+                val node = MAPPER.readTree(json)
+                if (!node.isArray) return emptyList()
+                node.mapNotNull { parsePrInfo(it) }
+            } catch (e: Exception) {
+                LOG.warn("Failed parsing PR list response: ${e.message}")
+                emptyList()
             }
         }
 

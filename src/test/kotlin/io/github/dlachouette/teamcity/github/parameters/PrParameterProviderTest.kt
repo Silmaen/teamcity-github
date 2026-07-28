@@ -106,6 +106,87 @@ class PrParameterProviderTest {
         assertEquals(null, nonPr[PrParameterProvider.ALIAS_PR_NUMBER])
     }
 
+    // ----- branch builds attached to their PR via the head commit -----
+
+    @Test
+    fun `branch build whose commit heads a PR gets the full PR params`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            headSha = "deadbeef1234",
+            prByCommitResolver = { readyPr },
+        ) { _ -> error("the number-based resolver must not be used on a branch build") }
+
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_PULL_REQUEST])
+        assertEquals("false", params[PrParameterProvider.PARAM_IS_DRAFT])
+        assertEquals("189", params[PrParameterProvider.PARAM_PR_NUMBER])
+        assertEquals("Add raycast shadows", params[PrParameterProvider.PARAM_PR_TITLE])
+        assertEquals("feature/raycast", params[PrParameterProvider.PARAM_PR_SOURCE_BRANCH])
+        assertEquals("main", params[PrParameterProvider.PARAM_PR_TARGET_BRANCH])
+        assertEquals("deadbeef1234", params[PrParameterProvider.PARAM_PR_HEAD_SHA])
+    }
+
+    @Test
+    fun `branch build carries the PR draft state`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            headSha = "deadbeef1234",
+            prByCommitResolver = { draftPr },
+        ) { _ -> null }
+        assertEquals("true", params[PrParameterProvider.PARAM_IS_DRAFT])
+    }
+
+    @Test
+    fun `branch build with no PR for the commit stays non-PR`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            headSha = "deadbeef1234",
+            prByCommitResolver = { null },
+        ) { _ -> readyPr }
+        assertEquals(PrParameterProvider.DEFAULT_NON_PR_PARAMS, params)
+    }
+
+    @Test
+    fun `branch build without a resolved revision never looks a PR up`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            headSha = null,
+            prByCommitResolver = { error("must not be called without a head SHA") },
+        ) { _ -> readyPr }
+        assertEquals(PrParameterProvider.DEFAULT_NON_PR_PARAMS, params)
+    }
+
+    @Test
+    fun `commit resolver throwing degrades to non-PR defaults`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            headSha = "deadbeef1234",
+            prByCommitResolver = { throw RuntimeException("simulated GitHub outage") },
+        ) { _ -> null }
+        assertEquals(PrParameterProvider.DEFAULT_NON_PR_PARAMS, params)
+    }
+
+    @Test
+    fun `legacy aliases are emitted for a branch build attached to a PR`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "Feature/raycast",
+            legacyAliases = true,
+            headSha = "deadbeef1234",
+            prByCommitResolver = { readyPr },
+        ) { _ -> null }
+        assertEquals("189", params[PrParameterProvider.ALIAS_PR_NUMBER])
+        assertEquals("feature/raycast", params[PrParameterProvider.ALIAS_PR_SOURCE_BRANCH])
+    }
+
+    @Test
+    fun `a pull ref never uses the commit resolver`() {
+        val params = PrParameterProvider.computeParams(
+            branchName = "pull/189",
+            headSha = "deadbeef1234",
+            prByCommitResolver = { error("pull/N refs resolve by number") },
+        ) { _ -> readyPr }
+        assertEquals("189", params[PrParameterProvider.PARAM_PR_NUMBER])
+    }
+
     @Test
     fun `ALL_KEYS lists exactly 8 keys and matches DEFAULT_NON_PR_PARAMS`() {
         assertEquals(8, PrParameterProvider.ALL_KEYS.size)

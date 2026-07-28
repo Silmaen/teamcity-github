@@ -61,6 +61,14 @@ class BridgeServerSettings(
     // pull-requests/issues write permission and posts to the PR thread.
     fun prCommentEnabled(): Boolean = boolSetting(KEY_PR_COMMENT_ENABLED, false)
 
+    // Resolve the PR of a build launched on a plain branch ref (not a
+    // `pull/N` ref) from its head commit, so branch builds get the PR
+    // parameters, the draft/ready tag and the summary comment. On by
+    // default: one extra `GET /commits/{sha}/pulls` per built commit,
+    // cached (negative answers included). Turn off to keep branch builds
+    // strictly PR-unaware.
+    fun branchPrLookupEnabled(): Boolean = boolSetting(KEY_BRANCH_PR_LOOKUP, true)
+
     // Bearer token for the external API. null = API disabled. Stored
     // separately (set/cleared from its own admin form) so a bulk settings
     // save never clears it.
@@ -117,6 +125,7 @@ class BridgeServerSettings(
                 "prInfoTtl=${prInfoCacheTtlSeconds()}s, staleGrace=${prInfoStaleGraceSeconds()}s, " +
                 "retry=${httpMaxAttempts()}x@${httpBaseDelayMs()}ms, replay=${replayProtectionEnabled()}, " +
                 "dryRun=${dryRun()}, metrics=${metricsEnabled()}, legacyAliases=${legacyAliasesEnabled()}, " +
+                "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -153,6 +162,7 @@ class BridgeServerSettings(
         const val KEY_METRICS_ENABLED: String = "metrics.enabled"
         const val KEY_LEGACY_ALIASES: String = "legacyAliases.enabled"
         const val KEY_PR_COMMENT_ENABLED: String = "prComment.enabled"
+        const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"
         const val DEFAULT_COMMENT_ASSOCIATIONS: String = "OWNER,MEMBER,COLLABORATOR"

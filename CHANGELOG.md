@@ -6,6 +6,30 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.9.0] - unreleased
 
+### Added
+
+- **Branch builds are attached to their pull request.** A build launched
+  on a plain branch ref (`Feature/x`, not a `pull/N` ref) now resolves the
+  pull request from the built commit
+  (`GET /repos/{slug}/commits/{sha}/pulls`), so it publishes the same PR
+  parameters (`teamcity.github.bridge.pullRequest.*`), gets the
+  `draft`/`ready` tag and updates the sticky summary comment — a manual run
+  on the branch is reported like the `pull/N` build of the same commit.
+  Only **open** PRs whose **head** is that exact commit qualify, so a build
+  of an intermediate commit (or of a branch whose PR has been merged) is
+  never reported as a PR's state. The lookup goes through the PR-info
+  cache, negative answers included, and is governed by the new
+  `branchPrLookup.enabled` feature flag (default **on**, admin-page label
+  *"Attach branch builds to their PR"*).
+
+  Check Run publication itself was already commit-based and needed no
+  change: GitHub attaches the Check Run to the commit, and every PR whose
+  head is that commit shows it, under the same Check Run name as the
+  `pull/N` build. Gating is unchanged — a branch build still takes
+  `BridgeGate`'s branch path (`triggerOnBranch` +
+  `branchTrigger.branches`), so draft state and the PR-metadata filters do
+  not apply to it.
+
 ### Fixed
 
 - **"Queued" Check Run now appears reliably.** The `buildTypeAddedToQueue`

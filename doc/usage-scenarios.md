@@ -77,7 +77,7 @@ sequenceDiagram
     Cleaner->>TC: queuedBuild.removeFromQueue(reason)
     Cleaner->>Rep: postSkippedCheckRun(reason=DRAFT_PR)
     Rep->>API: POST /repos/.../check-runs (conclusion=skipped)
-    Note over TC: Build gone from the queue;<br/>DraftAwareBuildFilter is only the fallback<br/>if removeFromQueue ever throws
+    Note over TC: Build gone from the queue —<br/>DraftAwareBuildFilter is only the fallback<br/>if removeFromQueue ever throws
 ```
 
 On the PR's Checks tab, GitHub shows:
@@ -819,7 +819,7 @@ flowchart TD
     B --> C{manual Run?}
     C -->|yes| R[ALLOW: metadata bypassed]
     C -->|no| D{skipPhrase in title/body?}
-    D -->|yes, e.g. [skip ci]| S[SUPPRESS_METADATA]
+    D -->|"yes, e.g. [skip ci]"| S[SUPPRESS_METADATA]
     D -->|no| E{requirePhrase set<br/>and absent?}
     E -->|yes| S
     E -->|no| F{labelFilter set<br/>and no rule matches labels?}

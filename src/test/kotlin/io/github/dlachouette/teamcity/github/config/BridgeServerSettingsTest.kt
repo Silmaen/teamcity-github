@@ -33,6 +33,7 @@ class BridgeServerSettingsTest {
         assertFalse(s.dryRun())
         assertFalse(s.legacyAliasesEnabled())
         assertFalse(s.prCommentEnabled())
+        assertTrue(s.branchPrLookupEnabled())
     }
 
     @Test
@@ -40,6 +41,11 @@ class BridgeServerSettingsTest {
         val s = settings(tmp, BridgeServerSettings.KEY_DRY_RUN to "true", BridgeServerSettings.KEY_REPLAY_ENABLED to "false")
         assertTrue(s.dryRun())
         assertFalse(s.replayProtectionEnabled())
+    }
+
+    @Test
+    fun `branch to PR lookup can be switched off`(@TempDir tmp: Path) {
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_BRANCH_PR_LOOKUP to "false").branchPrLookupEnabled())
     }
 
     @Test

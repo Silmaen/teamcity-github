@@ -109,6 +109,7 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 | `metrics.enabled` | `true` | Metrics endpoint | Expose the metrics endpoint. |
 | `legacyAliases.enabled` | `false` | Publish legacy `teamcity.pullRequest.*` aliases | Also publish the bundled feature's variable names alongside the `teamcity.github.bridge.pullRequest.*` ones. |
 | `prComment.enabled` | `false` | Sticky PR summary comment | Post/update a summary comment on the PR thread. Needs the App's pull-requests/issues **write** permission, hence off by default. |
+| `branchPrLookup.enabled` | `true` | Attach branch builds to their PR | For a build launched on a plain branch ref (not a `pull/N` ref), resolve the pull request from the built commit (`GET /commits/{sha}/pulls`) so the build gets the PR parameters, the `draft`/`ready` tag and the summary comment. Only **open** PRs whose **head** is that exact commit qualify; the answer (including "no PR") is cached for the PR-info TTL. Off = branch builds stay strictly PR-unaware. |
 
 ### Managed GitHub App (v1.7.0+)
 
@@ -176,6 +177,12 @@ fails (token outage, repo not reachable), the parameters degrade
 to `isPullRequest=true` + `number=N` (extracted from the branch
 name) and empty strings for the rest.
 
+A build launched on a **plain branch ref** (`Feature/x`, not `pull/N`)
+gets the same populated values when that commit is the head of an open
+PR — see `branchPrLookup.enabled` under
+[Feature flags](#feature-flags). When the commit heads no open PR (or
+the flag is off) the non-PR defaults above apply.
+
 Parameters are visible server-side in the build's "Parameters"
 tab and on the agent (`%teamcity.github.bridge.pullRequest.number%`,
 etc.).
@@ -238,7 +245,8 @@ both secrets listed in the tables above (`api.base`, `api.version`,
 `http.retry.maxAttempts`, `http.retry.baseDelayMs`, `repo.allowlist`,
 `comment.allowedAssociations`, `webhook.replay.enabled`, `dryRun`,
 `metrics.enabled`, `legacyAliases.enabled`, `prComment.enabled`,
-`webhook.secret`, `api.token`) plus, when a managed App has been created
+`branchPrLookup.enabled`, `webhook.secret`, `api.token`) plus, when a
+managed App has been created
 (v1.7.0+), the managed-App credentials `app.id`, `app.privateKey` (PEM)
 and `app.slug`. The plugin never has to mutate `internal.properties`.
 
@@ -458,7 +466,7 @@ flowchart TD
 
     E[api.base / api.version / TTL etc] --> F{plugin settings file<br/>has the key?}
     F -->|yes| G[Use that value]
-    F -->|no| F2{legacy internal property set?<br/>(only api.base/api.version/ttl)}
+    F -->|no| F2{"legacy internal property set?<br/>(only api.base / api.version / ttl)"}
     F2 -->|yes| G
     F2 -->|no| H[Use compiled-in default]
 ```

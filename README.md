@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -98,8 +98,14 @@ Concretely:
   so the plugin works on a vanilla TeamCity 2026.1 sandbox without
   any prior interaction with TC's connection cache.
 
-Highlights (1.7.0 / 1.8.0):
+Highlights (1.7.0 / 1.8.0 / 1.9.0):
 
+- **Builds launched on a branch report into its PR** - run a
+  configuration on `Feature/x` itself instead of the `pull/N` ref and it
+  still lands in the pull request: the Check Run is posted on the built
+  commit (same name as the PR build, so it satisfies the same required
+  check), and the PR parameters, the `draft`/`ready` tag and the summary
+  comment come from the open PR whose head is that commit.
 - **Trigger or skip builds from PR metadata** - per-build-configuration
   filters on the pull request's **title**, **description** and **labels**:
   a require-phrase, a skip-phrase (e.g. `[skip ci]`), and a label filter
@@ -272,7 +278,7 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.8.0**. 190 unit tests pass.
+**Stable**. Current version is **1.9.0**. 212 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery

@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
@@ -13,6 +14,7 @@ class PrBuildEnricher(
     buildServer: SBuildServer,
     private val tokenResolver: TokenResolver,
     private val prInfoCache: PrInfoCache,
+    private val serverSettings: BridgeServerSettings,
 ) : BuildServerAdapter() {
 
     init {
@@ -29,19 +31,39 @@ class PrBuildEnricher(
 
     private fun enrich(build: SRunningBuild) {
         val branchName = build.branch?.name ?: return
-        if (!branchName.startsWith("pull/")) return
-
-        val prNumber = branchName.removePrefix("pull/").toIntOrNull() ?: return
         val buildType = build.buildType ?: return
+
+        // `pull/N` ref -> the number comes from the branch name. Plain
+        // branch ref -> the PR (if any) is looked up from the head commit,
+        // so a build launched on `Feature/x` is enriched like the `pull/N`
+        // build of the same commit.
+        val prNumber = if (branchName.startsWith("pull/")) {
+            branchName.removePrefix("pull/").toIntOrNull() ?: return
+        } else {
+            null
+        }
+        val headSha = build.revisions.firstOrNull()?.revision.orEmpty()
+        if (prNumber == null) {
+            if (!serverSettings.branchPrLookupEnabled() || headSha.isBlank()) return
+        }
 
         val config = BridgeFeatureReader.read(buildType) ?: return
 
         // TokenResolver already logs the cause (rate-limited).
         val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return
 
-        val pr = prInfoCache.get(config.repo, prNumber, access.token, access.apiBase)
+        val pr = if (prNumber != null) {
+            prInfoCache.get(config.repo, prNumber, access.token, access.apiBase)
+        } else {
+            prInfoCache.getForCommit(config.repo, headSha, access.token, access.apiBase)
+        }
         if (pr == null) {
-            LOG.warn("Cannot fetch PR info for ${config.repo.slug}#$prNumber; skipping enrichment")
+            if (prNumber != null) {
+                LOG.warn("Cannot fetch PR info for ${config.repo.slug}#$prNumber; skipping enrichment")
+            } else {
+                // The normal case for a branch that has no open PR.
+                LOG.debug("No open PR heads ${config.repo.slug}@$headSha; skipping enrichment of $branchName")
+            }
             return
         }
 
@@ -50,7 +72,8 @@ class PrBuildEnricher(
         if (plan.tagsToAdd.isNotEmpty()) {
             build.setTags(build.tags + plan.tagsToAdd)
         }
-        LOG.info("Enriched build ${buildType.externalId} #${build.buildId} for ${config.repo.slug}#$prNumber (draft=${pr.draft})")
+        LOG.info("Enriched build ${buildType.externalId} #${build.buildId} for ${config.repo.slug}#${pr.number} " +
+            "(branch=$branchName, draft=${pr.draft})")
     }
 
     companion object {
