@@ -14,6 +14,11 @@ data class PrInfo(
     // existing constructions/tests need not supply them.
     val body: String = "",
     val labels: List<String> = emptyList(),
+    // `owner/name` of the repository the head branch lives in. Equal to the
+    // base repository for an ordinary PR; different for a fork; blank when
+    // GitHub omits it (a deleted fork). Used by the fork guard — the bridge
+    // is attached to one repository, never to its forks.
+    val headRepo: String = "",
 )
 
 data class RepoCoords(val owner: String, val name: String) {

@@ -48,6 +48,8 @@ object WebhookPayloadParser {
             val head = pr.path("head")
             val headSha = head.path("sha").asText("")
             val headRef = head.path("ref").asText("")
+            // Blank when GitHub omits the head repository (deleted fork).
+            val headRepo = head.path("repo").path("full_name").asText("")
             val baseRef = pr.path("base").path("ref").asText("")
             val draft = pr.path("draft").asBoolean(false)
             val merged = pr.path("merged").asBoolean(false)
@@ -69,6 +71,7 @@ object WebhookPayloadParser {
                 title = title,
                 body = body,
                 labels = labels,
+                headRepo = headRepo,
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request payload: ${e.message}")
@@ -98,6 +101,7 @@ object WebhookPayloadParser {
                 headSha = head.path("sha").asText(""),
                 headRef = head.path("ref").asText(""),
                 draft = pr.path("draft").asBoolean(false),
+                headRepo = head.path("repo").path("full_name").asText(""),
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request_review payload: ${e.message}")
