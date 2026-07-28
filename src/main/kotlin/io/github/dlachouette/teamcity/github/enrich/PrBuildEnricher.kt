@@ -83,8 +83,8 @@ class PrBuildEnricher(
             currentTags: List<String>,
             pr: PrInfo,
         ): EnrichmentPlan {
-            val stateTag = if (pr.draft) TAG_DRAFT else TAG_READY
-            val tagsToAdd = if (currentTags.contains(stateTag)) emptyList() else listOf(stateTag)
+            val wanted = listOf(if (pr.draft) TAG_DRAFT else TAG_READY, prTag(pr.number))
+            val tagsToAdd = wanted.filterNot { currentTags.contains(it) }
 
             val newBuildNumber = currentBuildNumber
                 ?.takeIf { it.isNotBlank() && pr.headRef.isNotBlank() && !it.contains(pr.headRef) }
@@ -93,8 +93,19 @@ class PrBuildEnricher(
             return EnrichmentPlan(newBuildNumber, tagsToAdd)
         }
 
+        // The PR number, persisted as a build tag: it survives the build,
+        // costs no API call to read back, is searchable with TeamCity's own
+        // tag filter, and is what the branch/PR view keys on.
+        fun prTag(prNumber: Int): String = "$TAG_PR_PREFIX$prNumber"
+
+        // The PR number a `pr-189` tag encodes, or null for any other tag.
+        fun prNumberFromTag(tag: String): Int? =
+            tag.takeIf { it.startsWith(TAG_PR_PREFIX) }
+                ?.removePrefix(TAG_PR_PREFIX)?.toIntOrNull()?.takeIf { it > 0 }
+
         const val TAG_DRAFT: String = "draft"
         const val TAG_READY: String = "ready"
+        const val TAG_PR_PREFIX: String = "pr-"
     }
 }
 

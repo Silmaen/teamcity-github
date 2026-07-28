@@ -16,6 +16,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.GateDecision
 import io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature
 import io.github.dlachouette.teamcity.github.feature.PrBuildRef
+import io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher
 import io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter
 import io.github.dlachouette.teamcity.github.report.SkipReason
 import io.github.dlachouette.teamcity.github.report.checkRunName
@@ -268,6 +269,10 @@ class PullRequestEventListener(
         // (DraftBuildQueueCleaner on `buildTypeAddedToQueue`) refetches.
         prInfoCache.invalidate(payload.repo, payload.prNumber)
 
+        // Builds that already ran on this head before the PR existed carry no
+        // PR link yet (G12b) — give them one now.
+        retroAssociate(payload)
+
         // A closed/merged PR has nothing to retrigger: cancel any builds
         // still queued for its head, then stop. Running builds are left to
         // finish (stopping them needs an acting user / extra permissions).
@@ -396,6 +401,40 @@ class PullRequestEventListener(
             LOG.info("Path filter excluded ${dropped.size} BT(s) for ${payload.repo.slug}#${payload.prNumber} (${changed.size} files changed)")
         }
         return kept
+    }
+
+    // G12b: a build launched on `Feature/x` before the PR was opened has no
+    // PR tag, so it is invisible to a search by PR number. Tag the builds
+    // that already exist at this head — no API call needed, the payload
+    // carries the number and the draft state.
+    //
+    // Bounded by the history scan depth and skipped entirely for a closed
+    // PR (there is nothing left to associate).
+    private fun retroAssociate(payload: PrEventPayload) {
+        if (payload.action == PrAction.CLOSED || payload.headSha.isBlank()) return
+        val stateTag = if (payload.draft) PrBuildEnricher.TAG_DRAFT else PrBuildEnricher.TAG_READY
+        val prTag = PrBuildEnricher.prTag(payload.prNumber)
+        var tagged = 0
+        findCandidateBuildTypes(payload.repo).forEach { (bt, config) ->
+            val ref = prBuildRefFor(config, payload.prNumber, payload.headRef)
+            bt.history.asSequence()
+                .take(HISTORY_SCAN_DEPTH)
+                .filter { buildMatchesBranchAndSha(it, ref, payload.headSha) }
+                .forEach { build ->
+                    val missing = listOf(prTag, stateTag).filterNot { build.tags.contains(it) }
+                    if (missing.isEmpty()) return@forEach
+                    try {
+                        build.setTags(build.tags + missing)
+                        tagged++
+                    } catch (e: Exception) {
+                        LOG.warn("Failed tagging build #${build.buildNumber} of ${bt.externalId} " +
+                            "for ${payload.repo.slug}#${payload.prNumber}: ${e.message}")
+                    }
+                }
+        }
+        if (tagged > 0) {
+            LOG.info("Associated $tagged existing build(s) with ${payload.repo.slug}#${payload.prNumber}")
+        }
     }
 
     // Remove every build still queued for the closed/merged PR's head

@@ -23,21 +23,40 @@ class PrBuildEnricherTest {
     )
 
     @Test
-    fun `adds draft tag for a draft PR`() {
+    fun `adds the draft state and the PR tag for a draft PR`() {
         val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = true))
-        assertEquals(listOf("draft"), plan.tagsToAdd)
+        assertEquals(listOf("draft", "pr-7"), plan.tagsToAdd)
     }
 
     @Test
-    fun `adds ready tag for a non-draft PR`() {
+    fun `adds the ready state and the PR tag for a non-draft PR`() {
         val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false))
-        assertEquals(listOf("ready"), plan.tagsToAdd)
+        assertEquals(listOf("ready", "pr-7"), plan.tagsToAdd)
     }
 
     @Test
-    fun `does not duplicate the state tag when already present`() {
-        val plan = PrBuildEnricher.computePlan("42", listOf("draft"), pr(draft = true))
-        assertTrue(plan.tagsToAdd.isEmpty())
+    fun `does not duplicate tags that are already present`() {
+        assertTrue(PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = true)).tagsToAdd.isEmpty())
+        // A build tagged during the draft phase only needs the state update.
+        assertEquals(
+            listOf("ready"),
+            PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = false)).tagsToAdd,
+        )
+    }
+
+    // The PR tag is what makes a build findable by PR number without asking
+    // GitHub anything (G12) — including on a plain branch ref.
+    @Test
+    fun `the PR tag round-trips`() {
+        assertEquals("pr-189", PrBuildEnricher.prTag(189))
+        assertEquals(189, PrBuildEnricher.prNumberFromTag("pr-189"))
+    }
+
+    @Test
+    fun `only a well-formed PR tag is read back`() {
+        listOf("pr-", "pr-x", "pr-0", "pr--1", "draft", "ready", "prime", "PR-7").forEach {
+            assertNull(PrBuildEnricher.prNumberFromTag(it), "tag=$it")
+        }
     }
 
     @Test
