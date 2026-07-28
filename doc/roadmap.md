@@ -149,7 +149,7 @@ Enabled by default (`webhook.replay.enabled`), toggleable from the
 admin page. See [security.md](security.md) *Inbound: replay
 protection*.
 
-## Item 4 - Disable the bundled `commitStatusPublisher` automatically
+## Item 4 - Warn when the bundled `commitStatusPublisher` is also active
 
 ### Problem statement
 
@@ -158,29 +158,51 @@ TC bundled `commitStatusPublisher` still posts its hard-coded
 `"TeamCity build finished"` description on commit statuses. The
 result is a duplicate row per buildType on the GitHub PR UI.
 
-Today the operator must disable the bundled publisher manually on
-each opted-in build type.
+### Decision (2026-07-28): warn, never act
+
+Auto-suppressing the bundled feature was the original idea and is
+**rejected**:
+
+- Which system reports to GitHub is a *configuration decision* that
+  belongs to the operator; silently disabling another plugin's output
+  is surprising behaviour.
+- Refusing to publish would be worse — it removes reporting from the
+  very builds the operator wants to observe.
+- The mechanics are risky anyway (see *Constraints* below).
+
+So the plugin's job is to make the misconfiguration **impossible to
+miss**, and stop there. Correcting it is the operator's call, and the
+requirement is documented for them in
+[configuration.md](configuration.md#choosing-the-right-setup),
+[quickstart.md](quickstart.md) step 4 and
+[troubleshooting.md](troubleshooting.md#symptom-pr-shows-two-teamcity-entries-commit-status--check-run).
 
 ### Proposed design
 
-When the plugin's Build Feature (item 1) is enabled on a
-buildType, automatically suppress the bundled
-`commitStatusPublisher` feature for the same build type. Either by
-removing the feature descriptor at runtime (fragile) or by
-contributing a `BuildPromotionHook` that prevents the bundled
-publisher from running for opted-in builds (cleaner).
+Detect, per opted-in buildType, whether the resolved feature set also
+contains `commitStatusPublisher` (same `resolvedSettings` read that
+`BridgeFeatureReader` already performs, so template-inherited
+publishers are caught too), then:
+
+1. a **`WARN` log line** naming the buildType, emitted once per
+   buildType per server start (not per build — it would flood);
+2. a **self-test row** on the admin page: *"N opted-in build
+   configurations also carry the bundled Commit status publisher"*,
+   listing them, with `WARN` status;
+3. optionally a counter for the metrics endpoint.
+
+No behaviour change: the bridge keeps publishing its Check Runs.
 
 ### Constraints
 
 The bundled `commitStatusPublisher` is part of TC's bundled plugin
-set. Disabling it cleanly per-buildType is **not** a public DSL
-setting today. The implementation will likely depend on
-`BuildPromotionEx` and may break across TC releases.
+set; disabling it cleanly per-buildType is **not** a public DSL
+setting, which is a second reason not to try. *Reading* the feature
+set, by contrast, is plain public API.
 
 ### Effort
 
-Medium to large. Risk-heavy because the integration with the
-bundled publisher is intentionally not exposed.
+Small — a read, a log line and a self-test row.
 
 ## Item 5 - Mirror legacy `teamcity.pullRequest.*` variable names — **SHIPPED in 1.7.0**
 
@@ -330,7 +352,7 @@ than on our willingness to ship them. Re-check on each TC release.
 | Question | What we want | Status as of TC 2026.1 |
 |---|---|---|
 | Public `BuildBranchInfoProvider` | Override the branch column display | Not in `server-openapi`; see Item 2 above. |
-| Per-buildType disable of bundled features via DSL | Suppress `commitStatusPublisher` cleanly | Not in `server-openapi`; see Item 4. |
+| Per-buildType disable of bundled features via DSL | Suppress `commitStatusPublisher` cleanly | Not in `server-openapi` — and **no longer wanted**: Item 4 decided to warn rather than act. Keep the row only as a record of the SDK state. |
 | `ConnectionCredentialsFactory` for GitHub App | High-level token acquisition that does not need our self-mint path | Not supported (`Unsupported Connection Provider type: GitHubApp`). **Worked around in v1.2.0** by the self-mint path (Item 9). When/if JetBrains adds it, the self-mint primary path can be dropped — the credentials-manager fallback would suffice again. |
 
 ## Where to record new ideas

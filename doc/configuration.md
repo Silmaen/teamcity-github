@@ -633,13 +633,30 @@ unchecked) on a `pull/N` branch whose PR is draft.
 
 ### Choosing the right setup
 
-| Goal | Action |
-|---|---|
-| Keep both publishers (informational fallback) | Do nothing. Update branch protection to require **only** Check Run names like `TeamCity / <buildType full name>`. Commit Statuses appear but are not blocking. |
-| Single source of truth | Disable the bundled `commitStatusPublisher` on the opted-in build types via the existing UI (Build Features tab). The plugin's Check Runs become the only TC signal. |
+> ⚠️ **Recommended, and assumed by the rest of this documentation:
+> disable the bundled `commitStatusPublisher` on every build configuration
+> that carries the GitHub Bridge feature.** One producer of GitHub status
+> per build, never two.
 
-The "disable per-buildType" path is currently manual; a future
-release will provide a Build Feature for one-click opt-out.
+| Goal | Action | Verdict |
+|---|---|---|
+| **Single source of truth** (recommended) | Remove or disable the bundled `commitStatusPublisher` on the opted-in build configurations (Build Features tab). The plugin's Check Runs become the only TeamCity signal, and you can safely turn on `legacyAliases.enabled` so build scripts keep seeing the `teamcity.pullRequest.*` parameter names. | ✅ |
+| Keep both publishers (informational fallback) | Leave the bundled feature on and make branch protection require **only** Check Run names like `TeamCity / <buildType full name>`. Commit Statuses still appear on every PR but are not blocking. | ⚠️ tolerated, noisy |
+
+**The plugin will not do it for you — by design.** Disabling the bundled
+feature is a *configuration decision about what reports to GitHub*, and it
+belongs to the operator: silently suppressing another plugin's output would
+be surprising, and refusing to work would break reporting for the very
+builds you are trying to observe. What the bridge does instead is **warn**
+when it sees a build configuration carrying both features — in the log and
+in the admin page's self-tests — and then get on with its job. Acting on
+that warning is up to you.
+
+> **Status:** the warning itself is planned, not shipped yet (see
+> [roadmap.md](roadmap.md#item-4---warn-when-the-bundled-commitstatuspublisher-is-also-active)).
+> Until it lands, the check is manual: look at the Build Features tab of
+> each opted-in build configuration, or watch for duplicate rows on a PR
+> ([troubleshooting.md](troubleshooting.md#symptom-pr-shows-two-teamcity-entries-commit-status--check-run)).
 
 ## Validation
 

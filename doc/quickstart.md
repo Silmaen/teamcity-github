@@ -46,7 +46,18 @@ That's the entire GitHub side — no `.pem`, no manual webhook.
 In the build configuration you want to report to GitHub:
 
 1. **Build Features → Add build feature → GitHub Bridge integration**.
-2. Save. (The defaults run on branches, ready PRs and draft PRs.)
+2. **Remove (or disable) the bundled `commitStatusPublisher` build feature
+   on the same build configuration**, if it has one.
+3. Save. (The defaults run on branches, ready PRs and draft PRs.)
+
+> ⚠️ **Step 2 is not optional in practice.** The bridge and TeamCity's
+> bundled *Commit status publisher* both report to GitHub, so leaving both
+> enabled produces **two competing rows per build** — a rich Check Run from
+> the bridge and a generic `"TeamCity build finished"` Commit Status from
+> TeamCity. The bridge **never disables the bundled feature for you** (it
+> only warns): choosing what reports to GitHub is your configuration
+> decision, not the plugin's. See
+> [configuration.md](configuration.md#check-run-publisher-coexistence-with-the-bundled-commitstatuspublisher).
 
 ## 5. Verify
 

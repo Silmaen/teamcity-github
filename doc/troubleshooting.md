@@ -753,24 +753,32 @@ In the PR's "All checks" panel, each build appears twice:
 
 ### Cause
 
-This is **expected** on opted-in build types as of v0.4.0. The plugin's
-`BuildStatusCheckRunPublisher` posts Check Runs but does **not** silence
-the bundled `commitStatusPublisher`, which keeps posting Commit
-Statuses with its hard-coded description.
+The build configuration carries **both** status producers: this plugin's
+`BuildStatusCheckRunPublisher` (Check Runs) and TeamCity's bundled
+`commitStatusPublisher` (Commit Statuses, with its hard-coded
+description). The plugin deliberately does **not** silence the bundled
+feature — see [configuration.md](configuration.md#choosing-the-right-setup)
+for why that is your call and not the plugin's.
 
 ### Fix
 
-Two options:
-- **Leave both**, configure branch protection to require only the
-  Check Run name (e.g. `TeamCity / <buildType full name>`); treat the
-  Commit Status as informational.
-- **Disable `commitStatusPublisher`** on the opted-in build types via
-  the bundled feature's UI (`Edit Configuration -> Build Features ->
-  Commit status publisher -> Disable`). Confirm via the build's
-  "Build features" tab that the publisher is off.
+**Recommended — disable the bundled publisher** on every build
+configuration that has the GitHub Bridge feature:
+`Edit Configuration → Build Features → Commit status publisher →
+Disable` (or remove it). Confirm on the build's "Build features" tab that
+it is off. If the feature comes from a **build configuration template**,
+disable it there or override it locally — the bridge reads the *resolved*
+feature set, so a template-inherited publisher is just as active.
 
-A future plugin iteration will provide a Build Feature to suppress the
-bundled publisher per-buildType automatically.
+Tolerated alternative: **leave both** and configure branch protection to
+require only the Check Run name (e.g. `TeamCity / <buildType full name>`),
+treating the Commit Status as informational. Expect permanent duplicate
+rows on every PR.
+
+Not an option: making the plugin disable it for you. It will (once the
+warning of [roadmap Item 4](roadmap.md#item-4---warn-when-the-bundled-commitstatuspublisher-is-also-active)
+ships) tell you about the conflict, but correcting the build configuration
+stays an operator decision.
 
 ## Symptom: admin page shows "No webhook deliveries yet"
 
