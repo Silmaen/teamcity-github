@@ -7,6 +7,7 @@ import io.github.dlachouette.teamcity.github.api.CheckRunStatus
 import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
+import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.WebLinks
 import java.util.concurrent.ConcurrentHashMap
@@ -36,7 +37,7 @@ class DraftCheckRunReporter(
         reason: SkipReason,
         headRef: String? = null,
     ): Boolean {
-        if (config.repo.slug.isBlank()) return false
+        if (!config.publishChecks || config.repo.slug.isBlank()) return false
         if (!config.prTriggerEnabled) return false
         if (headSha.isBlank()) return false
         if (!serverSettings.isRepoAllowed(config.repo.slug)) return false
@@ -70,6 +71,40 @@ class DraftCheckRunReporter(
         } else {
             LOG.info("Posted Skipped Check Run for ${config.repo.slug}@$headSha (${buildType.externalId}) — reason=${reason.name}")
         }
+        return ok
+    }
+
+    // Republish the success of a build that already covered this commit, for
+    // a queued build that was dropped as redundant. Same Check Run name and
+    // same commit as the original build, so GitHub updates that one row; the
+    // details link points at the build that actually ran.
+    fun postReusedSuccess(
+        buildType: SBuildType,
+        config: BridgeFeatureConfig,
+        headSha: String,
+        reused: SBuild,
+    ): Boolean {
+        if (!config.publishChecks || config.repo.slug.isBlank() || headSha.isBlank()) return false
+        if (!serverSettings.isRepoAllowed(config.repo.slug)) return false
+        if (serverSettings.dryRun()) {
+            LOG.info("[dry-run] would republish success of #${reused.buildNumber} for ${config.repo.slug}@$headSha")
+            return false
+        }
+        val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return false
+
+        val request = CheckRunRequest(
+            name = checkRunName(buildType),
+            headSha = headSha,
+            status = CheckRunStatus.COMPLETED,
+            conclusion = CheckRunConclusion.SUCCESS,
+            outputTitle = "Build passed (reused #${reused.buildNumber})",
+            outputSummary = "This commit already passed in build #${reused.buildNumber}; " +
+                "the queued build was dropped instead of reproducing a known result.",
+            detailsUrl = safeUrl { webLinks.getViewResultsUrl(reused) },
+        )
+        val ok = gitHubClient.postCheckRun(access.token, config.repo, request, access.apiBase)
+        if (ok) LOG.info("Republished success of #${reused.buildNumber} for ${config.repo.slug}@$headSha (${buildType.externalId})")
+        else LOG.warn("Reused-success Check Run POST failed for ${config.repo.slug}@$headSha (${buildType.externalId})")
         return ok
     }
 

@@ -13,7 +13,9 @@ import jetbrains.buildServer.serverSide.SBuildType
 //   - branchTrigger: builds on non-PR branches (main, Release/*, …)
 //   - prTrigger:     builds on PR branches (pull/N)
 // Each path has its own enable toggle + branch list. Empty branch
-// list = match every branch on that path.
+// list = match every branch on that path. A disabled path makes the bridge
+// MUTE for it (no trigger, no Check Run) — never destructive: an explicit
+// build is left alone, it is simply not reported.
 object BridgeProjectParams {
     const val REPO: String = "teamcity.github.bridge.repo"
     const val CONNECTION_ID: String = "teamcity.github.bridge.connectionId"
@@ -89,6 +91,20 @@ data class BridgeFeatureConfig(
     // Project-level choice of the ref PR builds run on. Defaults to the
     // historical `pull/N`.
     val prBuildRef: PrBuildRef = PrBuildRef.PULL,
+    // Remove an automatically-triggered build from the queue when this exact
+    // commit already passed in this build configuration, and republish that
+    // success. Off by default: a scheduled suite is expected to re-run on an
+    // unchanged commit (that is how environment rot is caught).
+    val skipIfCommitPassed: Boolean = false,
+    // Does this build configuration report to GitHub at all?
+    //
+    // This is the ONLY thing publication depends on: it is deliberately
+    // independent of what started the build. A build configuration that
+    // publishes does so for a PR event, a VCS trigger, a schedule, a manual
+    // Run or a GitHub command alike; one that does not publish is invisible
+    // on GitHub whatever happens. Trigger gates and filters decide what
+    // *runs*, not what is *reported*.
+    val publishChecks: Boolean = true,
 )
 
 object BridgeFeatureReader {
@@ -178,6 +194,8 @@ object BridgeFeatureReader {
             skipPhrase = featureParams[GitHubBridgeBuildFeature.PARAM_SKIP_PHRASE]?.trim().orEmpty(),
             labelFilter = BranchSpecMatcher.parse(featureParams[GitHubBridgeBuildFeature.PARAM_LABEL_FILTER]),
             prBuildRef = PrBuildRef.parse(projectParams[BridgeProjectParams.PR_BUILD_REF]),
+            skipIfCommitPassed = featureParams[GitHubBridgeBuildFeature.PARAM_SKIP_IF_COMMIT_PASSED] == "true",
+            publishChecks = featureParams[GitHubBridgeBuildFeature.PARAM_PUBLISH_CHECKS] != "false",
         )
     }
 }
@@ -257,16 +275,19 @@ object BridgeGate {
         prBody: String,
         prLabels: List<String>,
     ): GateDecision {
-        // Project-level kill switch.
+        // Project-level kill switch: the bridge is mute for this path, for
+        // every trigger. It never removes a build, it just says nothing.
         if (!config.prTriggerEnabled) return GateDecision.SUPPRESS_HARD
-        // BT not for PRs at all. HARD: applies to manual too.
-        if (!config.triggerOnPrReady) return GateDecision.SUPPRESS_HARD
-        // Draft state but BT skips drafts. An explicit request cannot
-        // override that declaration — the build simply does not run on
-        // drafts — but it stays silent on GitHub (HARD) instead of posting
-        // a "Skipped: draft PR" row nobody asked for.
+        // "On demand" BT: not part of the PR check set, so nothing automatic
+        // — but an explicit run reports normally.
+        if (!config.triggerOnPrReady) {
+            return if (trigger.isExplicit) GateDecision.ALLOW else GateDecision.SUPPRESS_HARD
+        }
+        // Draft PR of a BT that skips drafts: suppressed on the automatic
+        // path (with a "Skipped: draft PR" row), but an explicit request wins
+        // — nobody should click Run and get silence.
         if (prDraft == true && !config.triggerOnPrDraft) {
-            return if (trigger.isExplicit) GateDecision.SUPPRESS_HARD else GateDecision.SUPPRESS_DRAFT
+            return if (trigger.isExplicit) GateDecision.ALLOW else GateDecision.SUPPRESS_DRAFT
         }
         // An explicit request bypasses the SOFT filters (branch + metadata).
         if (trigger.isExplicit) return GateDecision.ALLOW
@@ -308,7 +329,9 @@ object BridgeGate {
         trigger: BridgeTrigger,
     ): GateDecision {
         if (!config.branchTriggerEnabled) return GateDecision.SUPPRESS_HARD
-        if (!config.triggerOnBranch) return GateDecision.SUPPRESS_HARD
+        if (!config.triggerOnBranch) {
+            return if (trigger.isExplicit) GateDecision.ALLOW else GateDecision.SUPPRESS_HARD
+        }
         if (trigger.isExplicit) return GateDecision.ALLOW
         if (!config.branchTriggerBranches.matches(branchName)) {
             return GateDecision.SUPPRESS_BRANCH_NON_PR

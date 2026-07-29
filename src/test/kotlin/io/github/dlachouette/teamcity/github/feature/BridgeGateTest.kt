@@ -60,11 +60,18 @@ class BridgeGateTest {
     }
 
     @Test
-    fun `non-PR branch HARD-blocked when BT triggerOnBranch is false`() {
-        BridgeTrigger.entries.forEach { manual ->
+    fun `non-PR branch on a BT that does not do branch builds`() {
+        // No automatic build...
+        assertEquals(
+            GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, auto),
+        )
+        // ...but an explicit Run, a schedule-started build or a command runs.
+        listOf(manual, command).forEach { trigger ->
             assertEquals(
-                GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, manual),
+                GateDecision.ALLOW,
+                BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, trigger),
+                "trigger=$trigger",
             )
         }
     }
@@ -106,11 +113,16 @@ class BridgeGateTest {
     }
 
     @Test
-    fun `PR-ready HARD-blocked when BT triggerOnPrReady is false`() {
-        BridgeTrigger.entries.forEach { manual ->
+    fun `PR-ready on a BT that is not part of the PR check set`() {
+        assertEquals(
+            GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", 42, false, "Feature/foo", auto),
+        )
+        listOf(manual, command).forEach { trigger ->
             assertEquals(
-                GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", 42, false, "Feature/foo", manual),
+                GateDecision.ALLOW,
+                BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", 42, false, "Feature/foo", trigger),
+                "trigger=$trigger",
             )
         }
     }
@@ -159,32 +171,27 @@ class BridgeGateTest {
     }
 
     @Test
-    fun `PR-draft HARD-blocks manual trigger when triggerOnPrDraft is false`() {
-        // Manual on a draft PR for a BT that excludes drafts is blocked.
-        assertEquals(
-            GateDecision.SUPPRESS_HARD,
-            BridgeGate.decide(
-                config(triggerOnPrDraft = false),
-                "pull/42", 42, true, "Feature/foo", manual,
-            ),
-        )
-    }
-
-    @Test
-    fun `PR-draft on a BT that does not run on PRs at all is HARD-blocked`() {
-        BridgeTrigger.entries.forEach { manual ->
-            // triggerOnPrReady=false => the gate clamps Draft to false
-            // via the config builder; the BT is "not for PRs at all"
-            // (HARD block for both ready and draft PRs).
-            val cfg = config(triggerOnPrReady = false, triggerOnPrDraft = false)
+    fun `PR-draft lets an explicit trigger through when triggerOnPrDraft is false`() {
+        // Nobody should click Run and get silence: the flag governs the
+        // automatic path, an explicit request wins.
+        listOf(manual, command).forEach { trigger ->
             assertEquals(
-                GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", manual),
+                GateDecision.ALLOW,
+                BridgeGate.decide(
+                    config(triggerOnPrDraft = false),
+                    "pull/42", 42, true, "Feature/foo", trigger,
+                ),
+                "trigger=$trigger",
             )
         }
     }
 
-    // --- PR metadata gate (title / body / labels) ---
+    @Test
+    fun `PR-draft on a BT that does not run on PRs at all`() {
+        val cfg = config(triggerOnPrReady = false)
+        assertEquals(GateDecision.SUPPRESS_HARD, BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", auto))
+        assertEquals(GateDecision.ALLOW, BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", manual))
+    }
 
     @Test
     fun `skip phrase in title suppresses (auto) but manual bypasses`() {
@@ -303,39 +310,42 @@ class BridgeGateTest {
     }
 
     @Test
-    fun `a command cannot override a HARD block`() {
-        listOf(
-            config(prTriggerEnabled = false),
-            config(triggerOnPrReady = false),
-        ).forEach { cfg ->
-            assertEquals(
-                GateDecision.SUPPRESS_HARD,
-                BridgeGate.decide(cfg, "pull/42", 42, false, "Feature/foo", command),
-            )
-        }
+    fun `only the project-level mute survives an explicit command`() {
+        // The project switch means "the bridge says nothing for this path",
+        // for every trigger.
         assertEquals(
             GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(config(prTriggerEnabled = false), "pull/42", 42, false, "Feature/foo", command),
+        )
+        assertEquals(
+            GateDecision.SUPPRESS_HARD,
+            BridgeGate.decide(config(branchTriggerEnabled = false), "main", null, null, null, command),
+        )
+        // The per-BT flags only mean "do not start it automatically".
+        assertEquals(
+            GateDecision.ALLOW,
+            BridgeGate.decide(config(triggerOnPrReady = false), "pull/42", 42, false, "Feature/foo", command),
+        )
+        assertEquals(
+            GateDecision.ALLOW,
             BridgeGate.decide(config(triggerOnBranch = false), "main", null, null, null, command),
         )
     }
 
     @Test
-    fun `a command on a draft PR is silent when the BT skips drafts`() {
+    fun `a command on a draft PR runs even when the BT skips drafts`() {
         val cfg = config(triggerOnPrDraft = false)
         // Automatic: the operator gets a "Skipped: draft PR" row.
         assertEquals(
             GateDecision.SUPPRESS_DRAFT,
             BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", auto),
         )
-        // Explicit: the build still does not run (the BT declared it does
-        // not build drafts) but no unsolicited row is posted.
+        // Explicit: it runs, and reports.
         assertEquals(
-            GateDecision.SUPPRESS_HARD,
+            GateDecision.ALLOW,
             BridgeGate.decide(cfg, "pull/42", 42, true, "Feature/foo", command),
         )
     }
-
-    // --- PR context comes from the PR number, not from the ref name (G18)
 
     @Test
     fun `a build on the head ref is gated as a PR when the PR number is known`() {

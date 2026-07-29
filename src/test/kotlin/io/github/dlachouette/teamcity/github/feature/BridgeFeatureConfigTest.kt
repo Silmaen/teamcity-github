@@ -163,4 +163,20 @@ class BridgeFeatureConfigTest {
         assertFalse(c!!.triggerOnPrReady)
         assertFalse(c.triggerOnPrDraft)  // clamped
     }
+
+    // --- publication and reuse flags (1.8.3) ---
+
+    @Test
+    fun `publication is on unless the feature says otherwise`() {
+        assertEquals(true, BridgeFeatureReader.fromInputs(mandatoryProjectParams, emptyMap())!!.publishChecks)
+        assertEquals(true, BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("publishChecks" to "true"))!!.publishChecks)
+        assertEquals(false, BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("publishChecks" to "false"))!!.publishChecks)
+    }
+
+    @Test
+    fun `reusing a passed commit is opt-in`() {
+        assertEquals(false, BridgeFeatureReader.fromInputs(mandatoryProjectParams, emptyMap())!!.skipIfCommitPassed)
+        assertEquals(false, BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("skipIfCommitPassed" to "false"))!!.skipIfCommitPassed)
+        assertEquals(true, BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("skipIfCommitPassed" to "true"))!!.skipIfCommitPassed)
+    }
 }

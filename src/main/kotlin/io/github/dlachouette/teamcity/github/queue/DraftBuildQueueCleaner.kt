@@ -1,8 +1,11 @@
 package io.github.dlachouette.teamcity.github.queue
 
 import com.intellij.openapi.diagnostic.Logger
+import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
+import io.github.dlachouette.teamcity.github.feature.BridgeTrigger
+import io.github.dlachouette.teamcity.github.feature.GateContext
 import io.github.dlachouette.teamcity.github.feature.GateContextResolver
 import io.github.dlachouette.teamcity.github.feature.GateDecision
 import io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter
@@ -11,19 +14,19 @@ import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SQueuedBuild
 
-// Removes queued builds that the gate says should be suppressed.
-// Posts Skipped Check Runs for PR contexts (DRAFT_PR / BRANCH_FILTER /
-// METADATA_FILTER). Stays silent for non-PR branch contexts (no Check Run
-// there) and for HARD blocks.
+// Removes queued builds the bridge is responsible for suppressing, and posts
+// the terminal Check Run that replaces them (a "Skipped: …" row, or the
+// republished success of a commit that already passed).
 //
-// Builds the bridge enqueued from an explicit GitHub command (comment,
-// approval, re-run, API) are classified COMMAND by `GateContextResolver`
-// and therefore keep their SOFT filters bypassed here — otherwise this
-// listener would undo every on-demand build the bridge just started.
+// What may be removed is deliberately narrow — see `QueueCleanupPolicy`:
+// only an AUTOMATIC build excluded by one of the scope filters, or an
+// automatic re-build of a commit that already passed. Anything a human, a
+// schedule or a GitHub command started is left alone: "the bridge never
+// removes a build it did not enqueue itself".
 class DraftBuildQueueCleaner(
     buildServer: SBuildServer,
     private val gateContextResolver: GateContextResolver,
-    private val draftCheckRunReporter: DraftCheckRunReporter,
+    private val checkRunReporter: DraftCheckRunReporter,
 ) : BuildServerAdapter() {
 
     init {
@@ -49,15 +52,21 @@ class DraftBuildQueueCleaner(
             config, ctx.branchName, ctx.prNumber, ctx.pr?.draft, ctx.pr?.headRef, ctx.trigger,
             ctx.pr?.title.orEmpty(), ctx.pr?.body.orEmpty(), ctx.pr?.labels.orEmpty(),
         )
-        if (decision == GateDecision.ALLOW) return
+
+        // An automatic re-build of a commit that already passed: drop it and
+        // republish the success it would have reproduced.
+        if (decision == GateDecision.ALLOW) {
+            maybeReuseSuccess(queuedBuild, config, ctx)
+            return
+        }
+        if (!QueueCleanupPolicy.removes(decision, ctx.trigger)) return
 
         val reason = when (decision) {
-            GateDecision.SUPPRESS_HARD -> "BT excluded by GitHub Bridge feature (HARD)"
             GateDecision.SUPPRESS_DRAFT -> "PR is draft; this BuildType has triggerOnPrDraft=false"
             GateDecision.SUPPRESS_BRANCH_PR -> "PR source branch '${ctx.pr?.headRef}' is excluded by the BT's PR branch filter"
             GateDecision.SUPPRESS_BRANCH_NON_PR -> "Branch '${ctx.branchName}' is excluded by the BT's branch filter"
             GateDecision.SUPPRESS_METADATA -> "PR metadata (title/body/labels) excluded by the BT's metadata filter"
-            GateDecision.ALLOW -> error("unreachable")
+            GateDecision.SUPPRESS_HARD, GateDecision.ALLOW -> error("unreachable")
         }
 
         try {
@@ -82,7 +91,7 @@ class DraftBuildQueueCleaner(
         val headSha = promotion.revisions.firstOrNull()?.revision.orEmpty()
         if (headSha.isBlank()) return
         try {
-            draftCheckRunReporter.postSkippedCheckRun(
+            checkRunReporter.postSkippedCheckRun(
                 buildType = buildType,
                 config = config,
                 prNumber = prNumber,
@@ -95,7 +104,70 @@ class DraftBuildQueueCleaner(
         }
     }
 
+    // `skipIfCommitPassed`: this exact commit already passed in this build
+    // configuration, so the queued build would only reproduce a known green.
+    // Automatic triggers only — a manual Run, a GitHub command or a Re-run
+    // means "do it again", and gets to.
+    private fun maybeReuseSuccess(
+        queuedBuild: SQueuedBuild,
+        config: BridgeFeatureConfig,
+        ctx: GateContext,
+    ) {
+        if (!config.skipIfCommitPassed || ctx.trigger != BridgeTrigger.AUTO) return
+        val promotion = queuedBuild.buildPromotion
+        val buildType = promotion.buildType ?: return
+        val headSha = promotion.revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return
+
+        // Same build configuration, same commit, any ref: GitHub keys a Check
+        // Run on (name, sha), so two refs of one commit are one row anyway.
+        val passed = buildType.history.asSequence()
+            .take(HISTORY_SCAN_DEPTH)
+            .firstOrNull { build ->
+                build.buildId != promotion.associatedBuildId &&
+                    build.canceledInfo == null &&
+                    build.buildStatus.isSuccessful &&
+                    build.revisions.any { it.revision == headSha }
+            } ?: return
+
+        try {
+            queuedBuild.removeFromQueue(
+                null,
+                "teamcity-github-bridge: commit $headSha already passed in #${passed.buildNumber}",
+            )
+        } catch (e: Exception) {
+            LOG.warn("removeFromQueue threw for ${buildType.externalId} (reuse of #${passed.buildNumber}): ${e.message}")
+            return
+        }
+        LOG.info("Removed ${buildType.externalId} from queue (${ctx.branchName}): " +
+            "commit $headSha already passed in #${passed.buildNumber}")
+        checkRunReporter.postReusedSuccess(buildType, config, headSha, passed)
+    }
+
     companion object {
         private val LOG = Logger.getInstance(DraftBuildQueueCleaner::class.java.name)
+
+        // How far back to look for a successful build of the same commit.
+        private const val HISTORY_SCAN_DEPTH: Int = 50
+    }
+}
+
+// What the bridge is allowed to take out of the queue. Kept separate (and
+// pure) because two sites must agree on it: the cleaner that removes, and the
+// Check Run publisher that must not post a "Queued" row for a build about to
+// disappear.
+object QueueCleanupPolicy {
+
+    fun removes(decision: GateDecision, trigger: BridgeTrigger): Boolean = when (decision) {
+        // A scope filter excluded this build. Only ever applied to automatic
+        // builds: the gate already answers ALLOW for explicit ones.
+        GateDecision.SUPPRESS_DRAFT,
+        GateDecision.SUPPRESS_BRANCH_PR,
+        GateDecision.SUPPRESS_BRANCH_NON_PR,
+        GateDecision.SUPPRESS_METADATA -> trigger == BridgeTrigger.AUTO
+        // "This build configuration is not part of that path" and the
+        // project-level mute both mean the bridge does not *start* the build —
+        // never that it deletes one somebody else started.
+        GateDecision.SUPPRESS_HARD -> false
+        GateDecision.ALLOW -> false
     }
 }

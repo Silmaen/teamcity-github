@@ -931,6 +931,58 @@ The tag is optional (`prTag.enabled`) and its prefix is configurable
 PR column only shows what the ref says: a `pull/N` build keeps its number, a
 build on a work branch loses it.
 
+## Scenario 25: publication and triggering are two separate switches
+
+**Actor**: an operator configuring a build configuration that should not
+clutter pull requests, or one that should never appear on GitHub at all.
+
+**Expected outcome**: two independent decisions.
+
+| Want | Set |
+|---|---|
+| Reports to GitHub, but the bridge never starts it on a PR (installer, deploy, nightly) | `publishChecks` **on**, `triggerOnPrReady` **off** — invisible until someone (or a schedule) starts it, then fully reported |
+| Never appears on GitHub, whatever happens | `publishChecks` **off** — the build still gets the PR parameters and the `draft`/`ready` tags, it just says nothing |
+| Normal PR check | both **on** (defaults) |
+
+**Publication does not depend on the trigger source.** A build configuration
+that publishes reports a PR event, a VCS trigger, a schedule, a manual Run and
+a GitHub command alike. Only `publishChecks` silences it.
+
+**And the bridge never removes what it did not start.** Unchecking a
+`triggerOn*` flag means "do not trigger this automatically" — a Run, a
+schedule or a VCS trigger goes through untouched. The queue is only ever
+cleaned in two automatic cases: a scope filter excluded the build (draft PR,
+branch list, path filter, PR metadata), or the next scenario.
+
+## Scenario 26: the same commit is queued again after it already passed
+
+**Actor**: a build configuration with **Reuse a passed commit**
+(`skipIfCommitPassed`) checked, and a commit that already went green there —
+e.g. a cascade merge that changed nothing for this configuration, or a PR
+event arriving after the branch build already ran the same commit.
+
+**Expected outcome**: the queued build is removed and the earlier success is
+republished at that commit, so GitHub stays green without spending an agent.
+
+```mermaid
+flowchart TD
+    A["automatic build queued<br/>Build_Linux @ abc123"] --> B{"skipIfCommitPassed?"}
+    B -->|off| R["runs normally"]
+    B -->|on| C{"a successful build of<br/>Build_Linux at abc123?"}
+    C -->|no| R
+    C -->|yes, #87| D["removed from the queue<br/>reason: commit abc123 already passed in #87"]
+    D --> E["Check Run 'Build passed (reused #87)'<br/>details_url -> build #87"]
+```
+
+Matched on the **commit alone**, any ref: a build of `Feature/x` and a build
+of `pull/189` at the same commit are the same Check Run row for GitHub, so
+running both is pure waste.
+
+**Never applied to an explicit request.** A manual Run, a comment command and
+the **Re-run** / **Re-run all checks** buttons mean "do it again", and they
+do. And leave the box **unchecked** for scheduled suites: a nightly on an
+unchanged commit is exactly how environment rot gets caught.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |
@@ -950,6 +1002,8 @@ build on a work branch loses it.
 | API error during draft check | Logged warning | Build allowed (fail-open) |
 | Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
 | Build type not opted in | None | No change |
+| Build configuration with `publishChecks` off | Nothing published, whatever the trigger | Invisible on GitHub; PR parameters and tags still applied |
+| Automatic build of a commit that already passed (`skipIfCommitPassed`) | Removed from the queue, earlier success republished | `Build passed (reused #87)` at the same commit |
 | Trusted collaborator comments the trigger phrase | `PullRequestEventListener.handleCommentCommand` enqueues matching BTs | Builds run; outside commenters are ignored |
 | PR review approved | `handleReviewApproved` enqueues run-on-approval BTs | Gated suites run |
 | Re-run clicked in GitHub Checks UI | `handleRerun` (`ignoreFinished=true`) | Fresh build runs even past a finished one |

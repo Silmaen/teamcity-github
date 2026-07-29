@@ -12,6 +12,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.queue.QueueCleanupPolicy
 import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.messages.Status
 import jetbrains.buildServer.serverSide.BuildPromotion
@@ -166,8 +167,8 @@ class BuildStatusCheckRunPublisher(
         }
 
         val ctx = resolveContext(buildType, promotion.revisions) ?: return
-        if (willBeSuppressed(queuedBuild, promotion, ctx)) {
-            LOG.debug("Skipping queued Check Run for ${ctx.buildType.externalId}; gate says SUPPRESS, cleaner will own the row")
+        if (willBeRemovedFromQueue(queuedBuild, promotion, ctx)) {
+            LOG.debug("Skipping queued Check Run for ${ctx.buildType.externalId}; the cleaner will own this row")
             return
         }
         val request = CheckRunRequest(
@@ -182,18 +183,23 @@ class BuildStatusCheckRunPublisher(
         post(ctx, request, "queued")
     }
 
-    // True iff `DraftBuildQueueCleaner` is going to remove this
-    // queued build (so we should not post the "Queued" Check Run —
-    // the cleaner will post Skipped, or stay silent for non-PR /
-    // HARD-block cases). Mirrors the cleaner's decision via
-    // `BridgeGate.decide`.
-    private fun willBeSuppressed(queuedBuild: SQueuedBuild, promotion: BuildPromotion, ctx: PrBuildContext): Boolean {
+    // True iff `DraftBuildQueueCleaner` is about to remove this queued build,
+    // in which case the "Queued" row would race with the terminal row the
+    // cleaner posts (Skipped, or the republished success). This asks the same
+    // question the cleaner does — it is not a publication policy, which
+    // depends on `publishChecks` alone.
+    private fun willBeRemovedFromQueue(
+        queuedBuild: SQueuedBuild,
+        promotion: BuildPromotion,
+        ctx: PrBuildContext,
+    ): Boolean {
         val gate = gateContextResolver.resolve(promotion, ctx.config, queuedBuild.triggeredBy.isTriggeredByUser)
             ?: return false
-        return BridgeGate.decide(
+        val decision = BridgeGate.decide(
             ctx.config, gate.branchName, gate.prNumber, gate.pr?.draft, gate.pr?.headRef, gate.trigger,
             gate.pr?.title.orEmpty(), gate.pr?.body.orEmpty(), gate.pr?.labels.orEmpty(),
-        ) != GateDecision.ALLOW
+        )
+        return QueueCleanupPolicy.removes(decision, gate.trigger)
     }
 
     private fun publishInProgress(build: SBuild) {
@@ -369,6 +375,9 @@ class BuildStatusCheckRunPublisher(
     private fun resolveContext(buildType: SBuildType?, revisions: List<BuildRevision>): PrBuildContext? {
         if (buildType == null) return null
         val config = BridgeFeatureReader.read(buildType) ?: return null
+        // Publication depends on this flag and on nothing else — not on what
+        // started the build, not on the ref.
+        if (!config.publishChecks) return null
         if (!serverSettings.isRepoAllowed(config.repo.slug)) return null
 
         val headSha = revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
