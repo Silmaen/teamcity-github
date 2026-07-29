@@ -394,12 +394,12 @@ on-demand you must *also* filter it out of the automatic path
 combination works**: the comment/approval enqueue is stamped as an explicit
 command and the queue cleaner no longer undoes it (G11).
 
-**Known limitation:** the plugin does **not** react to
-`pull_request.labeled` or `pull_request.edited`. Adding the `ci-full`
-label (or editing the title) does not by itself trigger anything — the
-label is only *evaluated* at the next `opened` / `synchronize` /
-approval / comment event. Practically: label first, then comment
-`/full` (or push). Tracked as **G1** in the [worklog](tasks/branching-worklog.md).
+**Since 1.8.3 a label is a trigger.** `pull_request.labeled`,
+`unlabeled` and `edited` are handled: adding `ci-full` (or editing the title
+to drop a skip phrase) re-evaluates the commit and enqueues what just became
+eligible. Those actions deliberately post **no** "Skipped" row — the commit
+has not changed, so a skip row would overwrite the result an earlier build
+already published for it.
 
 **Note on comment triggers:** they fire on
 `pull_request_review_comment` (inline comments on the diff), not on the
@@ -447,9 +447,10 @@ because a human is watching it".
 ### F8 — A PR build goes red
 
 **Trigger:** A2 fails.
-**GitHub:** `conclusion=failure`; the Check Run's `output.text` carries
-the build's failure reasons, and `details_url` deep-links to the
-TeamCity build page. (Line-level annotations are not emitted yet.)
+**GitHub:** `conclusion=failure`; the Check Run's `output.text` carries the
+build's failure reasons, `details_url` deep-links to the TeamCity build page,
+and since 1.8.3 the compiler diagnostics are **annotated on the lines of the
+diff** that produced them (`checkRun.annotations`).
 **Recovery paths:**
 1. Push a fix ⇒ F4.
 2. Click **Re-run** on the Check Run ⇒ `check_run.rerequested`, the
@@ -875,10 +876,11 @@ Two things follow:
   publishing the legacy `teamcity.pullRequest.*` parameter names is
   collision-free, and existing build scripts keep working. That flag exists
   precisely for this transition.
-- **Surface the conflict.** A build configuration carrying both features is
-  a misconfiguration: one `WARN` log line per buildType per server start,
-  plus a self-test row on the admin page listing the offenders. No
-  behaviour change. Tracked as **G15** in the [worklog](tasks/branching-worklog.md).
+- **The conflict is surfaced (since 1.8.3).** A build configuration carrying
+  both features gets a `WARN` line at server startup and a **Single status
+  publisher** row in the admin page's self-tests, listing the offenders. Both
+  read the *resolved* feature set, so a publisher inherited from a template is
+  caught. No behaviour change: the plugin tells, it does not act.
 - **Document it for users, not just here.** The requirement now appears in
   the user-facing docs — [quickstart.md](quickstart.md) step 4 (removing the
   bundled feature is part of opting a build configuration in),
