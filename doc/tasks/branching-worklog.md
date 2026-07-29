@@ -32,7 +32,8 @@ into rules; §9 keeps the short audit trail.
 | 2026-07-28 | QA hand-off | QA wants **a reference to a set of builds** (and artefacts), reachable from GitHub; they have GitHub access. | R15 |
 | 2026-07-28 | Red long-life branch | The **PR author** investigates. | ~~R16~~ |
 | 2026-07-29 | Red long-life branch (revised) | **Out of scope**: TeamCity's *investigation auto-assignment* already routes a broken protected-branch build to whoever caused it. G17 is dropped — it would duplicate a mechanism TeamCity does better, at the cost of a GitHub call per failing branch build. | — |
-| 2026-07-28 | CI cost | No hard ceiling, but the per-PR task set is deliberately limited. | R17 |
+| 2026-07-28 | CI cost | No hard ceiling, but the per-PR task set is deliberately limited. | ~~R17~~ |
+| 2026-07-29 | CI cost (revised) | **Out of scope**: the bridge does not manage per-PR queue load. Choosing how many tasks a PR runs is a TeamCity configuration decision; the plugin's filters (label, path, metadata) exist to express *scope*, not to police cost. | — |
 | 2026-07-28 | `Experiment/*` branches | Trigger **nothing** automatically, must stay **manually startable** — with or without a PR. | R6 |
 | 2026-07-28 | `Feature/*` / `Bugfix/*` without PR | Must be **buildable before any PR exists**. | R7 |
 | 2026-07-28 | Long-life branches | Some pipelines on **push**, others **scheduled**; both on the same branch. | R11 |

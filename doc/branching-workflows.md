@@ -122,7 +122,7 @@ Rules taken as given:
 | R14 | **One single set of required checks** for this project — no per-target-branch variation. Other deployments may differ. |
 | R15 | **QA is a reviewer, not a gate.** QA has no formal status in GitHub today; findings are tracked in an external bug tracker. What QA needs from us is a **reference to a set of builds** (and their artefacts), not a blocking check. |
 | ~~R16~~ | ~~A `<long-life branch>` turned red by a merge is the PR author's responsibility to investigate.~~ **Out of scope (2026-07-29):** TeamCity already does this with its **investigation auto-assignment**. The number is kept so the other cross-references stay valid. |
-| R17 | No hard CI cost ceiling, but the **set of tasks per PR is deliberately limited** to keep CI load reasonable. |
+| ~~R17~~ | ~~No hard CI cost ceiling, but the set of tasks per PR is deliberately limited to keep CI load reasonable.~~ **Out of scope (2026-07-29):** how much CI a pull request costs is not this plugin's concern — it triggers what it is told to trigger. Number kept so the others stay stable. |
 | R18 | What we validate is the **source branch**, not GitHub's merge preview. The merge-preview ref (`refs/pull/*/merge`) has never been used here — builds have always been of the branch as it stands. |
 | R19 | Consequently, the target model is **branch-source builds**: the bridge builds and reports on the real branch ref (`Feature/toto`), not on a synthetic `pull/N` ref. Decided 2026-07-28, shipped in 1.8.3 (F28). |
 
@@ -164,8 +164,6 @@ Consequences that shape everything below:
   Check Run, but **discoverability** — from GitHub, reach the set of builds
   and artefacts for a ref. See F17 and F26, which were rewritten around
   this answer.
-- R17 means filtering (F5, F6) is about *keeping the per-PR task set small
-  and deliberate*, not about chasing a budget.
 
 > **Still open:** only the pre-PR build policy (R7 — on demand or automatic,
 > see F1), and F28 largely settles it too: with branch-source builds the PR
@@ -375,7 +373,10 @@ TeamCity's own queue optimiser already handles part of it.
 
 ### F5 — Expensive suite kept out of the default path
 
-Three mechanisms, combinable, for A3:
+How many tasks a pull request runs is a TeamCity configuration decision
+(former R17, out of scope): the bridge does not manage queue load. What it
+does provide is a way to express **scope** — "this suite is not part of the
+default check set, ask for it" — through three combinable mechanisms for A3:
 
 | Mechanism | Config | How a dev asks for it |
 |---|---|---|
@@ -414,8 +415,9 @@ dropped before enqueue.
 **GitHub:** **"Skipped: paths out of scope"**.
 **Config:** e.g. A2 `pathFilter=+:src/**`, doc-only BT `+:doc/**`.
 **Caution:** path filtering **fails open** (token failure or empty file
-list ⇒ everything runs) — intentional, but it means path filters are a
-cost optimisation, never a security boundary.
+list ⇒ everything runs) — intentional, but it means a path filter expresses
+*scope*, never a guarantee: not a security boundary, and not a cost control
+you can rely on.
 
 ### F7 — PR that targets a `Release/*` branch instead of the default branch
 
