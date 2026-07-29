@@ -726,11 +726,12 @@ when it sees a build configuration carrying both features — in the log and
 in the admin page's self-tests — and then get on with its job. Acting on
 that warning is up to you.
 
-> **Status:** the warning itself is planned, not shipped yet (see
-> [roadmap.md](roadmap.md#item-4---warn-when-the-bundled-commitstatuspublisher-is-also-active)).
-> Until it lands, the check is manual: look at the Build Features tab of
-> each opted-in build configuration, or watch for duplicate rows on a PR
-> ([troubleshooting.md](troubleshooting.md#symptom-pr-shows-two-teamcity-entries-commit-status--check-run)).
+> **Since 1.9.0 the plugin tells you.** A `WARN` line at server startup lists
+> the build configurations carrying both producers, and the admin page's
+> self-tests show a **Single status publisher** row. Both read the *resolved*
+> feature set, so a publisher inherited from a BuildType template is caught
+> too. Symptom-side troubleshooting:
+> [troubleshooting.md](troubleshooting.md#symptom-pr-shows-two-teamcity-entries-commit-status--check-run).
 
 ## Validation
 

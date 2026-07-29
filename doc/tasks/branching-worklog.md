@@ -72,7 +72,7 @@ Status values: `open` · `in progress` · **`done (x.y.z)`** · `dropped` ·
 | G16 | "Build the branch only while it has no PR" | **superseded** | G18 shipped: there is no second ref left to deduplicate. | — |
 | G6 | Post an arbitrary Check Run from outside | **dropped** | R15: no external QA tooling — the deployment is a TeamCity build. Revisit only if a non-TeamCity system must report. | — |
 | G17 | Name the merged PR on a red long-life build | **dropped** | Would have published the merged PR + its author on a failing `<long-life branch>` build, to give R16 tooling. Dropped 2026-07-29: TeamCity's investigation auto-assignment already does the routing, better and without a GitHub call per failing build. | — |
-| G15 | Warn on a double status publisher | open | R10 / F24 is documented for users but nothing detects it. One `WARN` per build configuration per server start + a self-test row, read from `resolvedSettings` so template-inherited publishers are caught. **Warn only, never act** (roadmap Item 4). Small. | — |
+| G15 | Warn on a double status publisher | **done (1.8.3)** | A `WARN` at server startup listing the offenders + a **Single status publisher** self-test row, read from `resolvedSettings` so template-inherited publishers are caught. Warn only, never act. | `BundledPublisherDetector`, `PublisherConflictReporter`, `PluginSelfTester` |
 | G1 | `pull_request.labeled` / `unlabeled` | open | Labels are a *filter*, never a *trigger*: adding `ci-full` does nothing until the next push/comment/approval (F5). Handle `labeled` and re-evaluate candidates. Small. | — |
 | G3 | `pull_request.edited` | open | Editing the title to add/remove `[skip ci]` or a require-phrase has no effect until the next event. Same shape as G1. Small. | — |
 | G4 | `pull_request.reopened` | open | A reopened PR gets no fresh build until the next push. Add the action to `PrAction`. Small. | — |
@@ -128,11 +128,9 @@ row here is complete.
 The batch above closed the agreed sequence. What remains, in the order the
 scenarios argue for:
 
-1. **G15** — warn when a build configuration carries both the bridge and the
-   bundled `commitStatusPublisher` (R10 is documented, not yet detected).
-2. **G1 / G3 / G4** — react to `labeled`, `edited`, `reopened`, so a label is
+1. **G1 / G3 / G4** — react to `labeled`, `edited`, `reopened`, so a label is
    a trigger and not only a filter.
-3. **G10** — line-level Check Run annotations.
+2. **G10** — line-level Check Run annotations.
 
 Still open as a *decision*: the pre-PR build policy of F1 — but with G18
 shipped, "automatic on push" no longer costs a second build, so the

@@ -8,6 +8,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The plugin warns when two status publishers are active on one build
+  configuration** (G15). A `WARN` line at server startup lists the build
+  configurations carrying both this feature and TeamCity's bundled *Commit
+  status publisher*, and the admin page's self-tests grow a **Single status
+  publisher** row (WARN, never FAIL). Both read the *resolved* feature set, so
+  a publisher inherited from a BuildType template is caught too. The plugin
+  still never disables anything — see
+  [configuration.md](doc/configuration.md#choosing-the-right-setup).
+
 - **Queue cleanup is switchable off server-wide** (`queueCleanup.enabled`,
   admin page, default on): everything that takes a build *out* of the queue —
   draft suppression, the scope filters, `skipIfCommitPassed`, the drain of a
