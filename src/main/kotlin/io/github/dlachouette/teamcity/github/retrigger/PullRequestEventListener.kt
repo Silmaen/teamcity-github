@@ -441,6 +441,10 @@ class PullRequestEventListener(
     // across all candidate BTs, so closing a PR mid-build stops burning
     // agent minutes. Honours dry-run.
     private fun cancelQueuedForClosedPr(payload: PrEventPayload) {
+        if (!serverSettings.queueCleanupEnabled()) {
+            LOG.info("Queue cleanup is disabled server-wide; leaving builds queued for ${payload.repo.slug}#${payload.prNumber}")
+            return
+        }
         val verb = if (payload.merged) "merged" else "closed"
         val candidates = findCandidateBuildTypes(payload.repo)
         var removed = 0

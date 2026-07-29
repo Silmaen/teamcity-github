@@ -21,7 +21,7 @@ class QueueCleanupPolicyTest {
     @Test
     fun `an automatic build excluded by a scope filter is removed`() {
         filters.forEach {
-            assertTrue(QueueCleanupPolicy.removes(it, BridgeTrigger.AUTO), "decision=$it")
+            assertTrue(QueueCleanupPolicy.removes(it, BridgeTrigger.AUTO, cleanupEnabled = true), "decision=$it")
         }
     }
 
@@ -30,7 +30,7 @@ class QueueCleanupPolicyTest {
         filters.forEach { decision ->
             listOf(BridgeTrigger.MANUAL, BridgeTrigger.COMMAND).forEach { trigger ->
                 assertFalse(
-                    QueueCleanupPolicy.removes(decision, trigger),
+                    QueueCleanupPolicy.removes(decision, trigger, cleanupEnabled = true),
                     "decision=$decision trigger=$trigger",
                 )
             }
@@ -42,14 +42,28 @@ class QueueCleanupPolicyTest {
         // "Not part of that path" and the project-level mute mean the bridge
         // does not *start* the build — not that it deletes one.
         BridgeTrigger.entries.forEach { trigger ->
-            assertFalse(QueueCleanupPolicy.removes(GateDecision.SUPPRESS_HARD, trigger), "trigger=$trigger")
+            assertFalse(QueueCleanupPolicy.removes(GateDecision.SUPPRESS_HARD, trigger, cleanupEnabled = true), "trigger=$trigger")
         }
     }
 
     @Test
     fun `an allowed build is left alone`() {
         BridgeTrigger.entries.forEach { trigger ->
-            assertFalse(QueueCleanupPolicy.removes(GateDecision.ALLOW, trigger), "trigger=$trigger")
+            assertFalse(QueueCleanupPolicy.removes(GateDecision.ALLOW, trigger, cleanupEnabled = true), "trigger=$trigger")
+        }
+    }
+
+    @Test
+    fun `the server-wide switch overrides everything`() {
+        // Off: the bridge adds builds and reports on them, and never takes one
+        // out of the queue — whatever the gate decided.
+        GateDecision.entries.forEach { decision ->
+            BridgeTrigger.entries.forEach { trigger ->
+                assertFalse(
+                    QueueCleanupPolicy.removes(decision, trigger, cleanupEnabled = false),
+                    "decision=$decision trigger=$trigger",
+                )
+            }
         }
     }
 }

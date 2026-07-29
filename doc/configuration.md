@@ -111,6 +111,7 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 | `legacyAliases.enabled` | `false` | Publish legacy `teamcity.pullRequest.*` aliases | Also publish the bundled feature's variable names alongside the `teamcity.github.bridge.pullRequest.*` ones. |
 | `prComment.enabled` | `false` | Sticky PR summary comment | Post/update a summary comment on the PR thread. Needs the App's pull-requests/issues **write** permission, hence off by default. |
 | `checkRun.artifactLinks` | `true` | List artifacts in the Check Run and PR comment | Add an **Artifacts** section (top-level artifact files, capped at 10) to the completed Check Run and an `[artifacts]` link to each row of the sticky comment, so a reviewer or a tester reaches the installer/package straight from the PR. Costs one local artifact listing per finished build; no GitHub call. |
+| `queueCleanup.enabled` | `true` | Queue cleanup | Master switch for everything that takes a build **out** of the queue: draft suppression, the scope filters, `skipIfCommitPassed` and the drain of a closed PR. Off = the bridge only ever *adds* builds and reports on them; it never removes nor holds one, whatever the gate decided. Only ever applied to build configurations carrying the build feature (see the scope invariant above). |
 | `prTag.enabled` | `true` | Tag PR builds with their PR number | Persist the PR number as a build tag, so a build stays findable by PR long after it ran — it is what the **Branches & PRs** project tab and TeamCity's own tag filter search on. Turn it off to keep the tag list clean; the PR column then falls back to what the ref says (`pull/N` yes, a work branch no). |
 | `rerunAll.onlyFailed` | `false` | "Re-run all checks" re-runs only the failed ones | Restrict `check_suite.rerequested` (the GitHub **Re-run all checks** button) to build configurations whose last build at that commit **failed**. Off = re-run every opted-in build configuration, which is what the button says. A configuration that never ran at that commit has no failure to re-run and is left alone either way. |
 | `branchPrLookup.enabled` | `true` | Attach branch builds to their PR | For a build launched on a plain branch ref (not a `pull/N` ref), resolve the pull request from the built commit (`GET /commits/{sha}/pulls`) so the build gets the PR parameters, the `draft`/`ready` tag and the summary comment. Only **open** PRs whose **head** is that exact commit qualify; the answer (including "no PR") is cached for the PR-info TTL. Off = branch builds stay strictly PR-unaware. |
@@ -354,6 +355,19 @@ The feature exposes per-task fields along **two independent axes**:
 The bridge takes a build out of the queue in exactly two cases, both automatic:
 a scope filter excluded it (draft PR, branch list, path filter, PR metadata), or
 `skipIfCommitPassed` found the same commit already green.
+
+> **Queue cleanup can be switched off server-wide** with the
+> `queueCleanup.enabled` flag on the admin page — the bridge then only adds
+> builds and reports on them.
+>
+> **And it never leaves the opted-in set.** A build configuration is
+> only ever touched when it carries this build feature — directly or inherited
+> from a BuildType template — **and** its project chain provides
+> `teamcity.github.bridge.repo` + `connectionId`. A build configuration
+> without the feature is invisible to the cleanup, whatever the branch, the
+> trigger or the server settings. Publication is not part of that decision:
+> `publishChecks=false` silences GitHub reporting, it does not exempt the
+> configuration's automatic builds from its own trigger filters.
 
 | Feature param | Kind | Default | Feature-form field | Purpose |
 |---|---|---|---|---|

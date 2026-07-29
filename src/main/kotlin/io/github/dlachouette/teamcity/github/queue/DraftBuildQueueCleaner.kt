@@ -1,6 +1,7 @@
 package io.github.dlachouette.teamcity.github.queue
 
 import com.intellij.openapi.diagnostic.Logger
+import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
@@ -27,6 +28,7 @@ class DraftBuildQueueCleaner(
     buildServer: SBuildServer,
     private val gateContextResolver: GateContextResolver,
     private val checkRunReporter: DraftCheckRunReporter,
+    private val serverSettings: BridgeServerSettings,
 ) : BuildServerAdapter() {
 
     init {
@@ -42,6 +44,7 @@ class DraftBuildQueueCleaner(
     }
 
     private fun maybeRemove(queuedBuild: SQueuedBuild) {
+        if (!serverSettings.queueCleanupEnabled()) return
         val promotion = queuedBuild.buildPromotion
         val buildType = promotion.buildType ?: return
         val config = BridgeFeatureReader.read(buildType) ?: return
@@ -59,7 +62,7 @@ class DraftBuildQueueCleaner(
             maybeReuseSuccess(queuedBuild, config, ctx)
             return
         }
-        if (!QueueCleanupPolicy.removes(decision, ctx.trigger)) return
+        if (!QueueCleanupPolicy.removes(decision, ctx.trigger, cleanupEnabled = true)) return
 
         val reason = when (decision) {
             GateDecision.SUPPRESS_DRAFT -> "PR is draft; this BuildType has triggerOnPrDraft=false"
@@ -155,9 +158,32 @@ class DraftBuildQueueCleaner(
 // pure) because two sites must agree on it: the cleaner that removes, and the
 // Check Run publisher that must not post a "Queued" row for a build about to
 // disappear.
+//
+// SCOPE INVARIANT — do not weaken. Queue cleanup only ever touches a build
+// configuration that carries the **GitHub Bridge integration** build feature
+// (directly or inherited from a BuildType template) *and* whose project chain
+// provides `repo` + `connectionId`. Every removal site therefore opens with
+//
+//     val config = BridgeFeatureReader.read(buildType) ?: return
+//
+// so a build configuration that has not opted in is untouchable, whatever the
+// branch, the trigger or the settings. There are exactly three such sites:
+// this cleaner, `DraftAwareBuildFilter` (which holds rather than removes) and
+// `PullRequestEventListener.cancelQueuedForClosedPr`.
+//
+// Publication (`publishChecks`) is deliberately NOT part of this: silencing a
+// build configuration on GitHub does not change which of its automatic builds
+// the bridge is allowed to drop.
 object QueueCleanupPolicy {
 
-    fun removes(decision: GateDecision, trigger: BridgeTrigger): Boolean = when (decision) {
+    fun removes(decision: GateDecision, trigger: BridgeTrigger, cleanupEnabled: Boolean): Boolean {
+        // Server-wide master switch: when off the bridge never removes nor
+        // holds a build, whatever the gate says.
+        if (!cleanupEnabled) return false
+        return removesWhenEnabled(decision, trigger)
+    }
+
+    private fun removesWhenEnabled(decision: GateDecision, trigger: BridgeTrigger): Boolean = when (decision) {
         // A scope filter excluded this build. Only ever applied to automatic
         // builds: the gate already answers ALLOW for explicit ones.
         GateDecision.SUPPRESS_DRAFT,

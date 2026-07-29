@@ -81,6 +81,14 @@ class BridgeServerSettings(
     // artifact listing per finished build.
     fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
 
+    // Master switch for everything that takes a build OUT of the queue:
+    // draft suppression, the scope filters, the already-passed reuse and the
+    // drain of a closed PR. Off = the bridge only ever adds builds and reports
+    // on them; it never removes or holds one. On by default (draft
+    // suppression is a headline feature), but an operator who wants the plugin
+    // to keep its hands off the queue gets one checkbox.
+    fun queueCleanupEnabled(): Boolean = boolSetting(KEY_QUEUE_CLEANUP, true)
+
     // Tag every PR build with its PR number, so a build stays findable by PR
     // long after it ran — that is what the Branches & PRs tab and TeamCity's
     // own tag filter key on. On by default; turn it off to keep the tag list
@@ -153,6 +161,7 @@ class BridgeServerSettings(
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
                 "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
+                "queueCleanup=${queueCleanupEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -192,6 +201,7 @@ class BridgeServerSettings(
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
+        const val KEY_QUEUE_CLEANUP: String = "queueCleanup.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"
         const val DEFAULT_PR_TAG_PREFIX: String = "pr-"

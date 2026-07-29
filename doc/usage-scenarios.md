@@ -954,6 +954,13 @@ schedule or a VCS trigger goes through untouched. The queue is only ever
 cleaned in two automatic cases: a scope filter excluded the build (draft PR,
 branch list, path filter, PR metadata), or the next scenario.
 
+Two more guarantees about queue cleanup, both worth knowing before rollout:
+it only ever touches a build configuration that **carries this build
+feature** (and whose project provides `repo` + `connectionId`) — anything
+else is invisible to it; and it can be switched **off server-wide** with the
+**Queue cleanup** flag on the admin page, after which the bridge only adds
+builds and reports on them.
+
 ## Scenario 26: the same commit is queued again after it already passed
 
 **Actor**: a build configuration with **Reuse a passed commit**
