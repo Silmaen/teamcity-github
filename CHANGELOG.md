@@ -49,8 +49,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   queued, running and the last 30 finished per build configuration — with
   both keys on every row (branch **and** PR number), searchable by either
   (`189`, `#189`, `Feature/`) and sortable by time, branch or PR. The PR
-  number is persisted as a `pr-<n>` build tag, so the page costs no GitHub
-  API call and TeamCity's own tag filter finds it too. Builds that ran on a
+  number is persisted as a build tag (`pr-189` by default), so the page costs
+  no GitHub API call and TeamCity's own tag filter finds it too. The tag is
+  optional (`prTag.enabled`) and its prefix is configurable
+  (`prTag.prefix`). Builds that ran on a
   work branch **before** its PR existed are back-filled with that tag (and
   with `draft`/`ready`) when the PR is opened.
 

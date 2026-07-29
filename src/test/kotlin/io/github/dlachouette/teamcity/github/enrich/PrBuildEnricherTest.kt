@@ -24,39 +24,60 @@ class PrBuildEnricherTest {
 
     @Test
     fun `adds the draft state and the PR tag for a draft PR`() {
-        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = true))
+        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = true), prTag = "pr-7")
         assertEquals(listOf("draft", "pr-7"), plan.tagsToAdd)
     }
 
     @Test
     fun `adds the ready state and the PR tag for a non-draft PR`() {
-        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false))
+        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false), prTag = "pr-7")
         assertEquals(listOf("ready", "pr-7"), plan.tagsToAdd)
     }
 
     @Test
+    fun `applies only the state tag when PR tagging is disabled`() {
+        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false), prTag = null)
+        assertEquals(listOf("ready"), plan.tagsToAdd)
+    }
+
+    @Test
+    fun `honours a custom PR tag prefix`() {
+        val plan = PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false), prTag = "PR#7")
+        assertEquals(listOf("ready", "PR#7"), plan.tagsToAdd)
+    }
+
+    @Test
     fun `does not duplicate tags that are already present`() {
-        assertTrue(PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = true)).tagsToAdd.isEmpty())
+        assertTrue(
+            PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = true), prTag = "pr-7")
+                .tagsToAdd.isEmpty()
+        )
         // A build tagged during the draft phase only needs the state update.
         assertEquals(
             listOf("ready"),
-            PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = false)).tagsToAdd,
+            PrBuildEnricher.computePlan("42", listOf("draft", "pr-7"), pr(draft = false), prTag = "pr-7").tagsToAdd,
         )
     }
 
     // The PR tag is what makes a build findable by PR number without asking
     // GitHub anything (G12) — including on a plain branch ref.
     @Test
-    fun `the PR tag round-trips`() {
-        assertEquals("pr-189", PrBuildEnricher.prTag(189))
-        assertEquals(189, PrBuildEnricher.prNumberFromTag("pr-189"))
+    fun `the PR tag round-trips through any prefix`() {
+        listOf("pr-", "PR#", "github-pr-").forEach { prefix ->
+            val tag = PrBuildEnricher.prTag(prefix, 189)
+            assertEquals(189, PrBuildEnricher.prNumberFromTag(tag, prefix), "prefix=$prefix")
+        }
     }
 
     @Test
     fun `only a well-formed PR tag is read back`() {
         listOf("pr-", "pr-x", "pr-0", "pr--1", "draft", "ready", "prime", "PR-7").forEach {
-            assertNull(PrBuildEnricher.prNumberFromTag(it), "tag=$it")
+            assertNull(PrBuildEnricher.prNumberFromTag(it, "pr-"), "tag=$it")
         }
+        // A tag written with another prefix is not ours to read.
+        assertNull(PrBuildEnricher.prNumberFromTag("pr-189", "PR#"))
+        // An empty prefix would match every numeric tag: refuse it.
+        assertNull(PrBuildEnricher.prNumberFromTag("189", ""))
     }
 
     @Test

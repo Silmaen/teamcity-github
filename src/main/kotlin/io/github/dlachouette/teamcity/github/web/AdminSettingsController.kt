@@ -152,6 +152,8 @@ class AdminSettingsController(
             putBool(BridgeServerSettings.KEY_BRANCH_PR_LOOKUP, request.getParameter("branchPrLookup") != null)
             putBool(BridgeServerSettings.KEY_RERUN_ONLY_FAILED, request.getParameter("rerunAllOnlyFailed") != null)
             putBool(BridgeServerSettings.KEY_ARTIFACT_LINKS, request.getParameter("artifactLinks") != null)
+            putBool(BridgeServerSettings.KEY_PR_TAG_ENABLED, request.getParameter("prTag") != null)
+            put(BridgeServerSettings.KEY_PR_TAG_PREFIX, request.getParameter("prTagPrefix"))
 
             serverSettings.applyTo(gitHubClient, prInfoCache)
             LOG.info("GitHub Bridge server settings updated by ${user.username}")
