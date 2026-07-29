@@ -324,6 +324,8 @@
                     <label style="display:block;"><input type="checkbox" name="branchPrLookup" <c:if test="${set_branchPrLookup}">checked</c:if>/> Attach branch builds to their PR <span style="color:#888;">(look the PR up from the built commit, for builds launched on a plain branch)</span></label>
                     <label style="display:block;"><input type="checkbox" name="rerunAllOnlyFailed" <c:if test="${set_rerunAllOnlyFailed}">checked</c:if>/> "Re-run all checks" re-runs only the failed ones <span style="color:#888;">(off = re-run every opted-in build configuration for that commit)</span></label>
                     <label style="display:block;"><input type="checkbox" name="artifactLinks" <c:if test="${set_artifactLinks}">checked</c:if>/> List artifacts in the Check Run and PR comment <span style="color:#888;">(one click from the PR to the installer/package)</span></label>
+                    <label style="display:block;"><input type="checkbox" name="prTag" <c:if test="${set_prTag}">checked</c:if>/> Tag PR builds with their PR number <span style="color:#888;">(what the "Branches &amp; PRs" project tab and TeamCity's tag filter search on)</span></label>
+                    <label style="display:block; margin-left:1.6em;">PR tag prefix: <input type="text" name="prTagPrefix" size="10" value="<c:out value="${set_prTagPrefix}"/>"/> <span style="color:#888;">(default <code>pr-</code>, giving <code>pr-189</code>; no spaces)</span></label>
                 </td>
             </tr>
             <tr>

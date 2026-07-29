@@ -81,6 +81,19 @@ class BridgeServerSettings(
     // artifact listing per finished build.
     fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
 
+    // Tag every PR build with its PR number, so a build stays findable by PR
+    // long after it ran — that is what the Branches & PRs tab and TeamCity's
+    // own tag filter key on. On by default; turn it off to keep the tag list
+    // clean, at the cost of the PR column falling back to what the ref says.
+    fun prTagEnabled(): Boolean = boolSetting(KEY_PR_TAG_ENABLED, true)
+
+    // Prefix of that tag. Configurable because tags are shared with whatever
+    // else a team puts there; blank or whitespace-only falls back to the
+    // default rather than producing a bare number.
+    fun prTagPrefix(): String =
+        storage.get(KEY_PR_TAG_PREFIX)?.trim()?.takeIf { it.isNotEmpty() && !it.contains(' ') }
+            ?: DEFAULT_PR_TAG_PREFIX
+
     // Bearer token for the external API. null = API disabled. Stored
     // separately (set/cleared from its own admin form) so a bulk settings
     // save never clears it.
@@ -139,6 +152,7 @@ class BridgeServerSettings(
                 "dryRun=${dryRun()}, metrics=${metricsEnabled()}, legacyAliases=${legacyAliasesEnabled()}, " +
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
+                "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -178,6 +192,9 @@ class BridgeServerSettings(
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
+        const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
+        const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"
+        const val DEFAULT_PR_TAG_PREFIX: String = "pr-"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"
         const val DEFAULT_COMMENT_ASSOCIATIONS: String = "OWNER,MEMBER,COLLABORATOR"

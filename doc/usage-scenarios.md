@@ -898,6 +898,39 @@ restricted to build configurations whose last build at that commit failed.
 > `check_suite` as a missing event — add it in the App's webhook settings,
 > otherwise the "Re-run all checks" button stays silent.
 
+## Scenario 24: finding the builds of a branch — or of a PR
+
+**Actor**: anyone opening the project's **Branches & PRs** tab (v1.9.0+).
+
+**Expected outcome**: one list of the bridge's builds — queued, running and
+the last 30 finished per build configuration — each row carrying **both**
+keys: the branch it ran on and the PR it belongs to. Typing `Feature/` finds
+a branch; typing `189` or `#189` finds a pull request; the columns sort by
+time, branch or PR.
+
+```
++------------------+------+---------------------+--------+--------------+-----------+
+| Branch           | PR   | Build configuration | Build  | State        | Artifacts |
++------------------+------+---------------------+--------+--------------+-----------+
+| Feature/raycast  | #189 | Build_Linux         | 87     | Build passed | artifacts |
+|   [ready]        |      |                     |        |              |           |
+| Feature/raycast  | #189 | Build_Windows       | queued | Queued       |           |
+| master           |      | Nightly_All         | 86     | Build passed | artifacts |
++------------------+------+---------------------+--------+--------------+-----------+
+```
+
+**How the PR column is filled**: from the build's **PR tag** (`pr-189` by
+default), which the plugin writes when the build runs and back-fills on
+`pull_request.opened` for builds that ran *before* the PR existed. A
+`pull/N` ref supplies the number on its own. No GitHub API call is made to
+render the page.
+
+The tag is optional (`prTag.enabled`) and its prefix is configurable
+(`prTag.prefix`) — see
+[configuration.md](configuration.md#feature-flags). With tagging off, the
+PR column only shows what the ref says: a `pull/N` build keeps its number, a
+build on a work branch loses it.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |

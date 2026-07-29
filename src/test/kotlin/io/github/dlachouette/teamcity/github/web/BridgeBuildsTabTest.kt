@@ -31,19 +31,33 @@ class BridgeBuildsTabTest {
 
     @Test
     fun `the PR tag wins over the ref, so branch builds are keyed too`() {
-        assertEquals(189, BridgeBuildsTab.prNumberOf("Feature/x", listOf("ready", "pr-189")))
-        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", emptyList()))
+        assertEquals(189, BridgeBuildsTab.prNumberOf("Feature/x", listOf("ready", "pr-189"), "pr-"))
+        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", emptyList(), "pr-"))
         // The tag is authoritative: a `pull/N` build tagged by the enricher
         // agrees with its ref anyway.
-        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", listOf("pr-7")))
+        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", listOf("pr-7"), "pr-"))
+    }
+
+    @Test
+    fun `a custom prefix is honoured, the default one is then ignored`() {
+        assertEquals(189, BridgeBuildsTab.prNumberOf("Feature/x", listOf("PR#189"), "PR#"))
+        assertNull(BridgeBuildsTab.prNumberOf("Feature/x", listOf("pr-189"), "PR#"))
+    }
+
+    @Test
+    fun `with PR tagging off the ref is the only key left`() {
+        // Empty prefix = disabled: a tagged branch build loses its PR column,
+        // a pull ref keeps it.
+        assertNull(BridgeBuildsTab.prNumberOf("Feature/x", listOf("pr-189"), ""))
+        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", listOf("pr-7"), ""))
     }
 
     @Test
     fun `a plain branch build with no PR has no PR key`() {
-        assertNull(BridgeBuildsTab.prNumberOf("master", listOf("ready")))
-        assertNull(BridgeBuildsTab.prNumberOf(null, emptyList()))
+        assertNull(BridgeBuildsTab.prNumberOf("master", listOf("ready"), "pr-"))
+        assertNull(BridgeBuildsTab.prNumberOf(null, emptyList(), "pr-"))
         // Not a PR tag.
-        assertNull(BridgeBuildsTab.prNumberOf("master", listOf("pr-", "pr-x", "prefixed")))
+        assertNull(BridgeBuildsTab.prNumberOf("master", listOf("pr-", "pr-x", "prefixed"), "pr-"))
     }
 
     @Test

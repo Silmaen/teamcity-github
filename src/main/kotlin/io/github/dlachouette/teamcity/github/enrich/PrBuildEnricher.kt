@@ -65,7 +65,12 @@ class PrBuildEnricher(
             return
         }
 
-        val plan = computePlan(build.buildNumber, build.tags, pr)
+        val plan = computePlan(
+            currentBuildNumber = build.buildNumber,
+            currentTags = build.tags,
+            pr = pr,
+            prTag = prTagFor(serverSettings, pr.number),
+        )
         plan.newBuildNumber?.let { build.buildNumber = it }
         if (plan.tagsToAdd.isNotEmpty()) {
             build.setTags(build.tags + plan.tagsToAdd)
@@ -82,8 +87,10 @@ class PrBuildEnricher(
             currentBuildNumber: String?,
             currentTags: List<String>,
             pr: PrInfo,
+            // null = PR tagging disabled; only the state tag is applied.
+            prTag: String? = null,
         ): EnrichmentPlan {
-            val wanted = listOf(if (pr.draft) TAG_DRAFT else TAG_READY, prTag(pr.number))
+            val wanted = listOfNotNull(if (pr.draft) TAG_DRAFT else TAG_READY, prTag)
             val tagsToAdd = wanted.filterNot { currentTags.contains(it) }
 
             val newBuildNumber = currentBuildNumber
@@ -95,17 +102,21 @@ class PrBuildEnricher(
 
         // The PR number, persisted as a build tag: it survives the build,
         // costs no API call to read back, is searchable with TeamCity's own
-        // tag filter, and is what the branch/PR view keys on.
-        fun prTag(prNumber: Int): String = "$TAG_PR_PREFIX$prNumber"
+        // tag filter, and is what the branch/PR view keys on. Optional, and
+        // the prefix is the operator's choice.
+        fun prTag(prefix: String, prNumber: Int): String = "$prefix$prNumber"
 
-        // The PR number a `pr-189` tag encodes, or null for any other tag.
-        fun prNumberFromTag(tag: String): Int? =
-            tag.takeIf { it.startsWith(TAG_PR_PREFIX) }
-                ?.removePrefix(TAG_PR_PREFIX)?.toIntOrNull()?.takeIf { it > 0 }
+        // Convenience for the call sites that hold the settings.
+        fun prTagFor(settings: BridgeServerSettings, prNumber: Int): String? =
+            if (settings.prTagEnabled()) prTag(settings.prTagPrefix(), prNumber) else null
+
+        // The PR number a `<prefix><n>` tag encodes, or null for any other tag.
+        fun prNumberFromTag(tag: String, prefix: String): Int? =
+            tag.takeIf { prefix.isNotEmpty() && it.startsWith(prefix) }
+                ?.removePrefix(prefix)?.toIntOrNull()?.takeIf { it > 0 }
 
         const val TAG_DRAFT: String = "draft"
         const val TAG_READY: String = "ready"
-        const val TAG_PR_PREFIX: String = "pr-"
     }
 }
 

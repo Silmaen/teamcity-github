@@ -413,7 +413,7 @@ class PullRequestEventListener(
     private fun retroAssociate(payload: PrEventPayload) {
         if (payload.action == PrAction.CLOSED || payload.headSha.isBlank()) return
         val stateTag = if (payload.draft) PrBuildEnricher.TAG_DRAFT else PrBuildEnricher.TAG_READY
-        val prTag = PrBuildEnricher.prTag(payload.prNumber)
+        val wanted = listOfNotNull(PrBuildEnricher.prTagFor(serverSettings, payload.prNumber), stateTag)
         var tagged = 0
         findCandidateBuildTypes(payload.repo).forEach { (bt, config) ->
             val ref = prBuildRefFor(config, payload.prNumber, payload.headRef)
@@ -421,7 +421,7 @@ class PullRequestEventListener(
                 .take(HISTORY_SCAN_DEPTH)
                 .filter { buildMatchesBranchAndSha(it, ref, payload.headSha) }
                 .forEach { build ->
-                    val missing = listOf(prTag, stateTag).filterNot { build.tags.contains(it) }
+                    val missing = wanted.filterNot { build.tags.contains(it) }
                     if (missing.isEmpty()) return@forEach
                     try {
                         build.setTags(build.tags + missing)

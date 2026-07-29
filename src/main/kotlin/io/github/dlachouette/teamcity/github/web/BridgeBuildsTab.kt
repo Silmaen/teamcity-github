@@ -50,6 +50,7 @@ class BridgeBuildsTab(
     projectManager: ProjectManager,
     pluginDescriptor: PluginDescriptor,
     private val webLinks: WebLinks,
+    private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
 ) : ProjectTab(TAB_ID, TAB_TITLE, pagePlaces, projectManager) {
 
     init {
@@ -66,8 +67,10 @@ class BridgeBuildsTab(
         val query = request.getParameter("q").orEmpty().trim()
         val sort = request.getParameter("sort").orEmpty().trim().ifEmpty { SORT_TIME }
 
+        // Read once per render: the prefix is a server setting, not per row.
+        val prTagPrefix = if (serverSettings.prTagEnabled()) serverSettings.prTagPrefix() else ""
         val rows = try {
-            filterAndSort(collectRows(project), query, sort)
+            filterAndSort(collectRows(project, prTagPrefix), query, sort)
         } catch (e: Exception) {
             LOG.warn("Failed collecting GitHub Bridge builds for ${project.externalId}: ${e.message}", e)
             emptyList()
@@ -81,31 +84,31 @@ class BridgeBuildsTab(
 
     // Only opted-in build configurations, and only the recent past: this page
     // is a live view, not an audit log.
-    private fun collectRows(project: SProject): List<BridgeBuildRow> {
+    private fun collectRows(project: SProject, prTagPrefix: String): List<BridgeBuildRow> {
         val buildTypes = project.buildTypes.filter { BridgeFeatureReader.read(it) != null }
         if (buildTypes.isEmpty()) return emptyList()
 
         val rows = ArrayList<BridgeBuildRow>(buildTypes.size * HISTORY_DEPTH)
         buildTypes.forEach { bt ->
-            bt.getQueuedBuilds(null).forEach { rows += queuedRow(bt, it) }
-            bt.runningBuilds.forEach { rows += buildRow(bt, it, "Running", "pending") }
+            bt.getQueuedBuilds(null).forEach { rows += queuedRow(bt, it, prTagPrefix) }
+            bt.runningBuilds.forEach { rows += buildRow(bt, it, "Running", "pending", prTagPrefix) }
             bt.history.asSequence().take(HISTORY_DEPTH).forEach { build ->
                 val level = when {
                     build.canceledInfo != null -> "pending"
                     build.buildStatus.isSuccessful -> "ok"
                     else -> "bad"
                 }
-                rows += buildRow(bt, build, build.buildStatus.text, level)
+                rows += buildRow(bt, build, build.buildStatus.text, level, prTagPrefix)
             }
         }
         return rows
     }
 
-    private fun queuedRow(bt: SBuildType, queued: SQueuedBuild) = BridgeBuildRow(
+    private fun queuedRow(bt: SBuildType, queued: SQueuedBuild, prTagPrefix: String) = BridgeBuildRow(
         buildTypeId = bt.externalId,
         buildTypeName = bt.name,
         branch = queued.buildPromotion.branch?.name.orEmpty(),
-        prNumber = prNumberOf(queued.buildPromotion.branch?.name, queued.buildPromotion.tags),
+        prNumber = prNumberOf(queued.buildPromotion.branch?.name, queued.buildPromotion.tags, prTagPrefix),
         state = "Queued",
         level = "pending",
         buildNumber = "",
@@ -115,11 +118,17 @@ class BridgeBuildsTab(
         startedAt = Long.MAX_VALUE,
     )
 
-    private fun buildRow(bt: SBuildType, build: SBuild, state: String, level: String) = BridgeBuildRow(
+    private fun buildRow(
+        bt: SBuildType,
+        build: SBuild,
+        state: String,
+        level: String,
+        prTagPrefix: String,
+    ) = BridgeBuildRow(
         buildTypeId = bt.externalId,
         buildTypeName = bt.name,
         branch = build.branch?.name.orEmpty(),
-        prNumber = prNumberOf(build.branch?.name, build.tags),
+        prNumber = prNumberOf(build.branch?.name, build.tags, prTagPrefix),
         state = state,
         level = level,
         buildNumber = build.buildNumber,
@@ -143,10 +152,11 @@ class BridgeBuildsTab(
         const val SORT_BRANCH: String = "branch"
         const val SORT_PR: String = "pr"
 
-        // The PR a build belongs to: the `pr-<n>` tag when present (works for
-        // any ref, including a plain branch), else the `pull/N` ref itself.
-        fun prNumberOf(branchName: String?, tags: List<String>): Int? =
-            tags.firstNotNullOfOrNull { PrBuildEnricher.prNumberFromTag(it) }
+        // The PR a build belongs to: the PR tag when present (works for any
+        // ref, including a plain branch), else the `pull/N` ref itself. An
+        // empty prefix means PR tagging is off — the ref is all we have.
+        fun prNumberOf(branchName: String?, tags: List<String>, prTagPrefix: String): Int? =
+            tags.firstNotNullOfOrNull { PrBuildEnricher.prNumberFromTag(it, prTagPrefix) }
                 ?: BridgeRefs.prNumberFromRef(branchName)
 
         fun draftOf(tags: List<String>): Boolean? = when {

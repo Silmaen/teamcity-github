@@ -1,10 +1,14 @@
 # Branching workflows: how code travels between GitHub and TeamCity
 
-**Status:** requirements settled with the team on 2026-07-28 (R1–R19, see
-§0 and the audit trail in §9). The agreed first batch — **G11, G19, G18,
-G13, G12/G12b, G14** — is **implemented in 1.8.3** (released as 1.9.0);
-[tasks/branching-worklog.md](tasks/branching-worklog.md) is the living
-record of what is in the code and what is left.
+**Status:** requirements settled with the team on 2026-07-28 (rules R1–R19,
+§0). The first agreed batch of enhancements is **implemented in 1.8.3**
+(released as 1.9.0).
+
+> **Scenarios here, backlog there.** This page describes the *flows*: which
+> pipelines fire, when, and what GitHub shows. The decision history, the gap
+> list and their implementation status live in
+> **[tasks/branching-worklog.md](tasks/branching-worklog.md)**, which is
+> updated together with the code.
 
 Where [usage-scenarios.md](usage-scenarios.md) answers *"this webhook
 arrives, what does the plugin do?"*, this page answers the other
@@ -110,7 +114,7 @@ Rules taken as given:
 | R6 | **`Experiment/*`** branches trigger **nothing** automatically, but must remain **manually startable** in TeamCity — with or without an associated PR. |
 | R7 | `Feature/*` and `Bugfix/*` branches must be **buildable before any PR exists** — a developer wants feedback on a plain branch, PR or no PR. |
 | R8 | The branch namespace is **closed**: GitHub forbids any name outside `<default branch>`, `Release/*`, `Feature/*`, `Bugfix/*`, `Experiment/*`. Branch specs can therefore be exhaustive, and a catch-all exclusion is safe. |
-| R9 | **Forks are out of scope — by default, and as plugin behaviour.** The bridge is attached to **one repository**, never to its forks: a PR whose head lives in another repository must be ignored outright. Not a deployment convention, a plugin default (see F23, **G19**). |
+| R9 | **Forks are out of scope — by default, and as plugin behaviour.** The bridge is attached to **one repository**, never to its forks: a PR whose head lives in another repository must be ignored outright. Not a deployment convention, a plugin default — shipped in 1.8.3 (F23). |
 | R10 | When the bridge is active on a build configuration, TeamCity's **bundled `commitStatusPublisher` must be off** on it. One status producer, never two. The plugin **warns only** — configuring builds correctly is the operator's job (F24). |
 | R11 | On `<long-life branches>`, some pipelines run **on push**, others on a **schedule** (nightly / weekly). Both must coexist on the same branch. |
 | R12 | A build on a `<work branch>` must be **automatically associated with its PR** when one exists (GitHub allows only one open PR per head branch, so existence is the whole question), including **retro-actively** for builds that ran before the PR was opened. Not needed on `<long-life branches>`. |
@@ -120,7 +124,7 @@ Rules taken as given:
 | R16 | A `<long-life branch>` turned red by a merge is the **PR author's** responsibility to investigate. |
 | R17 | No hard CI cost ceiling, but the **set of tasks per PR is deliberately limited** to keep CI load reasonable. |
 | R18 | What we validate is the **source branch**, not GitHub's merge preview. The merge-preview ref (`refs/pull/*/merge`) has never been used here — builds have always been of the branch as it stands. |
-| R19 | Consequently, the target model is **branch-source builds**: the bridge builds and reports on the real branch ref (`Feature/toto`), not on a synthetic `pull/N` ref. Decided 2026-07-28 — see F28, **G18**. |
+| R19 | Consequently, the target model is **branch-source builds**: the bridge builds and reports on the real branch ref (`Feature/toto`), not on a synthetic `pull/N` ref. Decided 2026-07-28, shipped in 1.8.3 (F28). |
 
 Consequences that shape everything below:
 
@@ -167,7 +171,7 @@ Consequences that shape everything below:
 > **Still open:** only the pre-PR build policy (R7 — on demand or automatic,
 > see F1), and F28 largely settles it too: with branch-source builds the PR
 > build *is* the branch build, so "automatic" stops costing anything.
-> Everything else is decided — see the audit trail in §9.
+> Everything else is decided — the worklog keeps the audit trail.
 
 ### Who actually starts a build
 
@@ -216,7 +220,7 @@ build feature, with its own gates. Check Run names appear on GitHub as
 
 | Archetype | Runs on | Cost | Gate (plugin config) | Required in branch protection? |
 |---|---|---|---|---|
-| **A1 — PR fast checks** (compile + lint + unit) | PR ref (`pull/N` today, head ref after G18), drafts included | low | `triggerOnPrReady=on`, `triggerOnPrDraft=on` | yes |
+| **A1 — PR fast checks** (compile + lint + unit) | PR ref (`pull/N`, or the head branch in branch-source mode), drafts included | low | `triggerOnPrReady=on`, `triggerOnPrDraft=on` | yes |
 | **A2 — PR full suite** (integration, multi-platform) | PR ref, ready only | high | `triggerOnPrDraft=off` | yes |
 | **A3 — PR heavy/opt-in suite** (perf, long soak, big matrix) | PR ref, on demand | very high | `labelFilter=+:ci-full` and/or `runOnApproval=true` and/or `commentTrigger=/full` | no (informational) |
 | **A4 — Post-merge CI on default branch** (on push) | `<default branch>` (`master` here) | medium | TC **VCS trigger** + `triggerOnBranch=on`, `branchTrigger.branches=+:<default branch>` | n/a (no PR) |
@@ -227,7 +231,7 @@ build feature, with its own gates. Check Run names appear on GitHub as
 | **A9 — Manual-test sign-off** (records a human verdict) | PR ref or `Release/*` | ~0 | `commentTrigger=/qa-ok`, or manual run, or external API | **no** — R15: QA is a reviewer, not a gate. Kept as a reference pattern only (F17) |
 | **A10 — Cascade merge validation** | `pull/N` of a cascade PR | medium | same as A1+A2; see F13 | yes |
 | **A11 — Experimental / on-demand branch build** | `Experiment/*`, **manual only** | any | in the VCS branch spec, **not** in `branchTrigger.branches`, `triggerOnBranch` left **on**, no VCS trigger matching it | no |
-| **A12 — Pre-PR work-branch build** (R7) | `Feature/*`, `Bugfix/*`, no PR yet | low–medium | same shape as A11, plus (optionally) a VCS trigger if pre-PR builds should be automatic; `branchPrLookup` attaches it to the PR once one exists. **After G18 this archetype merges into A1/A2** — same ref, same build | no |
+| **A12 — Pre-PR work-branch build** (R7) | `Feature/*`, `Bugfix/*`, no PR yet | low–medium | same shape as A11, plus (optionally) a VCS trigger if pre-PR builds should be automatic; `branchPrLookup` attaches it to the PR once one exists. **In branch-source mode this archetype merges into A1/A2** — same ref, same build | no |
 
 > **To decide:** which of these actually exist today in your TeamCity
 > project tree, which are one BT vs a build chain, and which ones make up
@@ -395,7 +399,7 @@ command and the queue cleaner no longer undoes it (G11).
 label (or editing the title) does not by itself trigger anything — the
 label is only *evaluated* at the next `opened` / `synchronize` /
 approval / comment event. Practically: label first, then comment
-`/full` (or push). Tracked as **G1**.
+`/full` (or push). Tracked as **G1** in the [worklog](tasks/branching-worklog.md).
 
 **Note on comment triggers:** they fire on
 `pull_request_review_comment` (inline comments on the diff), not on the
@@ -485,7 +489,7 @@ it — and this is a real gap:
   the merged PR and its author, and ideally tell them where it hurts —
   a comment on the merged PR, or at least the PR number and author in the
   build (as parameters/tags) so TeamCity notifications can route to them.
-  See **G17**.
+  Tracked as **G17** in the [worklog](tasks/branching-worklog.md).
 
 Until then, routing is TeamCity-side only: notification rules on A4/A5
 pointing at the team, and a human mapping "which PR landed just before
@@ -620,14 +624,13 @@ vs the branch spec is worth a calendar entry.
 
 **Read R15 first — it reframes this whole section.** QA is a **reviewer**,
 not a gate: no formal GitHub status today, findings tracked in an external
-bug tracker, and no QA-specific tooling to integrate (so **G6**, "post an
-arbitrary Check Run from outside", is not needed here). What QA actually
+bug tracker, and no QA-specific tooling to integrate (so "post an arbitrary
+Check Run from outside" was dropped from the backlog). What QA actually
 asks for is a **reference to a set of builds** and their artefacts, which
 they can reach from GitHub — they do have GitHub access.
 
-So the useful work is **F26** (make the builds and artefacts discoverable
-from the PR — **G14** is the deliverable) and **F16** (let them start a
-deployment). The blocking-check pattern of F17 is documented but **not what
+So the useful work was **F26** (make the builds and artefacts discoverable
+from the PR — shipped in 1.8.3) and **F16** (let them start a deployment). The blocking-check pattern of F17 is documented but **not what
 this project wants** — keep it in mind only if the stance ever changes.
 Archetype A9 is therefore *not* a required check (see §1).
 
@@ -664,7 +667,7 @@ a developer, or by a schedule, or from TeamCity directly.
 > GitHub status, so **do not** make a QA verdict a required check. This
 > scenario is kept because it is the reference pattern if the stance ever
 > changes (a customer-facing release train, an audited product…), and
-> because the mechanism it exposes — **G11** — is what also blocks the
+> because the mechanism it exposes is the one that used to block the
 > on-demand suites of F5 and the re-run of skipped rows of F27.
 
 The pattern that would work with today's feature set: make the human
@@ -729,9 +732,7 @@ removed on every push — i.e. this pattern needs discipline (or a small
 GitHub Action that strips `qa-in-progress` on `synchronize`).
 
 **Questions to revisit only if R15 ever changes** (a blocking QA gate):
-whether the label dance is acceptable or G11 should be fixed first (it would
-make A9 clean: `triggerOnPrReady=on` + `requirePhrase=<something never
-present>` + `commentTrigger=/qa-ok`); whether a rejection posts a red
+whether a rejection posts a red
 `QA_Signoff` or simply leaves the row absent; and whether the tester's
 identity must appear in GitHub (the comment is already the audit trail, and
 the bridge puts the commenter in the trigger comment).
@@ -765,8 +766,7 @@ branch (R15/answer 11).
   if you know which commit to look at.
 - The natural "one link for QA" object is therefore either a **GitHub
   Release / tag** on the validated commit (which then shows its checks), or
-  a **plugin page** listing the builds and artefacts for a ref — the same
-  page that F25/G12 needs anyway.
+  the **Branches & PRs** tab filtered on that branch (F25).
 **Open question:** what is the artefact of record for "release X was
 QA-validated" — a TeamCity pin, a tracker ticket, a GitHub release? The
 bridge should *decorate* that object, not invent a competing one.
@@ -886,7 +886,7 @@ Two things follow:
 - **Surface the conflict.** A build configuration carrying both features is
   a misconfiguration: one `WARN` log line per buildType per server start,
   plus a self-test row on the admin page listing the offenders. No
-  behaviour change. See **G15**.
+  behaviour change. Tracked as **G15** in the [worklog](tasks/branching-worklog.md).
 - **Document it for users, not just here.** The requirement now appears in
   the user-facing docs — [quickstart.md](quickstart.md) step 4 (removing the
   bundled feature is part of opting a build configuration in),
@@ -917,7 +917,7 @@ flowchart TD
     E -->|yes| G["GET /commits/{sha}/pulls<br/>open PR whose head is this commit"]
     G -->|"exactly one, by construction"| H["PR number resolved:<br/>PR params, draft/ready tag,<br/>summary comment, Check Run on the PR"]
     G -->|"none yet"| F
-    C --> I["Sortable by branch AND by PR<br/>— the view itself is G12"]
+    C --> I["Searchable by branch AND by PR<br/>— the Branches & PRs tab"]
     H --> I
 ```
 
@@ -942,19 +942,15 @@ DOM-rewriting exercise — and F28 makes the column readable anyway by removing
    two lists. A build appears once, carrying both keys.
 2. **Search by either key**: type a PR number **or** a branch name and get
    the matching builds. So both keys must be indexed, not just displayed.
-3. **Retro-association is wanted**: a build that ran on `Feature/x` *before*
-   the PR existed must gain its PR link once the PR is opened. Today the
-   lookup happens while the build runs, so such a build keeps no link →
-   **G12b**: re-resolve on `pull_request.opened` (and on the first
-   `synchronize`), then attach the PR number to the already-finished
-   promotions for that head SHA.
+3. **Retro-association**: a build that ran on `Feature/x` *before* the PR
+   existed gains its PR link once the PR is opened — `pull_request.opened` and
+   `synchronize` back-fill the PR tag on the builds already at that head.
 
-That specification points at a **plugin-owned page** (G12): we need our own
-index over (branch, PR, SHA, build), which is exactly what a small
-server-side page can hold. Note that **F28 simplifies it a lot** — with
-branch-source builds there is a single branch namespace and the PR number is
-just an attribute, and G12b's retro-association mostly stops mattering
-because the build was never on a different ref to begin with.
+All three shipped in 1.8.3 as the **Branches & PRs** project tab: our own
+index over (branch, PR, SHA, build), which sidesteps the SDK dead end
+entirely. Branch-source mode (F28) simplifies it further — one branch
+namespace, the PR number as an attribute — and makes retro-association
+mostly unnecessary, since the build was never on a different ref.
 
 **Open question:** does the unified view live at project level, at build
 configuration level, or both? (A project-level page is the one QA would be
@@ -1154,77 +1150,13 @@ probably show both, keyed by SHA rather than by ref.
 
 ---
 
-## 8. Gaps in the plugin for this model
+## 8. Where the backlog lives
 
-Verified against the current code (v1.9.0). Ordered by how much they hurt
-the workflow above.
-
-**The agreed batch `G11 → G19 → G18 → G13 → G12/G12b → G14` shipped in
-1.8.3** — the rows below are struck through and
-[tasks/branching-worklog.md](tasks/branching-worklog.md) records where each
-one lives in the code.
-
-**What is left**, in the order the scenarios argue for: **G17** (name the
-merged PR on a red long-life build, so R16 has tooling), **G15** (warn on a
-double publisher), then **G1 / G3 / G4** (labels and edits as triggers) and
-**G10** (annotations).
-
-**Dropped for this project:** **G6** (no external QA tooling, R15) and the
-DOM rewrite of the Branch column (cosmetic; F28 removes the need).
-**G2** is not needed here (single required set, R14) but stays for other
-deployments.
-
-| # | Gap | Impact here | Fix shape |
-|---|---|---|---|
-| ~~G11~~ | ~~On-demand-only build configurations are not expressible~~ | **DONE (1.8.3)** — an explicit command is stamped on the promotion (`teamcity.github.bridge.triggerSource=command`) and gated like a manual Run: HARD blocks apply, SOFT ones do not. A3 and A9 are now expressible, and a *skipped* row can be re-run from GitHub. | — |
-| ~~G18~~ | ~~No branch-source mode~~ | **DONE (1.8.3)** — project setting `prBuildRef = pull \| branch` (default `pull`); in branch mode the bridge enqueues on the PR head ref and PR-ness comes from the commit, not the ref name. | — |
-| ~~G19~~ | ~~Fork PRs are not recognised~~ | **DONE (1.8.3)** — the head repository is parsed from the payload and from the REST answer; a foreign head is logged, counted (`fork_events_ignored`) and dropped. Blank head repo (deleted fork) fails open. | — |
-| ~~G13~~ | ~~No `check_suite.rerequested` handling~~ | **DONE (1.8.3)** — "Re-run all checks" re-runs every opted-in build configuration at that head, with the `rerunAll.onlyFailed` setting to restrict it to the failed ones. The managed App now subscribes to `check_suite`. | — |
-| G17 | A failed build on a `<long-life branch>` cannot name **the merged PR / its author** | R16 makes the PR author responsible for investigating, but nothing links a merge-commit build back to the PR: `branchPrLookup` matches only *open* PRs whose head is the commit (F9) | Ask GitHub for the PR associated with the merge commit (the same endpoint returns merged PRs), then publish the number/author as build parameters and optionally comment on the merged PR. Small. |
-| ~~G12b~~ | ~~No retro-association of pre-PR builds~~ | **DONE (1.8.3)** — `pull_request.opened` / `synchronize` back-fill the `pr-<n>` and draft/ready tags on builds already at that head, without any extra API call. | — |
-| ~~G12~~ | ~~No unified, searchable branch/PR view~~ | **DONE (1.8.3)** — project tab **Branches & PRs**: one list of queued/running/recent builds carrying both keys, searchable by branch name or PR number, sortable by time/branch/PR. The PR number is persisted as a `pr-<n>` build tag, so the page costs no API call. | — |
-| ~~G14~~ | ~~Check Runs and the PR comment carry no artifact links~~ | **DONE (1.8.3)** — the completed Check Run lists the build's top-level artifacts and the sticky comment gains an `[artifacts]` link per row (`checkRun.artifactLinks`, on by default). This is the QA hand-off of F26. | — |
-| G14b | No GitHub **Deployments / environments** support | F26: no idiomatic "deployed to QA, here is the URL" box on the PR | Post deployment + deployment_status through the API when a deploy BT finishes. Medium–large. |
-| G15 | Nothing detects a build configuration carrying **both** the bridge and the bundled `commitStatusPublisher` | R10 / F24: a mistake shows up as duplicate, competing statuses on GitHub, and nothing tells the operator | `WARN` log line once per buildType per server start + a self-test row listing offenders, read from `resolvedSettings` so template-inherited publishers are caught. **Warn only, never act** — decided; see roadmap Item 4. Small. |
-| ~~G16~~ | ~~No "build the branch only while it has no PR" condition~~ | **Superseded** — G18 shipped, so there is no second ref left to deduplicate. | — |
-| G1 | No `pull_request.labeled` / `unlabeled` handling | Labels are a *filter*, never a *trigger*: adding `ci-full` does nothing until the next push/comment/approval (F5, F13) | Handle `labeled` in `PluginWebhookController` + re-evaluate candidates. Small. |
-| G2 | No **base/target-branch** filter | **Not needed here** (R14: one single required set, F7) — kept for other deployments that gate release PRs differently | Add a `targetBranchFilter` to the build feature, matched on the PR's `base.ref`. Small–medium. |
-| G3 | No `pull_request.edited` handling | Editing the title to add/remove `[skip ci]` or `/full` has no effect until the next event | Same shape as G1. Small. |
-| G4 | No `pull_request.reopened` handling | A reopened PR gets no fresh build until the next push | Add the action to `PrAction`. Small. |
-| G5 | Comment triggers require a trusted `author_association` | **Moot here** since R13 makes the cascade human-driven; still relevant if a bot ever opens PRs, and it is what limits read-only QA accounts (F16) | Either an explicit bot-login allowlist, or drive it via `POST /api/trigger`. |
-| ~~G6~~ | ~~No way to post an arbitrary Check Run from outside~~ | **Dropped for this project** (R15: no external QA tooling — the deployment is a TeamCity build). Revisit only if a non-TeamCity system ever needs to report. | — |
-| G7 | Running builds are never cancelled | Superseded PR builds keep burning agents (F4) | Deliberate design choice; revisit only if agent cost bites. |
-| G8 | `push` and `check_suite` are in the App's recommended subscription list but ignored by the controller | Deliveries are answered `204 unsupported event`; harmless but confusing in the recent-events log. `check_suite` is subsumed by **G13** | Handle `check_suite` (G13); for `push`, either handle it or drop it from `WebhookInfo`. Small. |
-| G9 | No merge-queue (`merge_group`) support | If you ever enable GitHub merge queues on protected branches, checks won't run on the queue's temp refs | Handle `merge_group`. Medium; only if you adopt merge queues. |
-| G10 | No line-level Check Run annotations | Failures link out to TeamCity instead of annotating the diff | Roadmap Item 10 (partial). Medium. |
-
----
-
-## 9. Decisions taken, and what is still open
-
-Answers gathered on 2026-07-28. The rules they produced are R1–R19 in §0;
-this section is the audit trail.
-
-| # | Question | Answer |
-|---|---|---|
-| 1 | Naming | `master` for this project, but the plugin stays generic — `<default branch>`, `<long-life branches>` (`Release/YY.MM`), `<work branches>` (`Feature/*`, `Bugfix/*`, `Experiment/*`, nothing else). R1, R2, R8. |
-| 2 | Who cascades | A **human** — conflicts are frequent and must be resolved by a person. R13, F13, F14. |
-| 3 | Required checks | **One single set** for this project; other deployments may differ. R14 — so G2 is not needed here. |
-| 4 | QA status | QA is a **reviewer**, no formal GitHub status; findings go to an external bug tracker. R15 — F17's required-check pattern is *not* what we want. |
-| 5 | QA tooling | **None** to integrate — the deployment is a TeamCity build. R15 — G6 dropped. |
-| 6 | Red `<long-life branch>` | The **PR author** investigates. R16 — needs G17 to be actionable. |
-| 7 | Cost ceiling | No hard ceiling, but the per-PR task set is deliberately limited. R17. |
-| 8 | Pre-PR build policy (R7) | **Answered by F28**: in branch-source mode the PR build *is* the branch build, so automatic-on-push costs nothing extra. Until G18 ships, stay on demand. |
-| 9 | R10 enforcement | **Warning only** — the plugin flags a build configuration carrying both publishers (log + self-test) and never disables anything: correct configuration is the user's responsibility. Requirement now written into the user docs (quickstart / configuration / troubleshooting). G15, roadmap Item 4. With the bundled feature off, `legacyAliases.enabled` is safe to turn on. |
-| 10 | Branch/PR view | **Unified** view over branches with and without PR, searchable by **PR number or branch name**, plus **retro-association**. R12 — G12 + G12b, F25. |
-| 11 | QA hand-off | QA wants, first and foremost, **a reference to a set of builds**; they have GitHub access. G14 (artifact links) is the deliverable; G12's page covers the no-PR case. F26, F19. |
-| 12 | Priority | Agreed: **G11 → G13 → G12/G12b → G14**, with G17 riding along. Re-sequenced after question 13 to **G11 → G19 → G18 → G13 → G12/G12b → G14**. See §8. |
-| 13 | `pull/N` vs branch names (aparté, 2026-07-28) | Verified live on `Test_CI`: a manual build on `Feature/toto` shows the real branch name, resolves its PR, updates the status and gets the `draft` pill. Merge-preview refs have never been used (R18). Decision: **implement branch-source mode** (R19, F28, G18), with the **fork guard** (G19) as prerequisite; **forks are ignored by default** — the bridge is attached to one repository, never its forks (R9). The DOM rewrite of the Branch column is **dropped** as cosmetic. |
-
-**The two open items (8 and 9)** are both small and independent; neither
-blocks the priority list above.
-
----
+The gap list (G1–G19) and the decision audit trail used to sit here. They
+moved to **[tasks/branching-worklog.md](tasks/branching-worklog.md)**, which
+is updated with the code: what was decided and when, what each gap is, its
+status, and which files carry it. This page stays what it says on the tin —
+the scenarios.
 
 ## See also
 
