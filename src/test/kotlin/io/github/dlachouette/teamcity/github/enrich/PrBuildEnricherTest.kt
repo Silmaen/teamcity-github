@@ -90,16 +90,25 @@ class PrBuildEnricherTest {
     // on the head ref itself (branch-source mode) the Branch column already
     // says it, so repeating it in the build number is noise.
     @Test
-    fun `no suffix when the branch already names the head ref`() {
-        val plan = PrBuildEnricher.computePlan(
-            currentBuildNumber = "42",
-            currentTags = emptyList(),
-            pr = pr(draft = false, headRef = "Feature/DirectReady"),
-            branchName = "Feature/DirectReady",
-        )
-        assertNull(plan.newBuildNumber)
+    fun `no suffix on any ref that is not a pull ref`() {
+        // Keyed on the ref shape, not on equality with the head ref: the
+        // logical name TeamCity derives from a branch spec can differ from what
+        // GitHub reports (capture group, case), and an equality test would
+        // silently start appending again.
+        listOf("Feature/DirectReady", "feature/directready", "DirectReady", "Release/26.06").forEach { branch ->
+            val plan = PrBuildEnricher.computePlan(
+                currentBuildNumber = "42",
+                currentTags = emptyList(),
+                pr = pr(draft = false, headRef = "Feature/DirectReady"),
+                branchName = branch,
+            )
+            assertNull(plan.newBuildNumber, "branch=$branch")
+        }
         // Tags are unaffected by this.
-        assertEquals(listOf("ready"), plan.tagsToAdd)
+        assertEquals(
+            listOf("ready"),
+            PrBuildEnricher.computePlan("42", emptyList(), pr(draft = false), branchName = "Feature/x").tagsToAdd,
+        )
     }
 
     @Test
