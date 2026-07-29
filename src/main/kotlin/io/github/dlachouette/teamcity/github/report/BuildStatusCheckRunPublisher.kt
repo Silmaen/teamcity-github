@@ -267,7 +267,9 @@ class BuildStatusCheckRunPublisher(
                 emoji = emoji,
                 text = mapping.title,
                 url = safeUrl { webLinks.getViewResultsUrl(build) },
-                artifactsUrl = artifactsUrl(build),
+                // Direct download links, so the cell takes a reviewer to the
+                // installer rather than to a TeamCity page.
+                artifacts = if (serverSettings.artifactLinksEnabled()) artifactLinks(build) else emptyList(),
             ),
         )
     }
@@ -424,23 +426,42 @@ class BuildStatusCheckRunPublisher(
         return BuildProblemAnnotations.parse(descriptions, checkoutDir)
     }
 
-    // Artefact links, so a reviewer or a tester reaches the installer or
-    // the package straight from the PR instead of hunting for the build in
-    // TeamCity. Top-level files only, capped, and skipped entirely when the
-    // build produced nothing.
+    // Artefact links, so a reviewer or a tester reaches the installer or the
+    // package straight from the PR instead of hunting for the build in
+    // TeamCity. Every link is a **direct download**, not the artifacts tab:
+    // clicking it downloads the file.
+    //
+    // Top-level files only, capped, and skipped entirely when the build
+    // produced nothing. When there are more files than the cap, a final link
+    // to the artifacts tab covers the rest.
     private fun artifactSection(build: SBuild): String? {
         if (!serverSettings.artifactLinksEnabled()) return null
-        val artifactsUrl = artifactsUrl(build) ?: return null
-        val names = topLevelArtifactNames(build)
-        if (names.isEmpty()) return null
+        val links = artifactLinks(build)
+        if (links.isEmpty()) return null
         return buildString {
             append("### Artifacts\n\n")
-            names.forEach { append("- [").append(it).append("](").append(artifactsUrl).append(")\n") }
-            if (names.size == MAX_ARTIFACTS) append("- …\n")
+            links.forEach { append("- [").append(it.name).append("](").append(it.url).append(")\n") }
+            if (links.size == MAX_ARTIFACTS) {
+                artifactsPageUrl(build)?.let { append("- [all artifacts…](").append(it).append(")\n") }
+            }
         }
     }
 
-    private fun artifactsUrl(build: SBuild): String? =
+    // Direct download links for the build's top-level artifact files.
+    //
+    // The root URL is read per project (`getRootUrlByProjectExternalId`), not
+    // globally: TeamCity lets a project override it, and a link built from the
+    // wrong host would 404 for exactly the people we are trying to help.
+    internal fun artifactLinks(build: SBuild): List<PrSummaryCommenter.ArtifactLink> {
+        if (!build.isArtifactsExists) return emptyList()
+        val projectId = build.buildType?.project?.externalId ?: return emptyList()
+        val root = safeUrl { webLinks.getRootUrlByProjectExternalId(projectId) } ?: return emptyList()
+        return topLevelArtifactNames(build).map { name ->
+            PrSummaryCommenter.ArtifactLink(name, artifactDownloadUrl(root, build, name))
+        }
+    }
+
+    private fun artifactsPageUrl(build: SBuild): String? =
         if (!build.isArtifactsExists) null else safeUrl { webLinks.getViewArtifactsUrl(build) }
 
     private fun topLevelArtifactNames(build: SBuild): List<String> = try {
@@ -476,6 +497,22 @@ class BuildStatusCheckRunPublisher(
             attempt >= MAX_QUEUED_ATTEMPTS -> QueuedAction.GIVE_UP
             else -> QueuedAction.RETRY
         }
+
+        // TeamCity's artifact download URL — the long-standing
+        // `/repository/download/<btExternalId>/<buildId>:id/<path>` contract,
+        // the same one artifact dependencies use. Not the artifacts *tab*: the
+        // point is that clicking the link downloads the file.
+        fun artifactDownloadUrl(rootUrl: String, build: SBuild, path: String): String =
+            "${rootUrl.trimEnd('/')}/repository/download/" +
+                "${build.buildTypeExternalId}/${build.buildId}:id/${encodeArtifactPath(path)}"
+
+        // Percent-encode each segment, keeping the separators. `URLEncoder`
+        // targets form bodies, so its `+` for a space must become `%20`.
+        fun encodeArtifactPath(path: String): String =
+            path.split('/').joinToString("/") { segment ->
+                java.net.URLEncoder.encode(segment, java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("+", "%20")
+            }
 
         // GitHub limits output.summary to 65535 characters. Truncate
         // conservatively to leave headroom for the ellipsis.

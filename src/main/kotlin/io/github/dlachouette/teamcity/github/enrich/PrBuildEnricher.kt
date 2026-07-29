@@ -70,6 +70,7 @@ class PrBuildEnricher(
             currentTags = build.tags,
             pr = pr,
             prTag = prTagFor(serverSettings, pr.number),
+            branchName = branchName,
         )
         plan.newBuildNumber?.let { build.buildNumber = it }
         if (plan.tagsToAdd.isNotEmpty()) {
@@ -89,12 +90,23 @@ class PrBuildEnricher(
             pr: PrInfo,
             // null = PR tagging disabled; only the state tag is applied.
             prTag: String? = null,
+            // The ref this build runs on. When it already *is* the PR's head
+            // branch — branch-source mode — the Branch column shows the name,
+            // so repeating it in the build number is noise.
+            branchName: String? = null,
         ): EnrichmentPlan {
             val wanted = listOfNotNull(if (pr.draft) TAG_DRAFT else TAG_READY, prTag)
             val tagsToAdd = wanted.filterNot { currentTags.contains(it) }
 
+            // The suffix exists to make a `pull/N` build readable. It is
+            // skipped when the branch already names the head ref, and when the
+            // build number happens to carry it already.
+            val branchAlreadyShowsIt = branchName != null && branchName == pr.headRef
             val newBuildNumber = currentBuildNumber
-                ?.takeIf { it.isNotBlank() && pr.headRef.isNotBlank() && !it.contains(pr.headRef) }
+                ?.takeIf {
+                    !branchAlreadyShowsIt && it.isNotBlank() &&
+                        pr.headRef.isNotBlank() && !it.contains(pr.headRef)
+                }
                 ?.let { "$it ${pr.headRef}" }
 
             return EnrichmentPlan(newBuildNumber, tagsToAdd)

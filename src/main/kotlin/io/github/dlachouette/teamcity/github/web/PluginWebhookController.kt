@@ -24,7 +24,7 @@ class PluginWebhookController(
 
     init {
         webManager.registerController(WEBHOOK_PATH, this)
-        authInterceptor.addPathNotRequiringAuth(WEBHOOK_PATH)
+        authInterceptor.addPathNotRequiringAuth(javaClass, WEBHOOK_PATH)
         LOG.info("Registered webhook controller at $WEBHOOK_PATH (anonymous, HMAC verified)")
     }
 

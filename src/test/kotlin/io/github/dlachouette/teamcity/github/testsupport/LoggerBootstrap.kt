@@ -10,6 +10,10 @@ import com.intellij.openapi.diagnostic.Logger
 object LoggerBootstrap {
     init {
         try {
+            // `setFactory` is deprecated in the IntelliJ openapi we compile
+            // against, but it is the only way to install a factory from a
+            // plain unit test — there is no server to do it for us.
+            @Suppress("DEPRECATION")
             Logger.setFactory(Logger.Factory { category -> DefaultLogger(category) })
         } catch (_: Throwable) {
             // already installed or running inside a host that owns logging

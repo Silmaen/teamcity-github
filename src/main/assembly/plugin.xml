@@ -10,8 +10,13 @@
     <includeBaseDirectory>false</includeBaseDirectory>
 
     <files>
+        <!-- The FILTERED copy from target/classes, not the source file: the
+             descriptor takes its <version> from the POM (see the <resources>
+             block there), so the version TeamCity displays cannot drift from
+             the code. Pointing at src/ would package the literal
+             ${project.version}. -->
         <file>
-            <source>${project.basedir}/src/main/resources/teamcity-plugin.xml</source>
+            <source>${project.build.outputDirectory}/teamcity-plugin.xml</source>
             <outputDirectory>/</outputDirectory>
         </file>
     </files>

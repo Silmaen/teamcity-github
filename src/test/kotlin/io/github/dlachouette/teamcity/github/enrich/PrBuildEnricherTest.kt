@@ -86,6 +86,44 @@ class PrBuildEnricherTest {
         assertEquals("42 feature/x", plan.newBuildNumber)
     }
 
+    // The suffix exists to make a `pull/N` build readable. Once the build runs
+    // on the head ref itself (branch-source mode) the Branch column already
+    // says it, so repeating it in the build number is noise.
+    @Test
+    fun `no suffix when the branch already names the head ref`() {
+        val plan = PrBuildEnricher.computePlan(
+            currentBuildNumber = "42",
+            currentTags = emptyList(),
+            pr = pr(draft = false, headRef = "Feature/DirectReady"),
+            branchName = "Feature/DirectReady",
+        )
+        assertNull(plan.newBuildNumber)
+        // Tags are unaffected by this.
+        assertEquals(listOf("ready"), plan.tagsToAdd)
+    }
+
+    @Test
+    fun `the suffix is still added on a pull ref`() {
+        val plan = PrBuildEnricher.computePlan(
+            currentBuildNumber = "42",
+            currentTags = emptyList(),
+            pr = pr(draft = false, headRef = "Feature/DirectReady"),
+            branchName = "pull/5",
+        )
+        assertEquals("42 Feature/DirectReady", plan.newBuildNumber)
+    }
+
+    @Test
+    fun `an unknown branch keeps the historical behaviour`() {
+        val plan = PrBuildEnricher.computePlan(
+            currentBuildNumber = "42",
+            currentTags = emptyList(),
+            pr = pr(draft = false, headRef = "feature/x"),
+            branchName = null,
+        )
+        assertEquals("42 feature/x", plan.newBuildNumber)
+    }
+
     @Test
     fun `does not re-append head ref if already in build number`() {
         val plan = PrBuildEnricher.computePlan("42 feature/x", emptyList(), pr(draft = false, headRef = "feature/x"))

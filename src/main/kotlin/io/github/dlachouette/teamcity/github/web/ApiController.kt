@@ -39,7 +39,7 @@ class ApiController(
         listOf(STATUS, EVENTS, METRICS, TRIGGER).forEach {
             webManager.registerController(it, this)
             // We do our own bearer-token auth; skip TeamCity's session auth.
-            authInterceptor.addPathNotRequiringAuth(it)
+            authInterceptor.addPathNotRequiringAuth(javaClass, it)
         }
     }
 

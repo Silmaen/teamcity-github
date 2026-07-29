@@ -6,7 +6,6 @@ import jetbrains.buildServer.serverSide.SProject
 import jetbrains.buildServer.serverSide.connections.credentials.ConnectionCredentialsException
 import jetbrains.buildServer.serverSide.connections.credentials.ProjectConnectionCredentialsManager
 import jetbrains.buildServer.serverSide.oauth.OAuthConnectionDescriptor
-import jetbrains.buildServer.serverSide.oauth.OAuthConnectionsManager
 import java.util.concurrent.ConcurrentHashMap
 
 // Pair of (token, apiBase) returned by TokenResolver. The apiBase
@@ -54,8 +53,16 @@ data class ResolvedAccess(
 // necessary" flag does not refresh GitHub App tokens reliably on
 // 2026.1, so the cache ends up handing out 401-rejected stale tokens
 // that mask the real configuration. Self-mint replaces it cleanly.
+//
+// `OAuthConnectionsManager` is deprecated in favour of the connection
+// *credentials* API — which is precisely path 2 above, the one that refuses
+// `GitHubApp` on 2026.1. We still need the raw descriptor to read the App ID
+// and private key for self-minting, so the deprecated manager stays, read-only,
+// until the credentials API covers GitHub App connections. Tracked in
+// doc/roadmap.md ("Open SDK questions worth revisiting").
+@Suppress("DEPRECATION")
 class TokenResolver(
-    private val oauthConnectionsManager: OAuthConnectionsManager,
+    private val oauthConnectionsManager: jetbrains.buildServer.serverSide.oauth.OAuthConnectionsManager,
     private val credentialsManager: ProjectConnectionCredentialsManager,
     private val appTokenMinter: AppTokenMinter,
     private val serverSettings: BridgeServerSettings,
