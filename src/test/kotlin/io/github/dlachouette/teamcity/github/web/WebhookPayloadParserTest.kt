@@ -76,10 +76,21 @@ class WebhookPayloadParserTest {
 
     @Test
     fun `parse ignores unrelated actions`() {
-        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("edited")))
-        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("labeled")))
-        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("reopened")))
-        assertNull(WebhookPayloadParser.parsePullRequestEvent(payload("assigned")))
+        listOf("assigned", "converted_to_draft", "review_requested", "locked").forEach {
+            assertNull(WebhookPayloadParser.parsePullRequestEvent(payload(it)), "action=$it")
+        }
+    }
+
+    @Test
+    fun `parse accepts the re-evaluation actions`() {
+        mapOf(
+            "reopened" to PrAction.REOPENED,
+            "labeled" to PrAction.LABELED,
+            "unlabeled" to PrAction.UNLABELED,
+            "edited" to PrAction.EDITED,
+        ).forEach { (raw, expected) ->
+            assertEquals(expected, WebhookPayloadParser.parsePullRequestEvent(payload(raw))?.action, "action=$raw")
+        }
     }
 
     @Test

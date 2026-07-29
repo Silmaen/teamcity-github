@@ -2,8 +2,10 @@ package io.github.dlachouette.teamcity.github.retrigger
 
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class PullRequestEventListenerTest {
@@ -28,9 +30,10 @@ class PullRequestEventListenerTest {
 
     @Test
     fun `PrAction fromString returns null for unrelated actions`() {
-        assertTrue(PrAction.fromString("edited") == null)
-        assertTrue(PrAction.fromString("labeled") == null)
+        // `edited` and `labeled` became actionable in 1.8.3 — see the
+        // re-evaluation tests below.
         assertTrue(PrAction.fromString("assigned") == null)
+        assertTrue(PrAction.fromString("converted_to_draft") == null)
         assertTrue(PrAction.fromString("") == null)
     }
 
@@ -104,5 +107,38 @@ class PullRequestEventListenerTest {
                 targetSha = "deadbeef",
             )
         )
+    }
+
+    // --- G1 / G3 / G4: labels and edits become triggers, not only filters
+
+    @Test
+    fun `the re-evaluation actions are recognised`() {
+        mapOf(
+            "reopened" to PrAction.REOPENED,
+            "labeled" to PrAction.LABELED,
+            "unlabeled" to PrAction.UNLABELED,
+            "edited" to PrAction.EDITED,
+        ).forEach { (raw, expected) -> assertEquals(expected, PrAction.fromString(raw)) }
+    }
+
+    @Test
+    fun `actions we do not act on stay unmapped`() {
+        listOf("assigned", "converted_to_draft", "review_requested", "locked", "").forEach {
+            assertNull(PrAction.fromString(it), "action=$it")
+        }
+    }
+
+    @Test
+    fun `only the actions that change the commit report skips`() {
+        // A new commit (or a fresh PR) may legitimately publish a "Skipped"
+        // row: nothing else has reported for that commit yet.
+        listOf(PrAction.OPENED, PrAction.REOPENED, PrAction.READY_FOR_REVIEW, PrAction.SYNCHRONIZE, PrAction.CLOSED)
+            .forEach { assertTrue(it.reportsSkips, "action=$it") }
+
+        // A label or a title edit re-evaluates the SAME commit. A Check Run is
+        // keyed on (name, commit), so posting "Skipped" here would overwrite
+        // the result an earlier build published for it.
+        listOf(PrAction.LABELED, PrAction.UNLABELED, PrAction.EDITED)
+            .forEach { assertFalse(it.reportsSkips, "action=$it") }
     }
 }
