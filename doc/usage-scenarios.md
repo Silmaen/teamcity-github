@@ -990,6 +990,62 @@ the **Re-run** / **Re-run all checks** buttons mean "do it again", and they
 do. And leave the box **unchecked** for scheduled suites: a nightly on an
 unchanged commit is exactly how environment rot gets caught.
 
+## Scenario 27: a compiler error is annotated in the diff
+
+**Actor**: a build fails to compile on a PR.
+
+**Expected outcome**: on top of the red Check Run and the failure reasons in
+its body, GitHub shows the diagnostics **on the offending lines** of the PR's
+diff (v1.9.0+, `checkRun.annotations`, default on).
+
+```
+src/render/ray.cpp
+   40 |   auto hit = scene.intersect(r);
+   41 |
+   42 |   return hit.trace();
+      |          ^^^^^^^^^^^
+      |  ✗ error: no member named 'trace'         <- Check Run annotation
+```
+
+Parsed from the build problems TeamCity already reports — no build-log
+scanning — in both shapes a C++ toolchain produces:
+
+| Toolchain | Diagnostic line |
+|---|---|
+| clang / gcc | `/opt/agent/work/xxx/src/render/ray.cpp:42:7: error: no member named 'trace'` |
+| MSVC | `C:\agent\work\xxx\src\win\dialog.cpp(88,12): error C2065: undeclared identifier` |
+
+Paths are made **repo-relative** against the build's checkout directory. A
+diagnostic pointing outside it — a system header, a toolchain file — is
+skipped, because GitHub rejects an annotation whose path is not in the
+repository. Capped at the 50 annotations GitHub accepts per request, with
+duplicates collapsed (a failing build repeats the same diagnostic across
+targets).
+
+Test failures are **not** annotated: TeamCity reports a class and a method,
+not a file and a line.
+
+## Scenario 28: a label is added, a title is edited, a PR is reopened
+
+**Actor**: a reviewer adds the `ci-full` label, an author edits the PR title
+to drop `[skip ci]`, or someone reopens a closed PR (v1.9.0+).
+
+**Expected outcome**: the bridge re-evaluates and enqueues what just became
+eligible — a label is now a **trigger**, not only a filter.
+
+| Action | Behaviour |
+|---|---|
+| `reopened` | like `opened`: full evaluation, skip rows included |
+| `labeled` / `unlabeled` | re-evaluate the same commit; enqueue what became eligible |
+| `edited` (title/body) | idem, for the `requirePhrase` / `skipPhrase` gate |
+
+**Why the last two post no "Skipped" row.** A Check Run is keyed on
+`(name, commit)`. These actions do not change the commit, so a build has
+often already reported for it — posting `Skipped: PR metadata out of scope`
+would **overwrite that result**, turning a green row into a skip because
+someone removed a label. So the re-evaluation actions only ever *add* builds;
+they never write a skip row.
+
 ## Summary table
 
 | Trigger | Plugin action | Build / GitHub outcome |
@@ -1021,6 +1077,10 @@ unchanged commit is exactly how environment rot gets caught.
 | Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: SOFT filters bypassed, HARD blocks kept | The build actually runs (no "Skipped" row comes back to undo it) |
 | "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |
 | Build finishes with artifacts | Check Run `output.text` lists them; sticky comment gains an `[artifacts]` link | One click from the PR to the installer/package |
+| Build fails with compiler diagnostics | `BuildProblemAnnotations` parses them into `output.annotations` | Errors/warnings pinned to their line in the PR's diff |
+| Label added / removed, title edited | Re-evaluated: newly eligible builds are enqueued, **no** skip row posted | The green rows of that commit are left untouched |
+| PR reopened | Treated like `opened` | Full check set runs again |
+| Opted-in BT also carrying the bundled publisher | `WARN` at startup + a **Single status publisher** self-test row | The operator is told; nothing is disabled for them |
 | External API trigger | `triggerBuild` via `/api/trigger` | Build enqueued (or dry-run no-op) |
 | Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds/Check Runs/comments; log shows intent |
 

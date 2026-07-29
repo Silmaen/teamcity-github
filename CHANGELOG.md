@@ -8,6 +8,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Line-level Check Run annotations** (`checkRun.annotations`, default on):
+  the compiler diagnostics TeamCity reported as build problems are pinned to
+  their file and line in the PR's diff, instead of only linking out to
+  TeamCity. Both GNU/clang (`file:42:7: error: …`) and MSVC
+  (`file(42,7): error C2065: …`) shapes are parsed, from the build-problem
+  descriptions the plugin already reads for `output.text` — no build-log
+  scanning. Paths are made repo-relative against the build's checkout
+  directory, and a diagnostic pointing outside it (a system header, a
+  toolchain file) is skipped, since GitHub rejects a path that is not in the
+  repository. Capped at the 50 annotations GitHub accepts, duplicates
+  collapsed (a failing build repeats the same diagnostic across targets).
+  Completes roadmap item 10.
+
+- **`pull_request.labeled` / `unlabeled` / `edited` / `reopened` are handled**
+  (G1, G3, G4): a label or a title edit becomes a *trigger*, not only a
+  filter, and a reopened PR gets its builds back. `reopened` behaves like
+  `opened`; the other three re-evaluate the same commit, enqueue what became
+  eligible and — deliberately — post **no** "Skipped" row, since a Check Run
+  is keyed on `(name, commit)` and doing so would overwrite the result an
+  earlier build already published for that commit.
+
 - **The plugin warns when two status publishers are active on one build
   configuration** (G15). A `WARN` line at server startup lists the build
   configurations carrying both this feature and TeamCity's bundled *Commit

@@ -1,6 +1,7 @@
 package io.github.dlachouette.teamcity.github.report
 
 import com.intellij.openapi.diagnostic.Logger
+import io.github.dlachouette.teamcity.github.api.CheckRunAnnotation
 import io.github.dlachouette.teamcity.github.api.CheckRunConclusion
 import io.github.dlachouette.teamcity.github.api.CheckRunRequest
 import io.github.dlachouette.teamcity.github.api.CheckRunStatus
@@ -237,6 +238,7 @@ class BuildStatusCheckRunPublisher(
             outputSummary = truncateSummary(summary),
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
             outputText = joinSections(failureDetails(build), artifactSection(build)),
+            annotations = annotationsFor(build),
         )
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
         maybeUpdatePrComment(build, ctx, mapping)
@@ -402,6 +404,26 @@ class BuildStatusCheckRunPublisher(
         val apiBase: String,
     )
 
+    // Line-level annotations for the failing diagnostics, so the PR's diff
+    // shows them where they happened. Empty for a build that reported no
+    // problem, and for problems whose file is not in the checkout.
+    private fun annotationsFor(build: SBuild): List<CheckRunAnnotation> {
+        if (!serverSettings.checkRunAnnotationsEnabled()) return emptyList()
+        val descriptions = try {
+            build.failureReasons.mapNotNull { it.description }
+        } catch (e: Exception) {
+            LOG.debug("Could not read failure reasons of build ${build.buildId} for annotations: ${e.message}")
+            return emptyList()
+        }
+        if (descriptions.isEmpty()) return emptyList()
+        val checkoutDir = try {
+            build.parametersProvider.get(CHECKOUT_DIR_PARAM)
+        } catch (e: Exception) {
+            null
+        }
+        return BuildProblemAnnotations.parse(descriptions, checkoutDir)
+    }
+
     // Artefact links, so a reviewer or a tester reaches the installer or
     // the package straight from the PR instead of hunting for the build in
     // TeamCity. Top-level files only, capped, and skipped entirely when the
@@ -464,6 +486,10 @@ class BuildStatusCheckRunPublisher(
 
         // Top-level artifact files listed in the completed Check Run.
         const val MAX_ARTIFACTS: Int = 10
+
+        // TeamCity's own parameter for the agent-side checkout directory,
+        // used to turn an absolute diagnostic path into a repo-relative one.
+        private const val CHECKOUT_DIR_PARAM: String = "teamcity.build.checkoutDir"
 
         fun truncateSummary(text: String): String =
             if (text.length <= SUMMARY_MAX) text
