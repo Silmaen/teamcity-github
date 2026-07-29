@@ -314,9 +314,11 @@ class PullRequestEventListener(
             }
         }
 
-        postSkippedCheckRuns(branchSkips, payload, SkipReason.BRANCH_FILTER)
-        postSkippedCheckRuns(draftSkips, payload, SkipReason.DRAFT_PR)
-        postSkippedCheckRuns(metadataSkips, payload, SkipReason.METADATA_FILTER)
+        if (payload.action.reportsSkips) {
+            postSkippedCheckRuns(branchSkips, payload, SkipReason.BRANCH_FILTER)
+            postSkippedCheckRuns(draftSkips, payload, SkipReason.DRAFT_PR)
+            postSkippedCheckRuns(metadataSkips, payload, SkipReason.METADATA_FILTER)
+        }
 
         // Monorepo path filtering: drop targets whose path filter matches
         // none of the PR's changed files (posts a "paths out of scope" skip).
@@ -396,7 +398,7 @@ class PullRequestEventListener(
             val filter = entry.second.pathFilter
             if (filter.isEmpty() || changed.any { filter.matches(it) }) kept += entry else dropped += entry
         }
-        postSkippedCheckRuns(dropped, payload, SkipReason.PATH_FILTER)
+        if (payload.action.reportsSkips) postSkippedCheckRuns(dropped, payload, SkipReason.PATH_FILTER)
         if (dropped.isNotEmpty()) {
             LOG.info("Path filter excluded ${dropped.size} BT(s) for ${payload.repo.slug}#${payload.prNumber} (${changed.size} files changed)")
         }
@@ -670,10 +672,25 @@ class PullRequestEventListener(
     }
 }
 
-enum class PrAction(val value: String) {
+// The `pull_request` actions the bridge acts on.
+//
+// `reportsSkips` says whether an excluded build configuration should get a
+// "Skipped: …" Check Run for this action. It is false for the actions that
+// merely *re-evaluate* an unchanged commit — a label added, a label removed, a
+// title edited: a Check Run row is keyed on (name, commit), so posting a
+// "Skipped" row there would overwrite the real result an earlier build already
+// published for that commit. Turning a green row into "Skipped" because
+// someone removed a label is not a reasonable thing to do.
+enum class PrAction(val value: String, val reportsSkips: Boolean = true) {
     OPENED("opened"),
+    REOPENED("reopened"),
     READY_FOR_REVIEW("ready_for_review"),
     SYNCHRONIZE("synchronize"),
+    // Re-evaluations of the same commit: enqueue what became eligible, and
+    // say nothing about what did not.
+    LABELED("labeled", reportsSkips = false),
+    UNLABELED("unlabeled", reportsSkips = false),
+    EDITED("edited", reportsSkips = false),
     CLOSED("closed");
 
     companion object {
