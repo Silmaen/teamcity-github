@@ -23,6 +23,7 @@ import jetbrains.buildServer.serverSide.buildDistribution.WaitReason
 // this filter always agree on what a "suppressed" build is.
 class DraftAwareBuildFilter(
     private val gateContextResolver: GateContextResolver,
+    private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
 ) : StartBuildPrecondition {
 
     override fun canStart(
@@ -47,7 +48,7 @@ class DraftAwareBuildFilter(
         // started explicitly must never be blocked here, and "this build
         // configuration is not part of that path" is not a reason to hold
         // anything either.
-        if (!QueueCleanupPolicy.removes(decision, ctx.trigger)) return null
+        if (!QueueCleanupPolicy.removes(decision, ctx.trigger, serverSettings.queueCleanupEnabled())) return null
 
         return when (decision) {
             GateDecision.SUPPRESS_DRAFT -> {

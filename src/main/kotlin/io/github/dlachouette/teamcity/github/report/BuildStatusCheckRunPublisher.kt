@@ -199,7 +199,7 @@ class BuildStatusCheckRunPublisher(
             ctx.config, gate.branchName, gate.prNumber, gate.pr?.draft, gate.pr?.headRef, gate.trigger,
             gate.pr?.title.orEmpty(), gate.pr?.body.orEmpty(), gate.pr?.labels.orEmpty(),
         )
-        return QueueCleanupPolicy.removes(decision, gate.trigger)
+        return QueueCleanupPolicy.removes(decision, gate.trigger, serverSettings.queueCleanupEnabled())
     }
 
     private fun publishInProgress(build: SBuild) {

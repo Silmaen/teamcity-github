@@ -8,6 +8,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Queue cleanup is switchable off server-wide** (`queueCleanup.enabled`,
+  admin page, default on): everything that takes a build *out* of the queue —
+  draft suppression, the scope filters, `skipIfCommitPassed`, the drain of a
+  closed PR. Off, the bridge only ever adds builds and reports on them. The
+  cleanup scope is also now a documented invariant: it never touches a build
+  configuration that does not carry the build feature.
+
 - **Publication and triggering are two independent switches.** New build-feature
   flag **`publishChecks`** (default on) is now the *only* input to "does this
   build configuration report to GitHub?" — deliberately independent of what
