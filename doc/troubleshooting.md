@@ -775,10 +775,10 @@ require only the Check Run name (e.g. `TeamCity / <buildType full name>`),
 treating the Commit Status as informational. Expect permanent duplicate
 rows on every PR.
 
-Not an option: making the plugin disable it for you. It will (once the
-warning of [roadmap Item 4](roadmap.md#item-4---warn-when-the-bundled-commitstatuspublisher-is-also-active)
-ships) tell you about the conflict, but correcting the build configuration
-stays an operator decision.
+Not an option: making the plugin disable it for you. It **tells** you — a
+`WARN` at server startup and a **Single status publisher** row in the admin
+page's self-tests — but correcting the build configuration stays an operator
+decision.
 
 ## Symptom: admin page shows "No webhook deliveries yet"
 

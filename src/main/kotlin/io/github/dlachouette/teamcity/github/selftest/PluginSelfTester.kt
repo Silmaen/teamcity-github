@@ -5,6 +5,7 @@ import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.config.LogPathResolver
+import io.github.dlachouette.teamcity.github.feature.BundledPublisherDetector
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.web.SignatureVerifier
@@ -39,7 +40,32 @@ class PluginSelfTester(
         val tokenResults = mutableMapOf<String, ResolvedAccessForTest?>()
         out += testTokenResolutionForProjects(projects, tokenResults)
         out += testGitHubApiWithToken(projects, tokenResults)
+        out += testNoDoubleStatusPublisher()
         return out
+    }
+
+    // Configuration check: a build configuration must not carry both this
+    // plugin and TeamCity's bundled Commit status publisher, or GitHub shows
+    // two competing rows per build. WARN, never FAIL: the plugin works, it is
+    // the reporting that is ambiguous, and correcting it is the operator's
+    // call.
+    private fun testNoDoubleStatusPublisher(): TestResult {
+        val offenders = try {
+            BundledPublisherDetector.scan(projectManager.allBuildTypes)
+        } catch (e: Exception) {
+            return TestResult("Single status publisher", Status.SKIP, "Could not inspect build configurations: ${e.message}")
+        }
+        return if (offenders.isEmpty()) {
+            TestResult("Single status publisher", Status.PASS, "No build configuration carries both the bridge and the bundled Commit status publisher")
+        } else {
+            TestResult(
+                "Single status publisher", Status.WARN,
+                "${offenders.size} build configuration(s) also carry the bundled Commit status publisher, " +
+                    "so GitHub shows two rows per build: ${offenders.take(10).joinToString(", ")}" +
+                    (if (offenders.size > 10) " (+${offenders.size - 10} more)" else "") +
+                    ". Disable it there; the bridge never does it for you.",
+            )
+        }
     }
 
     // Local pair-like holder so the self-tester doesn't have to know

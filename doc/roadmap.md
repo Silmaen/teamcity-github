@@ -149,7 +149,7 @@ Enabled by default (`webhook.replay.enabled`), toggleable from the
 admin page. See [security.md](security.md) *Inbound: replay
 protection*.
 
-## Item 4 - Warn when the bundled `commitStatusPublisher` is also active
+## Item 4 - Warn when the bundled `commitStatusPublisher` is also active — **SHIPPED in 1.8.3**
 
 ### Problem statement
 
@@ -177,7 +177,17 @@ requirement is documented for them in
 [quickstart.md](quickstart.md) step 4 and
 [troubleshooting.md](troubleshooting.md#symptom-pr-shows-two-teamcity-entries-commit-status--check-run).
 
-### Proposed design
+### What shipped
+
+`BundledPublisherDetector` + `PublisherConflictReporter`: one `WARN` line at
+server startup listing the offending build configurations, and a
+**Single status publisher** row in the admin page's self-tests (WARN, never
+FAIL — the plugin works, it is the reporting that is ambiguous). Detection
+reads `resolvedSettings`, so a publisher inherited from a BuildType template
+is caught too, and matches the feature type by shape (`commit` + `status`)
+because the bundled plugin's id is not exposed by the SDK.
+
+### Original design
 
 Detect, per opted-in buildType, whether the resolved feature set also
 contains `commitStatusPublisher` (same `resolvedSettings` read that
