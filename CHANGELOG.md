@@ -157,9 +157,10 @@ released separately.)
   scope filter excluded the build, or `skipIfCommitPassed` matched
   (`QueueCleanupPolicy`).
 
-  This is a **behaviour change** for anyone who relied on those flags to
-  prevent manual runs; use `publishChecks` to silence a build configuration on
-  GitHub, and TeamCity's own permissions to control who may run what.
+  This is a **behaviour change**, though never the intent of those flags:
+  preventing a human from starting a build is TeamCity's job (permissions),
+  not a GitHub-reporting plugin's. Use `publishChecks` to silence a build
+  configuration on GitHub.
 
 
 - **Comment triggers now fire on `pull_request_review_comment`** (inline
