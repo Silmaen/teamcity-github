@@ -60,10 +60,11 @@ flowchart LR
 
 Concretely:
 
-- **Suppresses builds for draft PRs** via a `StartBuildPrecondition`
-  (per-buildType opt-in - paused configs are untouched). Manual
-  user triggers ("Run" from the TC UI) bypass the gate so an
-  operator can always force a build to run on a draft PR.
+- **Suppresses automatic builds for draft PRs** (per-buildType opt-in -
+  paused configs are untouched): the queued build is removed and a
+  "Skipped: draft PR" Check Run explains why. An explicit request - a Run
+  from the TC UI, a comment command, a Re-run button - always goes through,
+  and the bridge never removes a build it did not enqueue itself.
 - **Tags every opted-in PR build with `draft` / `ready`** the moment
   it hits the queue (`PrPromotionTagger`) so the queue UI shows at a
   glance which builds are deliberately held versus agent-starved.
@@ -99,6 +100,35 @@ Concretely:
   any prior interaction with TC's connection cache.
 
 Highlights (1.7.0 / 1.8.0 / 1.9.0):
+
+- **Build pull requests on their own branch** - a per-project switch makes PR
+  builds run on the PR's head branch (`Feature/toto`) instead of the synthetic
+  `pull/N` ref: readable branch names everywhere in TeamCity, and a push
+  builds *once* instead of twice once a PR exists.
+- **A "Branches & PRs" project tab** - one list of the bridge's builds, each
+  row carrying both keys (branch **and** PR number), searchable by either
+  (`Feature/`, `189`, `#189`) and sortable by time, branch or PR.
+- **Compiler diagnostics annotated on the diff** - errors and warnings from
+  the build problems TeamCity reports are pinned to their file and line in the
+  pull request (clang/gcc and MSVC shapes).
+- **Artifact links from the pull request** - the completed Check Run lists the
+  build's artifacts and the sticky comment gains an `[artifacts]` link, so a
+  reviewer or a tester reaches the installer without opening TeamCity.
+- **"Re-run all checks" works**, including re-running a *skipped* row, with an
+  option to restrict it to the checks that failed.
+- **Publication is one switch, independent of what triggered the build** - a
+  build configuration reports to GitHub, or it does not; a PR event, a VCS
+  trigger, a schedule, a manual Run and a comment command are all treated the
+  same.
+- **Reuse a commit that already passed** - an automatic build queued for a
+  commit that already went green is dropped and the earlier success is
+  republished, instead of spending an agent to reproduce a known result.
+- **Pull requests from forks are ignored** - the bridge is attached to one
+  repository, never to its forks.
+- **Warns when two status publishers report the same build** - carrying both
+  this feature and TeamCity's bundled *Commit status publisher* means two
+  competing rows per build; the plugin says so at startup and in its
+  self-tests, and never disables anything behind your back.
 
 - **Builds launched on a branch report into its PR** - run a
   configuration on `Feature/x` itself instead of the `pull/N` ref and it

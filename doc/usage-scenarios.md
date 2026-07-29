@@ -886,9 +886,10 @@ on a row that reads "Skipped: paths out of scope".
 Re-running a **skipped** row now actually starts a build: an explicit
 GitHub command is treated like a manual Run, so the branch, path and
 metadata filters that skipped the build in the first place no longer
-suppress it. HARD blocks (`triggerOnPrReady=false`, a project-level kill
-switch) still apply, and a build configuration that declares it does not
-build drafts still does not.
+suppress it. Two things still hold it back: a **project-level** kill switch
+(`prTrigger.enabled=false`), which mutes the bridge for that path entirely,
+and a build configuration whose publication is off — it runs, it just says
+nothing on GitHub.
 
 With the **`rerunAll.onlyFailed`** setting on, "Re-run all checks" is
 restricted to build configurations whose last build at that commit failed.
@@ -1060,7 +1061,7 @@ they never write a skip row.
 | Build finishes (success) | `BuildStatusCheckRunPublisher.buildFinished` | Check Run `status=completed`, conclusion `success`, summary = build's `statusDescriptor.text` |
 | Build finishes (failure) | Same hook, different mapping | conclusion `failure` |
 | Build cancelled (final) | Same hook, `isInterrupted` short-circuits | conclusion `cancelled` |
-| User clicks "Run" on draft PR | Manual trigger bypasses suppression (filter, cleaner, skipped-reporter, queued-gate all yield) | Build actually runs |
+| User clicks "Run" on a draft PR (or comments the trigger phrase) | An explicit request bypasses the draft rule and the soft filters, and is never removed from the queue (1.9.0+) | Build actually runs, and reports |
 | Reverted to draft | None | In-flight builds continue, new ones held |
 | API error during draft check | Logged warning | Build allowed (fail-open) |
 | Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
@@ -1074,7 +1075,7 @@ they never write a skip row.
 | PR title/body/labels out of scope (`requirePhrase`/`skipPhrase`/`labelFilter`) | `BridgeGate` returns `SUPPRESS_METADATA`, posts Skipped (auto only) | GitHub PR shows "Skipped: PR metadata out of scope"; manual Run bypasses |
 | PR closed / merged | `cancelQueuedForClosedPr` removes queued builds | Queue drained; running builds finish |
 | PR from a fork | Event dropped (logged, `fork_events_ignored`) | Nothing runs — the bridge serves one repository, never its forks |
-| Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: SOFT filters bypassed, HARD blocks kept | The build actually runs (no "Skipped" row comes back to undo it) |
+| Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: the scope filters are bypassed and nothing removes it afterwards | The build actually runs (no "Skipped" row comes back to undo it) |
 | "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |
 | Build finishes with artifacts | Check Run `output.text` lists them; sticky comment gains an `[artifacts]` link | One click from the PR to the installer/package |
 | Build fails with compiler diagnostics | `BuildProblemAnnotations` parses them into `output.annotations` | Errors/warnings pinned to their line in the PR's diff |

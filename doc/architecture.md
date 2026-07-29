@@ -237,12 +237,14 @@ then dispatches by `X-GitHub-Event` to `PullRequestEventListener`:
 
 | Event | Action(s) | Handler | Effect |
 |---|---|---|---|
-| `pull_request` | `opened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. |
+| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. |
+| `pull_request` | `labeled`, `unlabeled`, `edited` | `handle` | Re-evaluate the same commit and enqueue what became eligible. Never posts a `Skipped` row: the commit has not changed, so it would overwrite a result already published for it (`PrAction.reportsSkips`). |
 | `pull_request` | `closed` (incl. merged) | `handle` -> `cancelQueuedForClosedPr` | Remove builds still queued for the PR head. |
 | `pull_request_review` | `submitted` / `state=approved` | `handleReviewApproved` | Enqueue run-on-approval BuildTypes. |
 | `pull_request_review_comment` | `created` | `handleCommentCommand` | Default comment-trigger event (inline PR diff comment): enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
 | `issue_comment` | `created` | `handleCommentCommand` | Same, for PR *conversation* comments. **Opt-in**: only delivered when the App has the **Issues** permission, which the plugin does not request by default. |
 | `check_run` | `rerequested` | `handleRerun` | Re-run the BuildType behind the clicked Check Run (ignoring finished builds). |
+| `check_suite` | `rerequested` | `handleRerunAll` | "Re-run all checks": re-run every opted-in BuildType for that head, optionally only those whose last build there failed (`rerunAll.onlyFailed`). |
 
 ## Server settings applied live
 
@@ -375,6 +377,8 @@ Where we plug into TC:
 | `BuildServerAdapter` (build lifecycle) | `BuildStatusCheckRunPublisher`, `PrBuildEnricher`, `PrPromotionTagger`, `DraftCheckRunReporter` |
 | `BuildFeature` (opt-in per BuildType) | `GitHubBridgeBuildFeature` |
 | `EditProjectTab` + `AdminPage` (custom UI) | `BridgeProjectSettingsTab`, `AdminConsolePage`, `BranchEnrichmentPageExtension` |
+| `ProjectTab` (project-level view) | `BridgeBuildsTab` — the "Branches & PRs" list |
+| `SBuildType.resolvedSettings.buildFeatures` (read-only) | `BridgeFeatureReader`, `BundledPublisherDetector` |
 | `AuthorizationInterceptor.addPathNotRequiringAuth` (anonymous endpoints) | `HealthController`, `MetricsController`, `ApiController`, `WebhookInfoController`, `PluginWebhookController` |
 
 ## Packaging

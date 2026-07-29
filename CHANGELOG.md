@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.9.0] - unreleased
 
+_Developed on the `1.8.3` staging version; released as `1.9.0`._
+
 ### Added
 
 - **Line-level Check Run annotations** (`checkRun.annotations`, default on):
