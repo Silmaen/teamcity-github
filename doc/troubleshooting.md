@@ -75,9 +75,15 @@ A BuildType participates only when **both** of these are true:
 Draft behaviour is **not** a parameter. It is the per-feature
 **`triggerOnPrDraft`** checkbox (with **`triggerOnPrReady`** as its
 prerequisite — `triggerOnPrDraft` is only honoured when
-`triggerOnPrReady` is on). With `triggerOnPrDraft` off, an auto
+`triggerOnPrReady` is on). With `triggerOnPrDraft` off, an **automatic**
 trigger on a draft PR is removed from the queue and reported as a
-**"Skipped: draft PR"** Check Run.
+**"Skipped: draft PR"** Check Run; an explicit Run or GitHub command on the
+same draft PR runs normally (1.9.0+).
+
+Two more things the bridge never does, worth knowing when a build behaves
+unexpectedly: it never removes a build **it did not enqueue itself** except in
+the documented automatic cases, and it never touches a build configuration
+that does not carry its build feature.
 
 ## Symptom: self-test shows "Token resolution" FAIL on every project
 
@@ -242,7 +248,7 @@ TeamCity, instead of being removed from the queue and reported as a
 | The project's `teamcity.github.bridge.connectionId` is wrong/empty | Set `managed` or a valid `PROJECT_EXT_<N>` / `CID_<hash>`. With no token the plugin cannot fetch PR draft state and fails open. The log shows `Cannot resolve token`. |
 | GitHub App lacks `Pull requests: read` permission | API returns 403; plugin logs the warning and fails open. Add the permission and accept it on the App page. |
 | Branch does not look like `pull/N` | The gate only treats `pull/<number>` branches as PRs. Check the VCS root's branchSpec. |
-| Build was triggered manually by an operator | This is intentional: a manual "Run" HARD-blocks a draft build that would be suppressed, but bypasses the soft branch filters. The gate distinguishes manual from auto triggers via `isManualTrigger`. To avoid surprises, ask the operator to wait until the PR is marked ready. |
+| Build was triggered manually by an operator | Intentional since 1.9.0: an explicit request — a Run in TeamCity, a comment command, a Re-run button — bypasses the draft rule *and* the branch/metadata filters, and is never removed from the queue. Only the automatic path is filtered. If an operator's draft build surprises you, that is TeamCity permissions territory, not the bridge's. |
 
 ### Verify
 
@@ -275,7 +281,7 @@ queue.
 |---|---|
 | `teamcity.github.bridge.repo` slug does not match GitHub's `repository.full_name` | Compare case-sensitively. GitHub normalises owner/name casing differently in some places. |
 | The BuildTypes are not opted in | The listener only enqueues BuildTypes whose **"GitHub Bridge integration"** feature resolves against the project's `repo` + `connectionId`. Confirm the feature is present (or template-inherited on 1.6.0+) and the project params are set. |
-| The matching BuildTypes do not run on ready PRs | Each candidate needs `triggerOnPrReady` on (it is on by default). With it off the gate HARD-blocks the BuildType for every PR. |
+| The matching BuildTypes do not run on ready PRs | Each candidate needs `triggerOnPrReady` on (it is on by default). With it off the bridge never triggers the build configuration from a PR event — an explicit Run or command still works, and still reports. |
 | The PR's source branch is excluded by the branch filter | The `prTrigger` branch list (project-level, or the per-feature override) must match the PR head ref. An empty list matches every branch. |
 | Build queue optimiser deduped against an existing build | A build for `pull/N` on the same revision may already be running. Check the running builds list. |
 | Build types are paused | `ProjectManager.activeBuildTypes` excludes paused. Unpause or use a sibling build type. |

@@ -334,6 +334,25 @@ Consequences:
   leaked; paste the new PEM into `app.privateKey` (or re-run the create
   flow for a fresh App).
 
+## Pull requests from forks are ignored
+
+The bridge is attached to **one repository**, never to its forks. A
+`pull_request` (or review, or comment) event whose head branch lives in
+another repository is logged, counted (`fork_events_ignored`) and dropped: no
+build, no Check Run.
+
+That removes the classic hazard of CI-on-fork-PRs — untrusted code building
+with the server's credentials — by construction rather than by policy. The
+head repository is read from `head.repo.full_name` in the payload and from the
+REST answer (`PrInfo.headRepo`), which also covers the comment path, whose
+payload carries no head repo.
+
+**Fail-open on a missing head repository.** GitHub omits `head.repo` when the
+fork has been deleted; such an event is processed normally rather than
+dropped, because treating an absent field as "foreign" would silently stop
+reporting on legitimate pull requests. The consequence is bounded: the head
+ref of a deleted fork does not exist locally, so there is nothing to build.
+
 ## Comment-triggered builds: author authorization
 
 PR comment commands can start builds via `handleCommentCommand`. The

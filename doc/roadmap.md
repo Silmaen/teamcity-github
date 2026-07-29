@@ -12,16 +12,29 @@ described in [README.md](../README.md) and detailed in
 
 ## Shipped since 1.0
 
-- v1.9.0 — builds launched on a plain branch ref are attached to their
-  pull request: the PR is resolved from the built commit
-  (`GET /commits/{sha}/pulls`, open PRs whose head is that commit only),
-  so such a build gets the `teamcity.github.bridge.pullRequest.*`
-  parameters, the `draft`/`ready` tag and the sticky summary comment.
-  New `branchPrLookup.enabled` feature flag (default on). Gating is
-  untouched — a branch build still takes the gate's branch path.
+- v1.9.0 — the branching batch. Builds launched on a plain branch ref are
+  attached to their pull request (`branchPrLookup.enabled`, default on: the PR
+  is resolved from the built commit, open PRs whose head is that commit only).
+  On top of that:
+  **publication became one switch** (`publishChecks`) independent of what
+  triggered the build, while the `triggerOn*` flags govern only what the bridge
+  *starts* — and **the bridge no longer removes a build it did not enqueue**
+  (`QueueCleanupPolicy`, plus a server-wide `queueCleanup.enabled` master
+  switch); **branch-source PR builds** (`prBuildRef=branch`) so a PR builds on
+  its head ref instead of `pull/N`; **fork PRs are ignored**;
+  **`check_suite.rerequested`** ("Re-run all checks", with
+  `rerunAll.onlyFailed`); a **"Branches & PRs" project tab** searchable by
+  branch or PR number, backed by a per-build PR tag (`prTag.*`);
+  **artifact links** in the Check Run and the PR comment; **line-level
+  annotations** for compiler diagnostics (item 10); a **warning when two
+  status publishers** report the same build (item 4); **`labeled` /
+  `unlabeled` / `edited` / `reopened`** handled; and
+  **`skipIfCommitPassed`**, which republishes a known-green commit instead of
+  rebuilding it. See the CHANGELOG for the behaviour changes.
 - v1.8.0 — PR-metadata build gate (per-build-configuration
   `requirePhrase` / `skipPhrase` / `labelFilter` over the PR title,
-  body and labels; SOFT, manual bypasses, "Skipped: PR metadata out of
+  body and labels; applied to the automatic path only, an explicit request
+  bypasses them, excluded auto triggers get a "Skipped: PR metadata out of
   scope" Check Run). Comment triggers moved to
   `pull_request_review_comment` (inline diff comments) since GitHub only
   exposes `issue_comment` with the Issues permission, which the plugin
@@ -46,7 +59,9 @@ described in [README.md](../README.md) and detailed in
   parameters (`branchTrigger.enabled` / `branches`,
   `prTrigger.enabled` / `branches`). Per-BT trigger flags
   (`triggerOnBranch` / `triggerOnPrReady` / `triggerOnPrDraft`)
-  with HARD semantics — manual triggers cannot bypass.
+  with HARD semantics — manual triggers cannot bypass. **Revised in
+  1.9.0**: those flags now govern the automatic path only, and an explicit
+  request is never removed from the queue.
   Per-BT branch list overrides. Centralized gating in
   `BridgeGate.decide` shared by listener / filter / cleaner /
   publisher. Skipped Check Runs on GitHub for the two PR-context
@@ -85,7 +100,8 @@ described in [README.md](../README.md) and detailed in
 Shipped as `GitHubBridgeBuildFeature` (Spring bean) backed by the
 `bridgeFeatureEdit.jsp` edit form. The feature carries five
 fields: `triggerOnBranch` / `triggerOnPrReady` / `triggerOnPrDraft`
-(HARD trigger gates) + `branchTriggerBranchesOverride` /
+(trigger gates — HARD as shipped in 1.5.0, restricted to the automatic
+path in 1.9.0) + `branchTriggerBranchesOverride` /
 `prTriggerBranchesOverride` (BT-level branch list overrides
 that REPLACE the project defaults when set). Mandatory project
 config (`repo`, `connectionId`, the two `xxxTrigger.enabled`
@@ -109,6 +125,12 @@ CSS overlay.
 A server-side replacement would let us display the source branch
 name (e.g. `feature/raycast-shadows`) inline with the PR ref
 without depending on the rendered DOM staying stable.
+
+**Largely obsolete since 1.9.0.** Branch-source PR builds
+(`prBuildRef=branch`) make the Branch column show the real branch name
+because that *is* the ref being built — no display override needed. What
+remains of this item only matters to projects that keep the `pull/N` model
+(those allowing fork PRs).
 
 ### Constraints (verified via SDK introspection)
 
@@ -149,7 +171,7 @@ Enabled by default (`webhook.replay.enabled`), toggleable from the
 admin page. See [security.md](security.md) *Inbound: replay
 protection*.
 
-## Item 4 - Warn when the bundled `commitStatusPublisher` is also active — **SHIPPED in 1.8.3**
+## Item 4 - Warn when the bundled `commitStatusPublisher` is also active — **SHIPPED in 1.9.0**
 
 ### Problem statement
 
@@ -332,7 +354,7 @@ PKCS#8 so Java's stock `KeyFactory` can load it. Literal `\n`
 escape sequences (when the key is pasted into a single-line field)
 are normalised to real newlines before parsing.
 
-## Item 10 - Check Run annotations / richer failure detail — **SHIPPED in 1.8.3**
+## Item 10 - Check Run annotations / richer failure detail — **SHIPPED in 1.9.0**
 
 ### What shipped (1.7.0)
 
@@ -342,7 +364,7 @@ chars) with the build's **failure reasons** via `failureDetails(build)`,
 so a failed PR build surfaces *why* it failed in the PR's Checks tab
 rather than only a red status.
 
-### What shipped (1.8.3)
+### What shipped (1.9.0)
 
 Line-level **annotations** (`output.annotations`), parsed by
 `BuildProblemAnnotations` from the same build-problem descriptions, in the

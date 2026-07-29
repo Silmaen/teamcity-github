@@ -657,6 +657,7 @@ against the live plugin. The fixed checks are:
 5. **Webhook self-delivery** - HMAC-signed POST to our own webhook URL; expects `200 pong`.
 6. **Token resolution / `<project>` / `<repo>`** - one row per opted-in buildType project; uses `TokenResolver.resolveAccessToken`.
 7. **GitHub API auth / `<project>` / `<repo>`** - one row per project that produced a token; `GET /rate_limit` with the token.
+8. **Single status publisher** - lists the opted-in build configurations that also carry TeamCity's bundled *Commit status publisher*, since two producers mean two competing rows per build on GitHub. `WARN`, never `FAIL`: the plugin works, the reporting is ambiguous, and correcting it belongs to the operator.
 
 Each test reports `PASS` / `WARN` / `FAIL` / `SKIP` with a free-form
 detail string.

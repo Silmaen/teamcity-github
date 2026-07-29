@@ -12,8 +12,8 @@ the bulk of the configuration is no longer hand-edited parameters:
   holds the **webhook secret** and **API token** forms. Writes to
   the plugin-owned settings file; applied immediately (no restart).
 - **Project page** — `Administration -> <project> -> GitHub Bridge`
-  (under the *Integrations* group). Edits the six project-level
-  parameters that opt a project into the bridge.
+  (under the *Integrations* group). Edits the project-level parameters that
+  opt a project into the bridge, and the PR-ref mode.
 - **Per-BuildType build feature** — `Edit Configuration -> Build
   Features -> Add -> GitHub Bridge integration`. The presence of the
   feature is the per-task opt-in; its fields tune the trigger paths.
