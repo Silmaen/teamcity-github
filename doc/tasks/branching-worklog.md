@@ -30,7 +30,8 @@ into rules; §9 keeps the short audit trail.
 | 2026-07-28 | QA status | QA is a **reviewer**, not a gate: no formal GitHub status, findings tracked in an external bug tracker. | R15 |
 | 2026-07-28 | QA tooling | None to integrate — the deployment is a TeamCity build. | R15 |
 | 2026-07-28 | QA hand-off | QA wants **a reference to a set of builds** (and artefacts), reachable from GitHub; they have GitHub access. | R15 |
-| 2026-07-28 | Red long-life branch | The **PR author** investigates. | R16 |
+| 2026-07-28 | Red long-life branch | The **PR author** investigates. | ~~R16~~ |
+| 2026-07-29 | Red long-life branch (revised) | **Out of scope**: TeamCity's *investigation auto-assignment* already routes a broken protected-branch build to whoever caused it. G17 is dropped — it would duplicate a mechanism TeamCity does better, at the cost of a GitHub call per failing branch build. | — |
 | 2026-07-28 | CI cost | No hard ceiling, but the per-PR task set is deliberately limited. | R17 |
 | 2026-07-28 | `Experiment/*` branches | Trigger **nothing** automatically, must stay **manually startable** — with or without a PR. | R6 |
 | 2026-07-28 | `Feature/*` / `Bugfix/*` without PR | Must be **buildable before any PR exists**. | R7 |
@@ -69,7 +70,7 @@ Status values: `open` · `in progress` · **`done (x.y.z)`** · `dropped` ·
 | G14 | Artifact links | **done (1.8.3)** | The PR linked to build pages but not to what they produced. The completed Check Run lists top-level artifacts and the sticky comment gains an `[artifacts]` cell (`checkRun.artifactLinks`, on by default). This is the QA hand-off of F26. | `artifactSection` / `joinSections`, `PrSummaryCommenter.Row.artifactsUrl` |
 | G16 | "Build the branch only while it has no PR" | **superseded** | G18 shipped: there is no second ref left to deduplicate. | — |
 | G6 | Post an arbitrary Check Run from outside | **dropped** | R15: no external QA tooling — the deployment is a TeamCity build. Revisit only if a non-TeamCity system must report. | — |
-| G17 | Name the merged PR on a red long-life build | open | R16 makes the PR author responsible, but nothing links a merge-commit build back to its PR: `branchPrLookup` matches only *open* PRs whose head is the commit (F9). Ask GitHub for the PR associated with the merge commit — the same endpoint returns merged PRs — then publish number + author as build parameters, and optionally comment on the merged PR. Small. | — |
+| G17 | Name the merged PR on a red long-life build | **dropped** | Would have published the merged PR + its author on a failing `<long-life branch>` build, to give R16 tooling. Dropped 2026-07-29: TeamCity's investigation auto-assignment already does the routing, better and without a GitHub call per failing build. | — |
 | G15 | Warn on a double status publisher | open | R10 / F24 is documented for users but nothing detects it. One `WARN` per build configuration per server start + a self-test row, read from `resolvedSettings` so template-inherited publishers are caught. **Warn only, never act** (roadmap Item 4). Small. | — |
 | G1 | `pull_request.labeled` / `unlabeled` | open | Labels are a *filter*, never a *trigger*: adding `ci-full` does nothing until the next push/comment/approval (F5). Handle `labeled` and re-evaluate candidates. Small. | — |
 | G3 | `pull_request.edited` | open | Editing the title to add/remove `[skip ci]` or a require-phrase has no effect until the next event. Same shape as G1. Small. | — |
@@ -89,7 +90,6 @@ Status values: `open` · `in progress` · **`done (x.y.z)`** · `dropped` ·
 | G12 | No unified branch/PR view searchable by either key | **done (1.8.3)** | `BridgeBuildsTab` + `project/bridgeBuilds.jsp`, PR build tag (`prTag.enabled` / `prTag.prefix`) |
 | G12b | No retro-association of pre-PR builds | **done (1.8.3)** | `PullRequestEventListener.retroAssociate` on opened/synchronize |
 | G14 | Check Runs and PR comment carry no artifact links | **done (1.8.3)** | `artifactSection` / `joinSections`, `PrSummaryCommenter.Row.artifactsUrl`, setting `checkRun.artifactLinks` |
-| G17 | A red long-life build cannot name the merged PR / author | open | — |
 | G1 | No `pull_request.labeled` / `unlabeled` handling | open | — |
 | G3 | No `pull_request.edited` handling | open | — |
 | G4 | No `pull_request.reopened` handling | open | — |
@@ -127,15 +127,11 @@ row here is complete.
 The batch above closed the agreed sequence. What remains, in the order the
 scenarios argue for:
 
-1. **G17** — name the merged PR (and its author) on a red `<long-life branch>`
-   build, so R16 has tooling behind it. Small: ask GitHub for the PR
-   associated with the merge commit, publish number + author as build
-   parameters.
-2. **G15** — warn when a build configuration carries both the bridge and the
+1. **G15** — warn when a build configuration carries both the bridge and the
    bundled `commitStatusPublisher` (R10 is documented, not yet detected).
-3. **G1 / G3 / G4** — react to `labeled`, `edited`, `reopened`, so a label is
+2. **G1 / G3 / G4** — react to `labeled`, `edited`, `reopened`, so a label is
    a trigger and not only a filter.
-4. **G10** — line-level Check Run annotations.
+3. **G10** — line-level Check Run annotations.
 
 Still open as a *decision*: the pre-PR build policy of F1 — but with G18
 shipped, "automatic on push" no longer costs a second build, so the

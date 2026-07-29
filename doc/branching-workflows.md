@@ -121,7 +121,7 @@ Rules taken as given:
 | R13 | The **cascade PRs are opened and merged by a human** (R4), because conflicts are frequent and a human must resolve them. |
 | R14 | **One single set of required checks** for this project — no per-target-branch variation. Other deployments may differ. |
 | R15 | **QA is a reviewer, not a gate.** QA has no formal status in GitHub today; findings are tracked in an external bug tracker. What QA needs from us is a **reference to a set of builds** (and their artefacts), not a blocking check. |
-| R16 | A `<long-life branch>` turned red by a merge is the **PR author's** responsibility to investigate. |
+| ~~R16~~ | ~~A `<long-life branch>` turned red by a merge is the PR author's responsibility to investigate.~~ **Out of scope (2026-07-29):** TeamCity already does this with its **investigation auto-assignment**. The number is kept so the other cross-references stay valid. |
 | R17 | No hard CI cost ceiling, but the **set of tasks per PR is deliberately limited** to keep CI load reasonable. |
 | R18 | What we validate is the **source branch**, not GitHub's merge preview. The merge-preview ref (`refs/pull/*/merge`) has never been used here — builds have always been of the branch as it stands. |
 | R19 | Consequently, the target model is **branch-source builds**: the bridge builds and reports on the real branch ref (`Feature/toto`), not on a synthetic `pull/N` ref. Decided 2026-07-28, shipped in 1.8.3 (F28). |
@@ -134,10 +134,9 @@ Consequences that shape everything below:
   the head ref after F28 — changes nothing here.)
 - Because pushes are protected, a **red post-merge build on a
   `<long-life branch>` cannot be fixed by a push** — it needs another PR.
-  Post-merge builds are therefore *alarms*, not gates; the gates live on
-  the PR. R16 names the owner of the alarm: the PR author — which means the
-  alarm must carry enough information to identify that PR (see F9 and
-  **G17**).
+  Post-merge builds are therefore *alarms*, not gates; the gates live on the
+  PR. Routing that alarm to whoever caused it is **TeamCity's** job, not the
+  bridge's: investigation auto-assignment already does it (see F9).
 - The cascade (R4/R13) is **human-driven**: PRs between two protected
   branches, opened and merged by a person. That is good news for us — the
   author is a normal team member, so comment triggers, approvals and
@@ -474,26 +473,17 @@ the protected branch (visible on the commit, not on the closed PR).
 **Config:** A4/A5 need `triggerOnBranch=on` **and** a VCS trigger (or a
 scheduled trigger) — the bridge gates and reports branch builds but
 never *starts* them.
-**Who owns a red post-merge build (R16):** **the author of the PR that was
-just merged.** That is a clear rule, but the tooling does not yet support
-it — and this is a real gap:
+**Who owns a red post-merge build:** **TeamCity does the routing.** Its
+*investigation auto-assignment* already attributes a broken build on a
+protected branch to whoever most likely caused it, which is exactly what is
+needed here — so the bridge stays out of it. It was briefly specified as a
+bridge feature (name the merged PR and its author on the failing build) and
+that idea is **dropped**: it would duplicate a mechanism TeamCity does better,
+with an extra GitHub call per failing branch build.
 
-- The alarm lives on a **merge commit of a protected branch**. There is no
-  open PR whose head is that commit, so `branchPrLookup` (F25) resolves
-  nothing: it deliberately matches only *open* PRs whose head is the built
-  commit.
-- GitHub *does* know the answer — "list pull requests associated with a
-  commit" returns the **merged** PR for a merge commit — but the plugin
-  never asks for it in this direction, and has nowhere to put the answer.
-- What R16 wants concretely: when a `<long-life branch>` build fails, name
-  the merged PR and its author, and ideally tell them where it hurts —
-  a comment on the merged PR, or at least the PR number and author in the
-  build (as parameters/tags) so TeamCity notifications can route to them.
-  Tracked as **G17** in the [worklog](tasks/branching-worklog.md).
-
-Until then, routing is TeamCity-side only: notification rules on A4/A5
-pointing at the team, and a human mapping "which PR landed just before
-this build".
+What the bridge still contributes on that path is the *signal*: the Check Run
+on the merge commit, with the failure reasons in its body, so the breakage is
+visible from GitHub as well as from TeamCity.
 
 ### F10 — Direct push to a protected branch
 
