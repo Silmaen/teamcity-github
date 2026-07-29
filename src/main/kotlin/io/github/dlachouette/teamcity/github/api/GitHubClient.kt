@@ -496,6 +496,11 @@ open class GitHubClient {
             )
         }
 
+        // GitHub's documented limits for output.annotations.
+        const val MAX_ANNOTATIONS_PER_REQUEST: Int = 50
+        private const val MAX_ANNOTATION_MESSAGE: Int = 64 * 1024
+        private const val MAX_ANNOTATION_TITLE: Int = 255
+
         // Public for testing — verifies we build the exact JSON shape GitHub expects.
         // GitHub Check Runs API: when status != completed, the conclusion field
         // must NOT be sent. Otherwise it's required.
@@ -513,6 +518,20 @@ open class GitHubClient {
             output.put("title", request.outputTitle)
             output.put("summary", request.outputSummary)
             request.outputText?.let { output.put("text", it) }
+            if (request.annotations.isNotEmpty()) {
+                val arr = output.putArray("annotations")
+                // GitHub rejects a request carrying more than 50; the caller
+                // caps too, this is the belt to that braces.
+                request.annotations.take(MAX_ANNOTATIONS_PER_REQUEST).forEach { a ->
+                    val node = arr.addObject()
+                    node.put("path", a.path)
+                    node.put("start_line", a.startLine)
+                    node.put("end_line", a.endLine)
+                    node.put("annotation_level", a.level.apiValue)
+                    node.put("message", a.message.take(MAX_ANNOTATION_MESSAGE))
+                    a.title?.let { node.put("title", it.take(MAX_ANNOTATION_TITLE)) }
+                }
+            }
             request.detailsUrl?.let { root.put("details_url", it) }
             return MAPPER.writeValueAsString(root)
         }
@@ -550,7 +569,27 @@ data class CheckRunRequest(
     // chars). Used to surface build-failure reasons in the PR's Checks
     // panel beyond the short summary line.
     val outputText: String? = null,
+    // Optional line-level annotations (GitHub `output.annotations`, max 50 per
+    // request). Pin a failure to the file and line that caused it.
+    val annotations: List<CheckRunAnnotation> = emptyList(),
 )
+
+// One GitHub Check Run annotation: a diagnostic pinned to a repo-relative
+// path and a line range.
+data class CheckRunAnnotation(
+    val path: String,
+    val startLine: Int,
+    val endLine: Int,
+    val level: CheckRunAnnotationLevel,
+    val message: String,
+    val title: String? = null,
+)
+
+enum class CheckRunAnnotationLevel(val apiValue: String) {
+    NOTICE("notice"),
+    WARNING("warning"),
+    FAILURE("failure"),
+}
 
 enum class CheckRunStatus(val apiValue: String) {
     QUEUED("queued"),

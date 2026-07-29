@@ -73,6 +73,7 @@ class AdminConsolePage(
         model["set_branchPrLookup"] = serverSettings.branchPrLookupEnabled()
         model["set_rerunAllOnlyFailed"] = serverSettings.rerunAllOnlyFailed()
         model["set_artifactLinks"] = serverSettings.artifactLinksEnabled()
+        model["set_annotations"] = serverSettings.checkRunAnnotationsEnabled()
         model["set_queueCleanup"] = serverSettings.queueCleanupEnabled()
         model["set_prTag"] = serverSettings.prTagEnabled()
         model["set_prTagPrefix"] = serverSettings.prTagPrefix()

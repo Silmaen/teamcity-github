@@ -125,4 +125,71 @@ class CheckRunPayloadTest {
         assertEquals("in_progress", CheckRunStatus.IN_PROGRESS.apiValue)
         assertEquals("completed", CheckRunStatus.COMPLETED.apiValue)
     }
+
+    // G10: output.annotations, in the exact shape GitHub documents.
+    @Test
+    fun `annotations are encoded under output`() {
+        val json = GitHubClient.encodeCheckRunPayload(
+            CheckRunRequest(
+                name = "TeamCity / Build",
+                headSha = "abc",
+                status = CheckRunStatus.COMPLETED,
+                conclusion = CheckRunConclusion.FAILURE,
+                outputTitle = "Build failed",
+                outputSummary = "1 error",
+                annotations = listOf(
+                    CheckRunAnnotation(
+                        path = "src/a.cpp",
+                        startLine = 42,
+                        endLine = 42,
+                        level = CheckRunAnnotationLevel.FAILURE,
+                        message = "no member named 'trace'",
+                        title = "C2065",
+                    ),
+                ),
+            )
+        )
+        val node = ObjectMapper().readTree(json).path("output").path("annotations")
+        assertTrue(node.isArray)
+        assertEquals(1, node.size())
+        assertEquals("src/a.cpp", node[0].path("path").asText())
+        assertEquals(42, node[0].path("start_line").asInt())
+        assertEquals(42, node[0].path("end_line").asInt())
+        assertEquals("failure", node[0].path("annotation_level").asText())
+        assertEquals("no member named 'trace'", node[0].path("message").asText())
+        assertEquals("C2065", node[0].path("title").asText())
+    }
+
+    @Test
+    fun `no annotations means no annotations field at all`() {
+        val json = GitHubClient.encodeCheckRunPayload(
+            CheckRunRequest(
+                name = "TeamCity / Build",
+                headSha = "abc",
+                status = CheckRunStatus.IN_PROGRESS,
+                conclusion = null,
+                outputTitle = "Building",
+                outputSummary = "",
+            )
+        )
+        assertTrue(ObjectMapper().readTree(json).path("output").path("annotations").isMissingNode)
+    }
+
+    @Test
+    fun `more annotations than GitHub accepts are truncated`() {
+        val many = (1..80).map {
+            CheckRunAnnotation("src/a.cpp", it, it, CheckRunAnnotationLevel.WARNING, "w$it")
+        }
+        val json = GitHubClient.encodeCheckRunPayload(
+            CheckRunRequest(
+                name = "n", headSha = "abc", status = CheckRunStatus.COMPLETED,
+                conclusion = CheckRunConclusion.SUCCESS, outputTitle = "t", outputSummary = "s",
+                annotations = many,
+            )
+        )
+        assertEquals(
+            GitHubClient.MAX_ANNOTATIONS_PER_REQUEST,
+            ObjectMapper().readTree(json).path("output").path("annotations").size(),
+        )
+    }
 }

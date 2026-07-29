@@ -81,6 +81,12 @@ class BridgeServerSettings(
     // artifact listing per finished build.
     fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
 
+    // Pin compiler diagnostics to their file and line in the PR's diff, as
+    // GitHub Check Run annotations. Parsed from the build problems TeamCity
+    // already reports — no build-log scanning — so the cost is nil and the
+    // worst case is simply no annotation.
+    fun checkRunAnnotationsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_ANNOTATIONS, true)
+
     // Master switch for everything that takes a build OUT of the queue:
     // draft suppression, the scope filters, the already-passed reuse and the
     // drain of a closed PR. Off = the bridge only ever adds builds and reports
@@ -161,7 +167,7 @@ class BridgeServerSettings(
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
                 "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
-                "queueCleanup=${queueCleanupEnabled()}, " +
+                "queueCleanup=${queueCleanupEnabled()}, annotations=${checkRunAnnotationsEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -201,6 +207,7 @@ class BridgeServerSettings(
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
+        const val KEY_CHECK_RUN_ANNOTATIONS: String = "checkRun.annotations"
         const val KEY_QUEUE_CLEANUP: String = "queueCleanup.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"

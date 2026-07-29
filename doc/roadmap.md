@@ -332,7 +332,7 @@ PKCS#8 so Java's stock `KeyFactory` can load it. Literal `\n`
 escape sequences (when the key is pasted into a single-line field)
 are normalised to real newlines before parsing.
 
-## Item 10 - Check Run annotations / richer failure detail — **PARTIAL**
+## Item 10 - Check Run annotations / richer failure detail — **SHIPPED in 1.8.3**
 
 ### What shipped (1.7.0)
 
@@ -342,17 +342,18 @@ chars) with the build's **failure reasons** via `failureDetails(build)`,
 so a failed PR build surfaces *why* it failed in the PR's Checks tab
 rather than only a red status.
 
-### Still future work
+### What shipped (1.8.3)
 
-Line-level **annotations** (the GitHub `output.annotations` array
-that pins messages to specific files/lines, e.g. from compiler or
-linter output) are not yet emitted. Mapping TeamCity build problems
-and test failures to file/line annotations is the remaining work.
+Line-level **annotations** (`output.annotations`), parsed by
+`BuildProblemAnnotations` from the same build-problem descriptions, in the
+GNU/clang and MSVC diagnostic shapes. Paths are relativised against
+`teamcity.build.checkoutDir` and a diagnostic outside the checkout is dropped
+(GitHub rejects a path that is not in the repository). Capped at 50 with
+duplicates collapsed, behind `checkRun.annotations` (default on).
 
-### Effort
-
-Medium. Parsing build problems into annotation coordinates is the
-bulk of it.
+**Not covered:** test failures. TeamCity gives a class and a method, not a
+file and a line, so pinning them to the diff would need a language-specific
+mapping — out of scope until someone asks.
 
 ## Open SDK questions worth revisiting
 
