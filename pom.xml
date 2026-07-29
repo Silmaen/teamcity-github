@@ -110,6 +110,27 @@
         <sourceDirectory>src/main/kotlin</sourceDirectory>
         <testSourceDirectory>src/test/kotlin</testSourceDirectory>
 
+        <resources>
+            <!-- The plugin descriptor takes its version from the POM, so the
+                 version TeamCity displays can never drift from the code again.
+                 Only that one file is filtered: the JSPs carry ${...} EL
+                 expressions that must reach the browser untouched. -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>teamcity-plugin.xml</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>teamcity-plugin.xml</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
         <plugins>
             <plugin>
                 <groupId>org.jetbrains.kotlin</groupId>

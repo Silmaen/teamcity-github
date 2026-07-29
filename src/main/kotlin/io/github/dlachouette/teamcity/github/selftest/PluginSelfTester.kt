@@ -12,7 +12,7 @@ import io.github.dlachouette.teamcity.github.web.SignatureVerifier
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SProject
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 
 // Runs a battery of end-to-end checks against the running plugin
 // instance and returns a structured report. Invoked from the admin
@@ -102,7 +102,7 @@ class PluginSelfTester(
     // as PASS - the goal is "host reachable", not "endpoint readable".
     private fun testGitHubApiReachable(targets: List<OptedInTarget>): TestResult {
         val apiBase = firstApiBase(targets) ?: GitHubClient.DEFAULT_API_BASE
-        val url = URL("$apiBase/zen")
+        val url = URI.create("$apiBase/zen").toURL()
         return try {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -166,7 +166,7 @@ class PluginSelfTester(
         val payload = "{\"zen\":\"selftest\"}".toByteArray()
         val sig = "${SignatureVerifier.PREFIX}${SignatureVerifier.computeHmacSha256Hex(payload, secret)}"
         return try {
-            val conn = (URL(webhookUrl).openConnection() as HttpURLConnection).apply {
+            val conn = (URI.create(webhookUrl).toURL().openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
@@ -270,7 +270,7 @@ class PluginSelfTester(
     }
 
     private fun callRateLimit(accessToken: String, apiBase: String, testName: String): TestResult {
-        val url = URL("$apiBase/rate_limit")
+        val url = URI.create("$apiBase/rate_limit").toURL()
         return try {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"

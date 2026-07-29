@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.intellij.openapi.diagnostic.Logger
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 import java.time.Instant
 
 open class GitHubClient {
@@ -279,7 +279,7 @@ open class GitHubClient {
         token: String?,
         jsonBody: String? = null,
     ): HttpResponse? {
-        val conn = (URL(urlSpec).openConnection() as HttpURLConnection).apply {
+        val conn = (URI.create(urlSpec).toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = method
             if (token != null) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", ACCEPT_HEADER)
@@ -350,7 +350,7 @@ open class GitHubClient {
             if (gitHubUrl.isNullOrBlank()) return DEFAULT_API_BASE
             val cleaned = gitHubUrl.trim().trimEnd('/')
             return try {
-                val url = URL(cleaned)
+                val url = URI.create(cleaned).toURL()
                 val host = url.host.lowercase()
                 if (host == "github.com" || host == "api.github.com") {
                     DEFAULT_API_BASE

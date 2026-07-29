@@ -9,7 +9,7 @@
             detects PR draft state, retriggers builds on draft-to-ready
             transitions, and exposes richer commit statuses.
         </description>
-        <version>1.8.2</version>
+        <version>${project.version}</version>
         <vendor>
             <name>Damien Lachouette</name>
             <url>https://github.com/silmaen/teamcity-github</url>

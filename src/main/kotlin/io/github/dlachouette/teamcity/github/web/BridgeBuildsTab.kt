@@ -135,7 +135,7 @@ class BridgeBuildsTab(
         url = safeUrl { webLinks.getViewResultsUrl(build) },
         artifactsUrl = if (build.isArtifactsExists) safeUrl { webLinks.getViewArtifactsUrl(build) } else null,
         draft = draftOf(build.tags),
-        startedAt = build.startDate?.time ?: 0L,
+        startedAt = build.startDate.time,
     )
 
     companion object {

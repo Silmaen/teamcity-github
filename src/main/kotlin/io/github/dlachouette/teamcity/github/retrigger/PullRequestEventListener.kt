@@ -422,9 +422,9 @@ class PullRequestEventListener(
             bt.history.asSequence()
                 .take(HISTORY_SCAN_DEPTH)
                 .filter { buildMatchesBranchAndSha(it, ref, payload.headSha) }
-                .forEach { build ->
+                .forEach eachBuild@{ build ->
                     val missing = wanted.filterNot { build.tags.contains(it) }
-                    if (missing.isEmpty()) return@forEach
+                    if (missing.isEmpty()) return@eachBuild
                     try {
                         build.setTags(build.tags + missing)
                         tagged++
@@ -454,10 +454,10 @@ class PullRequestEventListener(
             val branchName = prBuildRefFor(config, payload.prNumber, payload.headRef)
             bt.getQueuedBuilds(null)
                 .filter { it.buildPromotion.branch?.name == branchName }
-                .forEach { qb ->
+                .forEach eachQueued@{ qb ->
                     if (serverSettings.dryRun()) {
                         LOG.info("[dry-run] would remove queued ${bt.externalId} for ${payload.repo.slug}#${payload.prNumber}")
-                        return@forEach
+                        return@eachQueued
                     }
                     try {
                         qb.removeFromQueue(null, "teamcity-github-bridge: PR #${payload.prNumber} $verb")
@@ -512,14 +512,13 @@ class PullRequestEventListener(
             }
     }
 
-    private fun collectAllBuildTypes(): List<SBuildType> {
-        val root = projectManager.rootProject
-        if (root != null) {
-            val fromRoot = root.buildTypes
-            if (fromRoot.isNotEmpty()) return fromRoot
+    // `rootProject.buildTypes` is the whole tree and is what works on TC
+    // 2026.1; the flattened walk is the fallback for a server whose root
+    // reports none (seen while diagnosing the empty-candidate case).
+    private fun collectAllBuildTypes(): List<SBuildType> =
+        projectManager.rootProject.buildTypes.ifEmpty {
+            projectManager.projects.flatMap { it.ownBuildTypes }
         }
-        return projectManager.projects.flatMap { it.ownBuildTypes }
-    }
 
     private fun diagnoseEmptyCandidates(eventRepo: RepoCoords) {
         val all = projectManager.allBuildTypes
@@ -527,7 +526,7 @@ class PullRequestEventListener(
         val numberOfBuildTypes = projectManager.numberOfBuildTypes
         val projects = projectManager.projects
         val root = projectManager.rootProject
-        val fromRoot = root?.buildTypes.orEmpty()
+        val fromRoot = root.buildTypes
         val fromProjectsFlatten = projects.flatMap { it.ownBuildTypes }
         LOG.info(
             "Diagnostic for repo=${eventRepo.slug}: " +
@@ -535,7 +534,7 @@ class PullRequestEventListener(
                 "allBuildTypes.size=${all.size}, " +
                 "activeBuildTypes.size=${activeOnly.size}, " +
                 "projects.size=${projects.size}, " +
-                "rootProject=${root?.externalId ?: "(null)"}, " +
+                "rootProject=${root.externalId}, " +
                 "rootProject.buildTypes.size=${fromRoot.size}, " +
                 "projects.flatMap(ownBuildTypes).size=${fromProjectsFlatten.size}"
         )

@@ -21,8 +21,8 @@ class WebhookInfoController(
     init {
         webManager.registerController(INFO_PATH, this)
         webManager.registerController(INFO_PATH_MARKDOWN, this)
-        authInterceptor.addPathNotRequiringAuth(INFO_PATH)
-        authInterceptor.addPathNotRequiringAuth(INFO_PATH_MARKDOWN)
+        authInterceptor.addPathNotRequiringAuth(javaClass, INFO_PATH)
+        authInterceptor.addPathNotRequiringAuth(javaClass, INFO_PATH_MARKDOWN)
     }
 
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView? {

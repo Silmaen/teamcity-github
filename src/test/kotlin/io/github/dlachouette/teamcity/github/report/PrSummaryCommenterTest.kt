@@ -38,23 +38,43 @@ class PrSummaryCommenterTest {
         assertTrue(commenter.parseState(null).isEmpty())
     }
 
-    // G14: QA reaches the installer from the PR, so the artefacts link must
-    // survive the JSON round-trip and stay optional for comments written by
-    // earlier versions.
+    // G14: QA reaches the installer from the pull request, so the cell holds
+    // **direct download** links — one per artifact — and they must survive the
+    // JSON round-trip.
     @Test
-    fun `renders and parses back the artifacts link`() {
-        val body = commenter.render(
-            mapOf("TeamCity / A" to PrSummaryCommenter.Row("✅", "Build passed", "https://tc/a", "https://tc/a/artifacts"))
+    fun `renders one direct link per artifact and parses them back`() {
+        val links = listOf(
+            PrSummaryCommenter.ArtifactLink("setup.exe", "https://tc/repository/download/Bt/42:id/setup.exe"),
+            PrSummaryCommenter.ArtifactLink("sha256.txt", "https://tc/repository/download/Bt/42:id/sha256.txt"),
         )
-        assertTrue(body.contains("[artifacts](https://tc/a/artifacts)"))
-        assertEquals("https://tc/a/artifacts", commenter.parseState(body)["TeamCity / A"]?.artifactsUrl)
+        val body = commenter.render(
+            mapOf("TeamCity / A" to PrSummaryCommenter.Row("✅", "Build passed", "https://tc/a", links))
+        )
+        assertTrue(body.contains("[setup.exe](https://tc/repository/download/Bt/42:id/setup.exe)"))
+        assertTrue(body.contains("[sha256.txt](https://tc/repository/download/Bt/42:id/sha256.txt)"))
+        assertEquals(links, commenter.parseState(body)["TeamCity / A"]?.artifacts)
     }
 
     @Test
-    fun `a row without artifacts renders an empty cell and parses back as null`() {
+    fun `a row without artifacts renders an empty cell`() {
         val body = commenter.render(mapOf("TeamCity / A" to PrSummaryCommenter.Row("✅", "Build passed", "https://tc/a")))
-        assertTrue(!body.contains("[artifacts]"))
-        assertNull(commenter.parseState(body)["TeamCity / A"]?.artifactsUrl)
+        assertTrue(!body.contains("[setup.exe]"))
+        assertEquals(emptyList<PrSummaryCommenter.ArtifactLink>(), commenter.parseState(body)["TeamCity / A"]?.artifacts)
+    }
+
+    @Test
+    fun `a legacy artifactsUrl is read back as a single link`() {
+        // Written by 1.9.0-rc versions, which pointed at the artifacts tab.
+        // Upgrading must not blank the cell.
+        val legacy = """
+            ${PrSummaryCommenter.MARKER_BEGIN}
+            {"TeamCity / A":{"emoji":"✅","text":"Build passed","url":"https://tc/a","artifactsUrl":"https://tc/a/artifacts"}}
+            ${PrSummaryCommenter.MARKER_END}
+        """.trimIndent()
+        assertEquals(
+            listOf(PrSummaryCommenter.ArtifactLink("artifacts", "https://tc/a/artifacts")),
+            commenter.parseState(legacy)["TeamCity / A"]?.artifacts,
+        )
     }
 
     @Test
@@ -67,7 +87,24 @@ class PrSummaryCommenterTest {
         """.trimIndent()
         val row = commenter.parseState(legacy)["TeamCity / A"]!!
         assertEquals("Build passed", row.text)
-        assertNull(row.artifactsUrl)
+        assertEquals(emptyList<PrSummaryCommenter.ArtifactLink>(), row.artifacts)
+    }
+
+    // The download URL contract: `/repository/download/<bt>/<buildId>:id/<path>`,
+    // the same one artifact dependencies use — a link that downloads the file
+    // rather than opening a TeamCity page.
+    @Test
+    fun `artifact paths are percent-encoded per segment`() {
+        assertEquals(
+            "dist/my%20app%20setup.exe",
+            BuildStatusCheckRunPublisher.encodeArtifactPath("dist/my app setup.exe"),
+        )
+        assertEquals(
+            "reports/index.html",
+            BuildStatusCheckRunPublisher.encodeArtifactPath("reports/index.html"),
+        )
+        // A '+' in a file name must survive as %2B, not be read back as a space.
+        assertEquals("libc%2B%2B.zip", BuildStatusCheckRunPublisher.encodeArtifactPath("libc++.zip"))
     }
 
     @Test

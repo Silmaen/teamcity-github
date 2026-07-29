@@ -20,7 +20,7 @@ class MetricsController(
 
     init {
         webManager.registerController(PATH, this)
-        authInterceptor.addPathNotRequiringAuth(PATH)
+        authInterceptor.addPathNotRequiringAuth(javaClass, PATH)
     }
 
     override fun doHandle(request: HttpServletRequest, response: HttpServletResponse): ModelAndView? {

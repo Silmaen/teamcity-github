@@ -1,5 +1,6 @@
 package io.github.dlachouette.teamcity.github.report
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.GitHubClient
@@ -21,14 +22,19 @@ class PrSummaryCommenter(
     private val gitHubClient: GitHubClient,
 ) {
 
-    // `artifactsUrl` is what QA asked for: from the PR, one click to the
-    // build's artefacts. Absent in comments written by older versions, so it
-    // must stay optional through the JSON round-trip.
+    // A direct download link for one artifact file.
+    data class ArtifactLink(val name: String, val url: String)
+
+    // `artifacts` is what QA asked for: from the pull request, one click to
+    // the installer **itself** — a direct download, not the artifacts tab.
+    // Comments written by earlier versions carry a single `artifactsUrl`
+    // instead; `parseState` folds that into a one-entry list so upgrading
+    // never blanks an existing comment.
     data class Row(
         val emoji: String,
         val text: String,
         val url: String?,
-        val artifactsUrl: String? = null,
+        val artifacts: List<ArtifactLink> = emptyList(),
     )
 
     fun upsert(
@@ -71,7 +77,7 @@ class PrSummaryCommenter(
                     emoji = v.path("emoji").asText(""),
                     text = v.path("text").asText(""),
                     url = v.path("url").asText("").takeIf { it.isNotBlank() },
-                    artifactsUrl = v.path("artifactsUrl").asText("").takeIf { it.isNotBlank() },
+                    artifacts = parseArtifacts(v),
                 )
             }
         } catch (e: Exception) {
@@ -80,16 +86,34 @@ class PrSummaryCommenter(
         }
     }
 
+    // Current shape: an array of `{name, url}`. Legacy shape: a single
+    // `artifactsUrl` pointing at the artifacts tab — read back rather than
+    // dropped, so a comment written by an earlier version keeps its link.
+    private fun parseArtifacts(v: JsonNode): List<ArtifactLink> {
+        val array = v.path("artifacts")
+        if (array.isArray) {
+            return array.mapNotNull { node ->
+                val url = node.path("url").asText("").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                ArtifactLink(node.path("name").asText("").ifBlank { "artifact" }, url)
+            }
+        }
+        return v.path("artifactsUrl").asText("").takeIf { it.isNotBlank() }
+            ?.let { listOf(ArtifactLink("artifacts", it)) }
+            ?: emptyList()
+    }
+
     // Public for testing — render the full comment body.
     fun render(rows: Map<String, Row>): String {
         val json = MAPPER.writeValueAsString(rows)
         return buildString {
             append(MARKER_BEGIN).append('\n').append(json).append('\n').append(MARKER_END).append('\n')
             append("### TeamCity build summary\n\n")
-            append("| Check | Result | | |\n|---|---|---|---|\n")
+            append("| Check | Result | | Artifacts |\n|---|---|---|---|\n")
             rows.toSortedMap().forEach { (name, r) ->
                 val link = r.url?.let { "[details]($it)" } ?: ""
-                val artifacts = r.artifactsUrl?.let { "[artifacts]($it)" } ?: ""
+                // One direct link per file, space-separated so the cell stays
+                // readable whether the build produced one artifact or five.
+                val artifacts = r.artifacts.joinToString(" ") { "[${it.name}](${it.url})" }
                 append("| ").append(name).append(" | ").append(r.emoji).append(' ').append(r.text)
                     .append(" | ").append(link).append(" | ").append(artifacts).append(" |\n")
             }

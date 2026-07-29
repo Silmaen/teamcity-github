@@ -178,6 +178,22 @@ released separately.)
 
 ### Changed
 
+- **The head branch is no longer appended to the build number when the build
+  already runs on it.** The suffix existed to make a `pull/N` build readable;
+  in branch-source mode the Branch column already shows
+  `Feature/DirectReady`, so repeating it was noise. Unchanged for `pull/N`
+  builds and for a build whose branch is unknown.
+
+- **Artifact links are direct downloads.** The Check Run section and the sticky
+  comment linked the TeamCity artifacts *tab*; they now link each file through
+  `/repository/download/<bt>/<buildId>:id/<path>`, so a click downloads it.
+  Paths are percent-encoded per segment, and the root URL is read per project
+  since TeamCity lets a project override it.
+
+- **The plugin declares the version from the POM.** The descriptor hardcoded
+  `1.8.2`, so TeamCity's plugin list showed a version unrelated to the code in
+  the zip.
+
 - **The bridge no longer removes a build it did not start.** `triggerOnBranch`
   and `triggerOnPrReady` used to be HARD blocks that removed even a manual Run
   from the queue — clicking "Run" on such a build configuration silently did
