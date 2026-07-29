@@ -82,13 +82,8 @@ sequenceDiagram
 
 On the PR's Checks tab, GitHub shows:
 
-```
-+----------------------------------------------------+
-|  -  TeamCity / Build_LinuxX64_Clang                |
-|     Skipped: draft PR                              |
-|     (conclusion: skipped)                          |
-+----------------------------------------------------+
-```
+> ⊘ **TeamCity / Build_LinuxX64_Clang** — Skipped: draft PR
+> _(conclusion: `skipped`)_
 
 The build no longer lingers in the TeamCity queue at all; the
 `DraftAwareBuildFilter` `canStart` precondition is kept only as a
@@ -167,15 +162,9 @@ sequenceDiagram
 In the TeamCity UI, the build queue shows fresh entries with the
 comment:
 
-```
-+----------------------------------------------------+
-|  o  pull/189  Build_LinuxX64_Clang   10:31        |
-|     Triggered by: teamcity-github-bridge          |
-|     Comment: Retriggered by teamcity-github-      |
-|              bridge after pull_request.opened on  |
-|              PR #189                              |
-+----------------------------------------------------+
-```
+| Queued build | Branch | Triggered by | Comment |
+|---|---|---|---|
+| Build_LinuxX64_Clang, 10:31 | `pull/189` | teamcity-github-bridge | Retriggered by teamcity-github-bridge after `pull_request.opened` on PR #189 |
 
 ## Scenario 4: PR is reverted to draft
 
@@ -241,11 +230,7 @@ query the API - it trusts the signed webhook payload.
 
 GitHub's `Recent Deliveries` shows:
 
-```
-+----------------------------------------------------------+
-|  x  ping  10:33  401  Response: Invalid signature        |
-+----------------------------------------------------------+
-```
+> ✗ `ping` — 10:33 — **401** — Response: `Invalid signature`
 
 This is fail-closed by design. See
 [security.md](security.md#fail-closed-on-the-webhook) for the
@@ -398,62 +383,42 @@ that tells them at a glance whether the plugin is healthy.
 Navigation: `Administration -> Server Administration -> GitHub
 Bridge`.
 
-```
-+----------------------------------------------------------+
-| TeamCity GitHub Bridge                                   |
-+----------------------------------------------------------+
-| Getting started                                          |
-|   1. Create & install the GitHub App (card below)        |
-|   2. Point a project at it (repo + connectionId=managed) |
-|   3. Add the "GitHub Bridge integration" build feature   |
-|   4. Verify App config + Run self-tests, open a PR       |
-+----------------------------------------------------------+
-| Plugin status                                            |
-|   Plugin version:    1.x                                 |
-|   TeamCity version:  TeamCity 2026.1 (build <n>)         |
-|   Webhook URL:       https://.../app/.../webhook         |
-|   HMAC secret:       [configured]  [Set/Replace] [Clear] |
-|   Dedicated log:     [configured] /.../...-bridge.log    |
-|   Config snapshot:   JSON | Markdown                     |
-+----------------------------------------------------------+
-| GitHub App                                               |
-|   [Create GitHub App]   (manifest pre-filled: webhook    |
-|                          URL, permissions, events)       |
-|   -- once configured --                                  |
-|   managed App: <app-slug>   [Open settings] [Install]    |
-|   connectionId=managed                                   |
-|   [Verify App configuration]  (GET /app, checks perms    |
-|                                & subscribed events)       |
-+----------------------------------------------------------+
-| Server settings (applied immediately, no restart)        |
-|   API base / API version / PR-info cache TTL / grace     |
-|   HTTP retry attempts + base delay                       |
-|   Feature flags: replay protection, dry-run, metrics,    |
-|                  legacy aliases, sticky PR comment       |
-|   Repository allowlist / Comment-trigger authors         |
-+----------------------------------------------------------+
-| External API                                             |
-|   [enabled/disabled]  API token form  [Set] [Disable]    |
-+----------------------------------------------------------+
-| Self-tests                                               |
-|   [Run self-tests]  (see scenario 11.b)                  |
-+----------------------------------------------------------+
-| Recent events (last N in-memory)                         |
-|   2026-05-25 14:02:30  pull_request  ready_for_review    |
-|                        acme/widget   200  accepted       |
-|   2026-05-25 14:01:55  ping                              |
-|                                      200  accepted       |
-|   ...                                                    |
-+----------------------------------------------------------+
-| GitHub App webhook quick-config                          |
-|   (paste-ready table for the App's webhook page)         |
-+----------------------------------------------------------+
-| Help & documentation                                     |
-|   - README                                               |
-|   - Installation, GitHub App setup, Webhook setup, ...   |
-|   - Common 401 / 404 troubleshooting (fold)              |
-+----------------------------------------------------------+
-```
+The page is one column of cards, in this order:
+
+1. **Getting started** — the four steps: create and install the GitHub App
+   (card below), point a project at it (`repo` + `connectionId=managed`), add
+   the *GitHub Bridge integration* build feature, then verify the App
+   configuration, run the self-tests and open a PR.
+2. **Plugin status** — plugin version, TeamCity version, the webhook URL to
+   paste into GitHub, whether the HMAC secret is configured (with
+   *Set/Replace* and *Clear*), whether the dedicated log is configured, and
+   the config snapshot links (JSON / Markdown).
+3. **GitHub App** — *Create GitHub App* (the manifest comes pre-filled with
+   the webhook URL, the permissions and the events). Once configured: the
+   managed App slug, *Open settings*, *Install / manage installations*, the
+   reminder that `connectionId=managed`, and *Verify App configuration*
+   (`GET /app`, diffs the live permissions and subscribed events against
+   what the plugin needs).
+4. **Server settings** — applied immediately, no restart:
+   - API base override, API version, PR-info cache TTL, stale grace,
+     HTTP retry attempts and base delay.
+   - Feature flags: webhook replay protection, dry-run, metrics endpoint,
+     legacy `teamcity.pullRequest.*` aliases, sticky PR summary comment,
+     attach branch builds to their PR, "Re-run all checks" re-runs only the
+     failed ones, list artifacts in the Check Run and PR comment, annotate
+     the diff with compiler diagnostics, **queue cleanup** (the server-wide
+     off switch), and tag PR builds with their PR number.
+   - Repository allowlist and comment-trigger authors.
+5. **External API** — enabled/disabled, plus the API token form
+   (*Set* / *Disable*).
+6. **Self-tests** — the *Run self-tests* button (scenario 11.b).
+7. **Recent events** — the last N deliveries held in memory, e.g.
+   `2026-05-25 14:02:30  pull_request  ready_for_review  acme/widget  200
+   accepted`. The full history is in the dedicated log.
+8. **GitHub App webhook quick-config** — a paste-ready table for the App's
+   webhook page.
+9. **Help & documentation** — what the plugin does, links to the README and
+   every page of `doc/`, and a fold with the common 401 / 404 causes.
 
 The page is organised top-to-bottom as: a **Getting started** card
 (the four-step opt-in), **Plugin status**, a **GitHub App** card
@@ -541,16 +506,17 @@ queue page.
 (placed by `PrPromotionTagger` - scenario 1 / 3) display a coloured
 pill instead of TC's default grey chip.
 
-```
-Builds list
-+----+--------------------+--------+------------------------------+
-| #  | Build              | Branch | Tags                         |
-+----+--------------------+--------+------------------------------+
-| 87 | #87 Feature/raycast| pull/189 | [draft] (amber)            |
-| 86 | #86 main           | main     |                            |
-| 85 | #85 Feature/foo    | pull/188 | [ready] (green)            |
-+----+--------------------+--------+------------------------------+
-```
+Builds list, as TeamCity renders it:
+
+| # | Build | Branch | Tags |
+|---|---|---|---|
+| 87 | #87 | `Feature/raycast` | `pr-189` &nbsp; **draft** _(amber pill)_ |
+| 86 | #86 | `master` | |
+| 85 | #85 | `Feature/foo` | `pr-188` &nbsp; **ready** _(green pill)_ |
+
+_(Branch shows the head branch because this project runs
+`prBuildRef = branch`; with the default `pull` mode the column would read
+`pull/189`.)_
 
 How it works: a `SimplePageExtension` registered in
 `ALL_PAGES_FOOTER_PLUGIN_CONTAINER` injects a small CSS + JS
@@ -832,13 +798,8 @@ flowchart TD
 
 On the PR's Checks tab, an excluded build shows:
 
-```
-+----------------------------------------------------+
-|  -  TeamCity / Build_LinuxX64_Clang                |
-|     Skipped: PR metadata out of scope             |
-|     (conclusion: skipped)                          |
-+----------------------------------------------------+
-```
+> ⊘ **TeamCity / Build_LinuxX64_Clang** — Skipped: PR metadata out of scope
+> _(conclusion: `skipped`)_
 
 A common pairing: leave `requirePhrase` blank, set `labelFilter` to
 `+:ci` so an expensive suite runs **only** when a reviewer adds the `ci`
@@ -909,16 +870,11 @@ keys: the branch it ran on and the PR it belongs to. Typing `Feature/` finds
 a branch; typing `189` or `#189` finds a pull request; the columns sort by
 time, branch or PR.
 
-```
-+------------------+------+---------------------+--------+--------------+-----------+
-| Branch           | PR   | Build configuration | Build  | State        | Artifacts |
-+------------------+------+---------------------+--------+--------------+-----------+
-| Feature/raycast  | #189 | Build_Linux         | 87     | Build passed | artifacts |
-|   [ready]        |      |                     |        |              |           |
-| Feature/raycast  | #189 | Build_Windows       | queued | Queued       |           |
-| master           |      | Nightly_All         | 86     | Build passed | artifacts |
-+------------------+------+---------------------+--------+--------------+-----------+
-```
+| Branch | PR | Build configuration | Build | State | Artifacts |
+|---|---|---|---|---|---|
+| `Feature/raycast` **ready** | #189 | Build_Linux | 87 | Build passed | artifacts |
+| `Feature/raycast` **ready** | #189 | Build_Windows | queued | Queued | |
+| `master` | | Nightly_All | 86 | Build passed | artifacts |
 
 **How the PR column is filled**: from the build's **PR tag** (`pr-189` by
 default), which the plugin writes when the build runs and back-fills on

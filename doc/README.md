@@ -17,7 +17,6 @@ GitHub App → configure a project → see a Check Run.
 | Know every setting and where it lives | [configuration.md](configuration.md) |
 | See concrete end-to-end walkthroughs | [usage-scenarios.md](usage-scenarios.md) |
 | Map our branch model (default / `Release/*` / cascade / QA) onto pipelines | [branching-workflows.md](branching-workflows.md) |
-| Follow the decisions, the gap backlog and what is actually implemented | [tasks/branching-worklog.md](tasks/branching-worklog.md) |
 | Call the plugin's HTTP API from another app | [api-reference.md](api-reference.md) |
 | Understand the security/trust model | [security.md](security.md) |
 | Diagnose a problem | [troubleshooting.md](troubleshooting.md) |

@@ -42,20 +42,22 @@ flowchart LR
     classDef plugin fill:#e3f2fd,stroke:#1976d2,color:#0d47a1
 
     subgraph TeamCity["TeamCity 2026.1+"]
-        SDK[Bundled GitHub SDK]
-        BRIDGE[teamcity-github-bridge]:::plugin
+        SDK["Bundled GitHub SDK"]
+        BRIDGE["teamcity-github-bridge"]:::plugin
     end
 
-    DRAFT["Draft PR check<br/>via GitHub REST"]:::solved
-    RETRIGGER["Auto retrigger on<br/>ready_for_review"]:::solved
-    WEBHOOK["App-level webhook<br/>+ HMAC verify"]:::solved
-    INFO["/info endpoint<br/>(config snapshot)"]:::solved
+    TRIG["<b>Triggers what should run</b><br/>ready_for_review, synchronize,<br/>label / edit / reopen, approval,<br/>PR comment, Re-run, Re-run all"]:::solved
+    SKIP["<b>Suppresses what should not</b><br/>draft PRs, out-of-scope branches,<br/>paths and PR metadata,<br/>already-passed commits, closed PRs"]:::solved
+    PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, diff annotations,<br/>artifact links, sticky PR comment"]:::solved
+    VIEW["<b>Makes it visible in TeamCity</b><br/>PR builds on their own branch,<br/>draft/ready pills, pr-N tags,<br/>Branches &amp; PRs tab"]:::solved
+    OPS["<b>Runs as a service</b><br/>one App-level webhook + HMAC,<br/>self-minted tokens, admin page,<br/>/info /health /metrics, external API"]:::solved
 
-    SDK -. unchanged .- BRIDGE
-    BRIDGE --> DRAFT
-    BRIDGE --> RETRIGGER
-    BRIDGE --> WEBHOOK
-    BRIDGE --> INFO
+    BRIDGE -. "leaves it unchanged" .-> SDK
+    BRIDGE --> TRIG
+    BRIDGE --> SKIP
+    BRIDGE --> PUB
+    BRIDGE --> VIEW
+    BRIDGE --> OPS
 ```
 
 Concretely:
@@ -99,7 +101,7 @@ Concretely:
   so the plugin works on a vanilla TeamCity 2026.1 sandbox without
   any prior interaction with TC's connection cache.
 
-Highlights (1.7.0 / 1.8.0 / 1.9.0):
+### Newest first (1.9.0)
 
 - **Build pull requests on their own branch** - a per-project switch makes PR
   builds run on the PR's head branch (`Feature/toto`) instead of the synthetic
@@ -129,6 +131,8 @@ Highlights (1.7.0 / 1.8.0 / 1.9.0):
   this feature and TeamCity's bundled *Commit status publisher* means two
   competing rows per build; the plugin says so at startup and in its
   self-tests, and never disables anything behind your back.
+
+### Earlier releases (1.7.0 / 1.8.0)
 
 - **Builds launched on a branch report into its PR** - run a
   configuration on `Feature/x` itself instead of the `pull/N` ref and it
@@ -215,41 +219,35 @@ Prefer to wire an existing App by hand? See
 
 ## Architecture at a glance
 
-```
- GitHub                                  TeamCity
-+----------+                          +-----------------------------+
-|          |  pull_request webhook    |  /webhook  (HMAC verified)  |
-|  Repo  ============================>|  PluginWebhookController    |
-|          |                          |              |              |
-|          |                          |              v              |
-|          |                          |  WebhookPayloadParser       |
-|          |                          |              |              |
-|          |                          |   opened/synchronize/       |
-|          |                          |   ready_for_review?         |
-|          |                          |              |              |
-|          |                          |              v              |
-|          |                          |  PullRequestEventListener   |
-|          |                          |    scan ProjectManager      |
-|          |                          |    -> enqueue matching      |
-|          |                          |       BuildTypes            |
-|          |                          |                             |
-|          |                          |  +-----------------------+  |
-|          |                          |  | DraftAwareBuildFilter |  |
-|          |                          |  | (per pre-start hook)  |  |
-|          |                          |  +-----------+-----------+  |
-|          |                          |              |              |
-|          |  GET /repos/.../pulls/N  |              v              |
-|          |<==============================  GitHubClient           |
-|          |  Bearer ghs_xxxx...      |              ^              |
-|          |  X-GitHub-Api-Version    |              |              |
-|          |                          |        TokenResolver        |
-|          |                          |              |              |
-|          |                          |              v              |
-|          |  POST /app/installations |        AppTokenMinter       |
-|          |  /{id}/access_tokens     |        (signs RS256 JWT     |
-|          |<==============================   with the App's key   |
-|          |  Bearer <JWT>            |         + caches ghs_*)     |
-+----------+                          +-----------------------------+
+```mermaid
+flowchart LR
+    subgraph GH["GitHub"]
+        REPO["Repository<br/>pull_request, review,<br/>comment, check_run events"]
+        CHECKS["Checks API<br/>Check Runs + PR comment"]
+    end
+
+    subgraph TC["TeamCity server — the plugin"]
+        WH["PluginWebhookController<br/>/webhook, HMAC verified"]
+        PARSE["WebhookPayloadParser<br/>+ DeliveryReplayGuard"]
+        LISTEN["PullRequestEventListener<br/>enqueues matching build<br/>configurations"]
+        GATE["GateContextResolver<br/>+ gate decision<br/>trigger axis"]
+        CLEAN["DraftBuildQueueCleaner<br/>DraftAwareBuildFilter<br/>drops out-of-scope auto builds"]
+        BUILD(["Build runs"])
+        PUB["BuildStatusCheckRunPublisher<br/>PrSummaryCommenter<br/>publication axis"]
+        TOKEN["TokenResolver → AppTokenMinter<br/>self-minted installation token"]
+        API["GitHubClient"]
+    end
+
+    REPO -- "webhook delivery" --> WH
+    WH --> PARSE --> LISTEN --> GATE
+    GATE -- "allowed" --> BUILD
+    GATE -- "excluded" --> CLEAN
+    CLEAN -- "Skipped Check Run" --> PUB
+    BUILD -- "queued / started / finished" --> PUB
+    PUB --> API
+    TOKEN --> API
+    API -- "REST calls" --> CHECKS
+    API -- "PR lookup" --> REPO
 ```
 
 See [doc/architecture.md](doc/architecture.md) for the full picture
@@ -283,6 +281,10 @@ The [doc/ index](doc/README.md) maps every page to a task.
 - [Usage scenarios](doc/usage-scenarios.md) - what happens for each
   PR lifecycle event (open, draft, ready, merge, force-push, etc.),
   with sequence diagrams.
+- [Branching workflows](doc/branching-workflows.md) - how the plugin fits a
+  default branch + dated release branches + work branches model: which
+  builds run where, who reports what, and the choices to make when
+  setting it up.
 - [HTTP API reference](doc/api-reference.md) - `/webhook`, `/info`,
   `/info.md` with curl examples.
 - [Troubleshooting](doc/troubleshooting.md) - common failure modes

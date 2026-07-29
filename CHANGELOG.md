@@ -4,144 +4,168 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.9.0] - unreleased
+## [1.9.0] - 2026-07-30
 
-_Developed on the `1.8.3` staging version; released as `1.9.0`._
+Branching workflows: pull requests build on their own branch, publication
+becomes independent of what triggered a build, and the plugin stops taking
+builds out of the queue that it did not put there. Plus a searchable
+branch/PR view, diff annotations and artifact links.
+
+See [doc/branching-workflows.md](doc/branching-workflows.md) for the
+scenarios these features were designed against.
 
 ### Added
 
-- **Line-level Check Run annotations** (`checkRun.annotations`, default on):
-  the compiler diagnostics TeamCity reported as build problems are pinned to
-  their file and line in the PR's diff, instead of only linking out to
-  TeamCity. Both GNU/clang (`file:42:7: error: …`) and MSVC
-  (`file(42,7): error C2065: …`) shapes are parsed, from the build-problem
-  descriptions the plugin already reads for `output.text` — no build-log
-  scanning. Paths are made repo-relative against the build's checkout
-  directory, and a diagnostic pointing outside it (a system header, a
-  toolchain file) is skipped, since GitHub rejects a path that is not in the
-  repository. Capped at the 50 annotations GitHub accepts, duplicates
-  collapsed (a failing build repeats the same diagnostic across targets).
-  Completes roadmap item 10.
+- **Publication and triggering are two independent switches.** The new
+  build-feature flag **`publishChecks`** (default on) is the *only* input to
+  "does this build configuration report to GitHub?" — deliberately
+  independent of what started the build: a PR event, a VCS trigger, a
+  schedule, a manual Run and a GitHub command all report, or none do.
+  Unchecked, the build configuration is invisible on GitHub while still
+  receiving the PR parameters and tags. The `triggerOn*` flags and the
+  branch/path/metadata filters are the other axis: they decide what the
+  bridge *starts automatically*.
 
-- **`pull_request.labeled` / `unlabeled` / `edited` / `reopened` are handled**
-  (G1, G3, G4): a label or a title edit becomes a *trigger*, not only a
-  filter, and a reopened PR gets its builds back. `reopened` behaves like
-  `opened`; the other three re-evaluate the same commit, enqueue what became
-  eligible and — deliberately — post **no** "Skipped" row, since a Check Run
-  is keyed on `(name, commit)` and doing so would overwrite the result an
-  earlier build already published for that commit.
-
-- **The plugin warns when two status publishers are active on one build
-  configuration** (G15). A `WARN` line at server startup lists the build
-  configurations carrying both this feature and TeamCity's bundled *Commit
-  status publisher*, and the admin page's self-tests grow a **Single status
-  publisher** row (WARN, never FAIL). Both read the *resolved* feature set, so
-  a publisher inherited from a BuildType template is caught too. The plugin
-  still never disables anything — see
-  [configuration.md](doc/configuration.md#choosing-the-right-setup).
-
-- **Queue cleanup is switchable off server-wide** (`queueCleanup.enabled`,
-  admin page, default on): everything that takes a build *out* of the queue —
-  draft suppression, the scope filters, `skipIfCommitPassed`, the drain of a
-  closed PR. Off, the bridge only ever adds builds and reports on them. The
-  cleanup scope is also now a documented invariant: it never touches a build
-  configuration that does not carry the build feature.
-
-- **Publication and triggering are two independent switches.** New build-feature
-  flag **`publishChecks`** (default on) is now the *only* input to "does this
-  build configuration report to GitHub?" — deliberately independent of what
-  started the build: a PR event, a VCS trigger, a schedule, a manual Run and a
-  GitHub command all report, or none do. Unchecked, the build configuration is
-  invisible on GitHub while still receiving the PR parameters and tags.
-
-- **Reuse a commit that already passed.** New build-feature flag
-  **`skipIfCommitPassed`** (default off): when an **automatic** build is queued
-  for a commit that already went green in that build configuration, it is
-  removed from the queue and the earlier success is republished
-  (`Build passed (reused #87)`, linking to the build that ran). Matched on the
-  commit alone, any ref — GitHub keys a Check Run on `(name, commit)`, so two
-  refs of one commit are one row. Explicit requests (manual Run, comment
-  command, the Re-run buttons) always re-run. Leave it off for scheduled
-  suites, which are expected to re-run on an unchanged commit.
+- **Branch-source PR builds.** New project setting *Build PRs on their own
+  branch* (`teamcity.github.bridge.prBuildRef = pull | branch`, default
+  `pull`). In branch mode the bridge enqueues PR builds on the PR's **head
+  branch** instead of the synthetic `pull/N` ref: TeamCity shows a branch
+  name that means something, and a push builds **once** instead of twice
+  once a PR exists, because there is no second ref for the same commit. The
+  PR context is resolved from the built commit, so the PR gates
+  (`triggerOnPrDraft`, the PR branch filter, the metadata filters) keep
+  applying — the gate no longer infers "is this a PR?" from the ref name.
+  Requires the head branches in the VCS root's branch spec. See
+  [configuration.md](doc/configuration.md#branch-source-pr-builds-v190).
 
 - **Explicit GitHub commands are no longer undone by the filters.** A build
   the bridge enqueues from a PR comment, a review approval, the *Re-run*
   button or `POST /api/trigger` is stamped with
   `teamcity.github.bridge.triggerSource=command` and gated like a manual
-  Run: HARD blocks still apply, the SOFT ones (branch list, PR-metadata
-  filters) do not. Before, `DraftBuildQueueCleaner` re-evaluated the full
-  gate with `isManual=false` and removed the build again, so every filter
-  that kept a build configuration off the automatic path also killed its
-  on-demand build. This is what makes an on-demand suite, a QA sign-off
-  build and **re-running a "Skipped: …" row from GitHub** work.
-
-- **Branch-source PR builds** (new project setting *Build PRs on their own
-  branch*, `teamcity.github.bridge.prBuildRef = pull | branch`, default
-  `pull`). In branch mode the bridge enqueues PR builds on the PR's **head
-  branch** instead of the synthetic `pull/N`: TeamCity shows a branch name
-  that means something, and a push builds **once** instead of twice once a
-  PR exists, because there is no second ref for the same commit. The PR
-  context is resolved from the built commit, so the PR gates
-  (`triggerOnPrDraft`, PR branch filter, metadata filters) keep applying —
-  `BridgeGate` no longer infers "is this a PR?" from the `pull/` prefix.
-  Requires the head branches in the VCS root's branch spec. See
-  [configuration.md](doc/configuration.md#branch-source-pr-builds-v190).
+  Run: the scope filters no longer apply and nothing removes it afterwards.
+  Before, the queue cleaner re-evaluated the gate and removed the build
+  again, so every filter that kept a build configuration off the automatic
+  path also killed its on-demand build. This is what makes an on-demand
+  suite, a QA sign-off build and **re-running a "Skipped: …" row from
+  GitHub** work.
 
 - **Pull requests from forks are ignored**, and can now be recognised at
   all: `head.repo.full_name` is parsed from the webhook payloads and from
-  the REST answer (`PrInfo.headRepo`). A PR whose head lives in another
-  repository is logged, counted (`fork_events_ignored`) and dropped — the
-  bridge is attached to one repository, never its forks. A blank head repo
+  the REST answer. A pull request whose head lives in another repository is
+  logged, counted (`fork_events_ignored`) and dropped — the bridge is
+  attached to one repository, never its forks. A blank head repository
   (GitHub omits it for a deleted fork) fails open.
 
 - **"Re-run all checks" from GitHub** (`check_suite.rerequested`) re-runs
   every opted-in build configuration for that head; the event used to be
-  answered *204 unsupported*. New `rerunAll.onlyFailed` setting restricts it
-  to configurations whose last build at that commit **failed**. The managed
-  App now subscribes to `check_suite` — on an App created earlier, *Verify
-  App configuration* reports it as a missing event until you add it.
+  answered *204 unsupported*. The new `rerunAll.onlyFailed` setting
+  restricts it to configurations whose last build at that commit **failed**.
+  The managed App now subscribes to `check_suite` — on an App created
+  earlier, *Verify App configuration* reports it as a missing event until
+  you add it.
 
 - **New project tab "Branches & PRs"**: one list of the bridge's builds —
   queued, running and the last 30 finished per build configuration — with
-  both keys on every row (branch **and** PR number), searchable by either
+  both keys on every row (branch **and** pull request), searchable by either
   (`189`, `#189`, `Feature/`) and sortable by time, branch or PR. The PR
-  number is persisted as a build tag (`pr-189` by default), so the page costs
-  no GitHub API call and TeamCity's own tag filter finds it too. The tag is
-  optional (`prTag.enabled`) and its prefix is configurable
-  (`prTag.prefix`). Builds that ran on a
-  work branch **before** its PR existed are back-filled with that tag (and
-  with `draft`/`ready`) when the PR is opened.
+  number is persisted as a build tag (`pr-189` by default), so the page
+  costs no GitHub API call and TeamCity's own tag filter finds it too. The
+  tag is optional (`prTag.enabled`) and its prefix configurable
+  (`prTag.prefix`). Builds that ran on a work branch **before** its pull
+  request existed are back-filled with that tag when the PR is opened.
+
+- **`pull_request.labeled` / `unlabeled` / `edited` / `reopened` are
+  handled**: a label or a title edit becomes a *trigger*, not only a filter,
+  and a reopened PR gets its builds back. `reopened` behaves like `opened`;
+  the other three re-evaluate the same commit, enqueue what became eligible
+  and — deliberately — post **no** "Skipped" row, since a Check Run is keyed
+  on `(name, commit)` and doing so would overwrite the result an earlier
+  build already published for that commit.
 
 - **Artifact links in the Check Run and the PR comment**
   (`checkRun.artifactLinks`, default on): a completed Check Run lists the
-  build's top-level artifacts and the sticky comment gains an `[artifacts]`
-  cell, so a reviewer or a tester reaches the installer/package straight
-  from the pull request instead of hunting for the build in TeamCity.
+  build's top-level artifacts and the sticky comment gains one link per
+  file. Every link is a **direct download**
+  (`/repository/download/<bt>/<buildId>:id/<path>`), not the artifacts tab,
+  so a reviewer or a tester gets the installer in one click. The root URL is
+  read per project, since TeamCity lets a project override it.
 
+- **Line-level Check Run annotations** (`checkRun.annotations`, default on):
+  the compiler diagnostics TeamCity reported as build problems are pinned to
+  their file and line in the pull request's diff, instead of only linking
+  out to TeamCity. Both GNU/clang (`file:42:7: error: …`) and MSVC
+  (`file(42,7): error C2065: …`) shapes are parsed, from the build-problem
+  descriptions the plugin already reads — no build-log scanning. Paths are
+  made repo-relative against the build's checkout directory, and a
+  diagnostic pointing outside it (a system header, a toolchain file) is
+  skipped, since GitHub rejects a path that is not in the repository. Capped
+  at the 50 annotations GitHub accepts, duplicates collapsed.
 
-- **Branch builds are attached to their pull request.** A build launched
-  on a plain branch ref (`Feature/x`, not a `pull/N` ref) now resolves the
-  pull request from the built commit
-  (`GET /repos/{slug}/commits/{sha}/pulls`), so it publishes the same PR
+- **Reuse a commit that already passed.** New build-feature flag
+  **`skipIfCommitPassed`** (default off): when an **automatic** build is
+  queued for a commit that already went green in that build configuration,
+  it is removed from the queue and the earlier success is republished
+  (`Build passed (reused #87)`, linking to the build that ran). Matched on
+  the commit alone, any ref — GitHub keys a Check Run on `(name, commit)`,
+  so two refs of one commit are one row. Explicit requests always re-run.
+  Leave it off for scheduled suites, which are expected to re-run on an
+  unchanged commit.
+
+- **Queue cleanup is switchable off server-wide** (`queueCleanup.enabled`,
+  admin page, default on): everything that takes a build *out* of the queue
+  — draft suppression, the scope filters, `skipIfCommitPassed`, the drain of
+  a closed pull request. Off, the bridge only ever adds builds and reports
+  on them. Its scope is also a documented invariant now: it never touches a
+  build configuration that does not carry the build feature.
+
+- **The plugin warns when two status publishers report the same build.** A
+  `WARN` line at server startup lists the build configurations carrying both
+  this feature and TeamCity's bundled *Commit status publisher*, and the
+  admin page's self-tests grow a **Single status publisher** row (WARN,
+  never FAIL). Both read the *resolved* feature set, so a publisher
+  inherited from a build-configuration template is caught too. The plugin
+  still never disables anything — see
+  [configuration.md](doc/configuration.md#choosing-the-right-setup).
+
+- **Branch builds are attached to their pull request.** A build launched on
+  a plain branch ref resolves the pull request from the built commit
+  (`GET /repos/{slug}/commits/{sha}/pulls`), so it publishes the PR
   parameters (`teamcity.github.bridge.pullRequest.*`), gets the
   `draft`/`ready` tag and updates the sticky summary comment — a manual run
-  on the branch is reported like the `pull/N` build of the same commit.
-  Only **open** PRs whose **head** is that exact commit qualify, so a build
-  of an intermediate commit (or of a branch whose PR has been merged) is
-  never reported as a PR's state. The lookup goes through the PR-info
-  cache, negative answers included, and is governed by the new
-  `branchPrLookup.enabled` feature flag (default **on**, admin-page label
-  *"Attach branch builds to their PR"*).
+  on the branch is reported like the `pull/N` build of the same commit. Only
+  **open** pull requests whose **head** is that exact commit qualify, so a
+  build of an intermediate commit (or of a branch whose PR has been merged)
+  is never reported as a PR's state. The lookup goes through the PR-info
+  cache, negative answers included, governed by `branchPrLookup.enabled`
+  (default on, admin-page label *"Attach branch builds to their PR"*), and
+  implied by branch-source mode.
 
-  Check Run publication itself was already commit-based and needed no
-  change: GitHub attaches the Check Run to the commit, and every PR whose
-  head is that commit shows it, under the same Check Run name as the
-  `pull/N` build. Gating is unchanged — a branch build still takes
-  `BridgeGate`'s branch path (`triggerOnBranch` +
-  `branchTrigger.branches`) **unless the project opted into branch-source
-  builds**, where the PR gates apply instead; so draft state and the
-  PR-metadata filters do
-  not apply to it.
+### Changed
+
+- **The bridge no longer removes a build it did not start.**
+  `triggerOnBranch` and `triggerOnPrReady` used to be HARD blocks that
+  removed even a manual Run from the queue — clicking "Run" on such a build
+  configuration silently did nothing. They now mean "the bridge does not
+  trigger this automatically": an explicit Run, a schedule or a VCS trigger
+  goes through untouched and reports. Same for a draft pull request on a
+  configuration with `triggerOnPrDraft` off — the automatic build is still
+  dropped with a `Skipped: draft PR` row, but an explicit request runs.
+  Queue cleanup is limited to two automatic cases: a scope filter excluded
+  the build, or `skipIfCommitPassed` matched.
+
+  This is a **behaviour change**, though never the intent of those flags:
+  preventing a human from starting a build is TeamCity's job (permissions),
+  not a GitHub-reporting plugin's. Use `publishChecks` to silence a build
+  configuration on GitHub.
+
+- **The head branch is no longer appended to the build number** unless the
+  build runs on a `pull/N` ref. The suffix existed to make such a build
+  readable; on any other ref the Branch column already shows the name, so
+  repeating it was noise.
+
+- **The plugin declares the version from the POM.** The descriptor hardcoded
+  its version, so TeamCity's plugin list could show a number unrelated to
+  the code in the zip.
 
 ### Fixed
 
@@ -151,9 +175,8 @@ _Developed on the `1.8.3` staging version; released as `1.9.0`._
   webhook). With no head SHA yet, the "Queued" Check Run was skipped
   silently and only appeared once the build started (as "Building"). The
   publisher now retries the "queued" publish on TeamCity's scheduler until
-  the revision is resolved, aborting if the build meanwhile starts or
-  leaves the queue (so it never clobbers a later `in_progress` / completed
-  row).
+  the revision is resolved, aborting if the build meanwhile starts or leaves
+  the queue (so it never clobbers a later `in_progress` / completed row).
 
 ## [1.8.0] - 2026-06-13
 
@@ -177,39 +200,6 @@ released separately.)
   call) and from `GET /pulls/{n}` on the queue/filter paths.
 
 ### Changed
-
-- **The head branch is no longer appended to the build number when the build
-  already runs on it.** The suffix existed to make a `pull/N` build readable;
-  in branch-source mode the Branch column already shows
-  `Feature/DirectReady`, so repeating it was noise. Unchanged for `pull/N`
-  builds and for a build whose branch is unknown.
-
-- **Artifact links are direct downloads.** The Check Run section and the sticky
-  comment linked the TeamCity artifacts *tab*; they now link each file through
-  `/repository/download/<bt>/<buildId>:id/<path>`, so a click downloads it.
-  Paths are percent-encoded per segment, and the root URL is read per project
-  since TeamCity lets a project override it.
-
-- **The plugin declares the version from the POM.** The descriptor hardcoded
-  `1.8.2`, so TeamCity's plugin list showed a version unrelated to the code in
-  the zip.
-
-- **The bridge no longer removes a build it did not start.** `triggerOnBranch`
-  and `triggerOnPrReady` used to be HARD blocks that removed even a manual Run
-  from the queue — clicking "Run" on such a build configuration silently did
-  nothing. They now mean "the bridge does not trigger this automatically": an
-  explicit Run, a schedule or a VCS trigger goes through untouched and reports.
-  Same for a draft PR on a build configuration with `triggerOnPrDraft` off —
-  the automatic build is still dropped with a `Skipped: draft PR` row, but an
-  explicit request runs. Queue cleanup is now limited to two automatic cases: a
-  scope filter excluded the build, or `skipIfCommitPassed` matched
-  (`QueueCleanupPolicy`).
-
-  This is a **behaviour change**, though never the intent of those flags:
-  preventing a human from starting a build is TeamCity's job (permissions),
-  not a GitHub-reporting plugin's. Use `publishChecks` to silence a build
-  configuration on GitHub.
-
 
 - **Comment triggers now fire on `pull_request_review_comment`** (inline
   PR diff comments) instead of `issue_comment`. GitHub only exposes the

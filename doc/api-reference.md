@@ -30,6 +30,9 @@ the admin page) rather than by a TeamCity session - see
 | `GET`  | `/admin/admin.html?tab=bridgeAdmin&...` | Admin / help page (AdminPage tab, JSP-rendered) | TeamCity admin |
 | `POST` | `/admin/bridge/saveSecret.html` | Manage secret, settings, and API token (forms on the admin page) | TC `CHANGE_SERVER_SETTINGS` + CSRF token |
 | `POST` | `/admin/bridge/runTests.html` | Run the self-test battery (button on the admin page) | TC `CHANGE_SERVER_SETTINGS` + CSRF token |
+| `GET`  | `/admin/editProject.html?projectId=…&tab=bridgeProjectSettings` | Project-level bridge parameters (EditProjectTab, *Integrations* group) | TC `EDIT_PROJECT` on that project |
+| `POST` | `/admin/bridge/saveProjectSettings.html` | Save those project parameters (form on the tab above) | TC `EDIT_PROJECT` + CSRF token |
+| `GET`  | `/project.html?projectId=…&tab=bridgeBuilds` | The **Branches & PRs** project tab (ProjectTab, read-only view) | TC project view permission |
 
 ```mermaid
 flowchart LR

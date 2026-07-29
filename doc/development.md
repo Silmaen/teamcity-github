@@ -18,48 +18,61 @@ You do **not** need:
 
 ## Project layout
 
-```
+```text
 teamcity-github/
-+-- README.md                     # landing page
-+-- LICENSE                       # Apache 2.0
-+-- pom.xml                       # Maven config (Kotlin 1.9.25, JDK 21, TC SDK 2026.1)
-+-- docker-compose.yml            # `mvn` service definition
-+-- dev                           # bash wrapper around docker compose
-+-- .dockerignore
-+-- .gitignore
-+-- .cache/                       # Maven local repo + HOME, git-ignored
-+-- doc/
-|   +-- *.md                      # human + AI-facing documentation
-+-- src/
-    +-- main/
-    |   +-- assembly/plugin.xml   # builds the plugin.zip layout
-    |   +-- resources/
-    |   |   +-- teamcity-plugin.xml                       # plugin descriptor
-    |   |   +-- META-INF/build-server-plugin-teamcity-github-bridge.xml  # Spring DI
-    |   |   +-- teamcity-github-bridge-log4j-snippet.xml  # log4j fragment for ops
-    |   |   +-- buildServerResources/
-    |   |       +-- admin/bridgeAdmin.jsp                   # admin/help page
-    |   |       +-- display/bridgeBranchEnrichment.jsp      # draft/ready pill CSS+JS
-    |   +-- kotlin/io/github/dlachouette/teamcity/github/
-    |       +-- TeamCityGitHubBridgePlugin.kt
-    |       +-- api/        # GitHubClient, TokenResolver, AppTokenMinter, RsaKeyParser, AppTokenCache, DTOs (PrInfo, RepoCoords, CheckRunRequest, etc.)
-    |       +-- cache/      # PrInfoCache (TTL-based)
-    |       +-- config/     # WebhookConfig, PluginSettingsStorage, PluginLogConfigurator, LogPathResolver, BridgeServerSettings
-    |       +-- enrich/     # PrBuildEnricher (buildStarted), PrPromotionTagger (queue tag)
-    |       +-- feature/    # GitHubBridgeBuildFeature (opt-in Build Feature)
-    |       +-- filter/     # DraftAwareBuildFilter (StartBuildPrecondition)
-    |       +-- parameters/ # PrParameterProvider (publishes teamcity.github.bridge.isdraft)
-    |       +-- queue/      # DraftBuildQueueCleaner (drops queued draft PR builds)
-    |       +-- report/     # DraftCheckRunReporter, BuildStatusCheckRunPublisher, PrSummaryCommenter
-    |       +-- retrigger/  # PullRequestEventListener (opened/ready_for_review/synchronize/closed + review/comment/re-run)
-    |       +-- selftest/   # PluginSelfTester (admin self-test battery)
-    |       +-- web/        # ~12 controllers/pages: PluginWebhookController, WebhookInfoController, HealthController,
-    |                       #   MetricsController, ApiController, AdminConsolePage, AdminSettingsController, AdminTestController,
-    |                       #   BridgeProjectSettingsTab/Controller, BranchEnrichmentPageExtension, plus SignatureVerifier,
-    |                       #   WebhookPayloadParser, DeliveryReplayGuard, RecentEventsLog, BridgeMetrics, RequestUrlBuilder
-    +-- test/kotlin/io/github/dlachouette/teamcity/github/
-        +-- api/  cache/  config/  enrich/  feature/  filter/
-        +-- parameters/  queue/  report/  retrigger/  selftest/  web/  testsupport/
+├── README.md                  landing page
+├── CHANGELOG.md               release history
+├── CONTRIBUTING.md            how to propose a change
+├── LICENSE                    Apache 2.0
+├── pom.xml                    Maven config: Kotlin 1.9.25, JDK 21, TC SDK 2026.1
+├── docker-compose.yml         the `mvn` service definition
+├── dev                        bash wrapper around docker compose — the only supported entry point
+├── .cache/                    Maven local repo + HOME, git-ignored
+├── doc/
+│   ├── quickstart.md          installation.md  github-app-setup.md  webhook-setup.md
+│   ├── configuration.md       usage-scenarios.md  branching-workflows.md
+│   ├── architecture.md        development.md  api-reference.md  security.md
+│   ├── troubleshooting.md     roadmap.md  README.md (documentation map)
+│   └── assets/                images used by the pages above
+└── src/
+    ├── main/
+    │   ├── assembly/plugin.xml            builds the plugin.zip layout
+    │   ├── resources/
+    │   │   ├── teamcity-plugin.xml        plugin descriptor, version filtered from the POM
+    │   │   ├── META-INF/build-server-plugin-teamcity-github-bridge.xml   Spring DI
+    │   │   ├── teamcity-github-bridge-log4j-snippet.xml                  log4j fragment for ops
+    │   │   └── buildServerResources/
+    │   │       ├── admin/bridgeAdmin.jsp              admin + help page
+    │   │       ├── display/bridgeBranchEnrichment.jsp draft/ready pill CSS + JS
+    │   │       ├── feature/bridgeFeatureEdit.jsp      build-feature form
+    │   │       ├── project/bridgeProjectSettings.jsp  project-level params form
+    │   │       └── project/bridgeBuilds.jsp           the "Branches & PRs" tab
+    │   └── kotlin/io/github/dlachouette/teamcity/github/
+    │       ├── TeamCityGitHubBridgePlugin.kt
+    │       ├── api/         GitHubClient, TokenResolver, AppTokenMinter, AppJwt, AppManager,
+    │       │                AppTokenCache, RsaKeyParser, PrInfo, RepoCoords, Check Run DTOs
+    │       ├── cache/       PrInfoCache
+    │       ├── config/      WebhookConfig, PluginSettingsStorage, BridgeServerSettings,
+    │       │                PluginLogConfigurator, LogPathResolver
+    │       ├── enrich/      PrBuildEnricher, PrPromotionTagger
+    │       ├── feature/     GitHubBridgeBuildFeature, BridgeFeatureConfig + BridgeGate,
+    │       │                GateContextResolver, BridgeTrigger, BridgeRefs,
+    │       │                BranchSpecMatcher, BundledPublisherDetector
+    │       ├── filter/      DraftAwareBuildFilter
+    │       ├── parameters/  PrParameterProvider
+    │       ├── queue/       DraftBuildQueueCleaner + QueueCleanupPolicy, PublisherConflictReporter
+    │       ├── report/      BuildStatusCheckRunPublisher, DraftCheckRunReporter,
+    │       │                BuildProblemAnnotations, PrSummaryCommenter, ReportHelpers
+    │       ├── retrigger/   PullRequestEventListener
+    │       ├── selftest/    PluginSelfTester
+    │       └── web/         controllers, pages and tabs (~20 files): webhook, info, health,
+    │                        metrics, external API, admin console, project settings,
+    │                        Branches & PRs tab, plus SignatureVerifier, WebhookPayloadParser,
+    │                        DeliveryReplayGuard, RecentEventsLog, BridgeMetrics, RequestUrlBuilder
+    └── test/kotlin/io/github/dlachouette/teamcity/github/
+        ├── api/  cache/  config/  enrich/  feature/  parameters/
+        ├── queue/  report/  retrigger/  web/
+        └── testsupport/  LoggerBootstrap.kt
 ```
 
 For the per-class breakdown and the Spring DI wiring, see

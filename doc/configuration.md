@@ -18,25 +18,17 @@ the bulk of the configuration is no longer hand-edited parameters:
   Features -> Add -> GitHub Bridge integration`. The presence of the
   feature is the per-task opt-in; its fields tune the trigger paths.
 
-```
-+-----------------------------------------------------------------+
-| 1. Plugin-level defaults (shipped)                              |
-|    -> teamcity-plugin.xml (legacy internal-property fallbacks)  |
-+-----------------------------------------------------------------+
-| 2. Server-wide settings + flags + secrets                       |
-|    -> Administration -> Server Administration -> GitHub Bridge  |
-|    -> stored in <TC_DATA_DIR>/config/                           |
-|       teamcity-github-bridge.properties                         |
-|    -> applied immediately, no restart needed                    |
-+-----------------------------------------------------------------+
-| 3. Per-project parameters (opt-in)                              |
-|    -> Administration -> <project> -> GitHub Bridge              |
-|    -> repo, connectionId, branch/PR trigger toggles + lists     |
-+-----------------------------------------------------------------+
-| 4. Per-BuildType "GitHub Bridge integration" build feature      |
-|    -> Edit Configuration -> Build Features                      |
-|    -> trigger gates, branch/path overrides, comment trigger     |
-+-----------------------------------------------------------------+
+The four layers, narrowest last — a value set at a lower layer wins over
+the one above it:
+
+```mermaid
+flowchart TB
+    L1["<b>1. Plugin-level defaults</b> (shipped)<br/>teamcity-plugin.xml — legacy internal-property fallbacks"]
+    L2["<b>2. Server-wide settings, flags and secrets</b><br/>Administration → Server Administration → GitHub Bridge<br/>stored in &lt;TC_DATA_DIR&gt;/config/teamcity-github-bridge.properties<br/>applied immediately, no restart"]
+    L3["<b>3. Per-project parameters</b> (opt-in)<br/>Administration → &lt;project&gt; → GitHub Bridge<br/>repo, connectionId, branch and PR trigger toggles + lists, prBuildRef"]
+    L4["<b>4. Per-BuildType build feature</b><br/>Edit Configuration → Build Features → GitHub Bridge integration<br/>trigger gates, publishChecks, branch/path overrides, comment trigger"]
+
+    L1 -- "overridden by" --> L2 -- "overridden by" --> L3 -- "overridden by" --> L4
 ```
 
 ## 1. Plugin-level defaults (shipped)
@@ -427,18 +419,17 @@ object Build_LinuxX64_Clang : BuildType({
 Put both the project params (on a parent project) and the build feature
 (on a shared BuildType template) once; children inherit both:
 
-```
-+------------------------------------------------+        +------------------------------------------------+
-| Project: Widgets                               |        | Template: GitHubAware                          |
-|   params:                                      |        |   features:                                    |
-|     teamcity.github.bridge.repo = acme/widget  |        |     github-bridge { triggerOnPrDraft = false } |
-|     ...connectionId = PROJECT_EXT_42           |        +------------------------------------------------+
-|     ...prTrigger.enabled = true                |                       |
-+------------------------------------------------+                       v inherits feature
-          | inherits project params                       +------------------------------------------------+
-          v                                                | BuildType: Build_LinuxX64_Clang                |
-   (every BuildType in the project)                        | BuildType: Build_WindowsX64_Clang              |
-                                                           +------------------------------------------------+
+```mermaid
+flowchart TB
+    PROJ["<b>Project: Widgets</b><br/>params:<br/>teamcity.github.bridge.repo = acme/widget<br/>…connectionId = PROJECT_EXT_42<br/>…prTrigger.enabled = true"]
+    TPL["<b>Template: GitHubAware</b><br/>features:<br/>github-bridge { triggerOnPrDraft = false }"]
+    BT1["BuildType: Build_LinuxX64_Clang"]
+    BT2["BuildType: Build_WindowsX64_Clang"]
+
+    PROJ -- "every BuildType inherits<br/>the project params" --> BT1
+    PROJ --> BT2
+    TPL -- "inherits the feature" --> BT1
+    TPL --> BT2
 ```
 
 ### Behaviour on draft PRs

@@ -32,9 +32,9 @@ flowchart TD
     subgraph Bridge["teamcity-github-bridge (this plugin)"]
         direction LR
         APP[GitHub App] -->|"app/teamcity-github-bridge/webhook"| TC2[TeamCity]
-        R4[Repo A] -.installed.- APP
-        R5[Repo B] -.installed.- APP
-        R6[Repo C] -.installed.- APP
+        R4[Repo A] -. "installed" .-> APP
+        R5[Repo B] -. "installed" .-> APP
+        R6[Repo C] -. "installed" .-> APP
     end
     class Bridge new
 ```
@@ -160,32 +160,10 @@ scroll to **Webhook**.
 | Secret | the random string from step 1 | step 1 |
 | SSL verification | Enable | required - the plugin assumes TLS |
 
-```
-GitHub App > Webhook
-+------------------------------------------------+
-| [x] Active                                     |
-|                                                |
-| Webhook URL                                    |
-| [ https://teamcity.example.com/app/teamcity-]  |
-| [ github-bridge/webhook                      ] |
-|                                                |
-| Content type                                   |
-| [ application/json                v]           |
-|                                                |
-| Secret                                         |
-| [ ************************************      ] |
-|                                                |
-| SSL verification                               |
-| (o) Enable SSL verification                    |
-| ( ) Disable                                    |
-+------------------------------------------------+
-```
-
 Then scroll to **Subscribe to events** and tick the following. These
-match `recommendedEvents` from `/info`. Most are actively consumed by
-the plugin today; **push** and **check_suite** are recommended for
-coexistence / future use but are **not** consumed by the plugin
-today (subscribing now means no resubscription later):
+match `recommendedEvents` from `/info`. All are consumed by the plugin
+except **push**, which is recommended for coexistence and future use
+(subscribing now means no resubscription later):
 
 - [x] **Pull request** - required for draft / ready-for-review
   detection, synchronize (push to PR), and PR close/merge handling
@@ -202,9 +180,11 @@ today (subscribing now means no resubscription later):
   straight from the PR's checks tab.
 - [x] **Push** - branch pushes outside the PR flow. *Recommended for
   coexistence / future use; not consumed by the plugin today.*
-- [x] **Check suite** - companion to the Check Run lifecycle.
-  *Recommended for coexistence / future use; not consumed by the
-  plugin today.*
+- [x] **Check suite** - powers GitHub's **Re-run all checks** button: a
+  `check_suite` `rerequested` event re-enqueues every opted-in build
+  configuration for that commit, or only the failed ones when
+  `rerunAll.onlyFailed` is set. Without this event the button stays
+  silent.
 - [x] **Ping** - delivered once on save; used for the health-check
   round-trip below.
 
@@ -233,12 +213,7 @@ Click `Save changes`.
 GitHub sends a `ping` event right after you save. You can see it in
 `Advanced -> Recent Deliveries`:
 
-```
-Recent Deliveries
-+----------------------------------------------------------+
-|  v  ping            12:34:56  200  Response: pong        |
-+----------------------------------------------------------+
-```
+> ✓ `ping` — 12:34:56 — **200** — Response: `pong`
 
 If you see `200 pong`, the round-trip is complete.
 

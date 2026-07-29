@@ -13,18 +13,18 @@ GitHub App, continue with [github-app-setup.md](github-app-setup.md).
 
 ## Where the plugin lives
 
-```
- +--------------------------------------+
- |  TeamCity Data Directory             |
- |  <TC_DATA_DIR>/                      |
- |  |- plugins/                         |
- |  |    teamcity-github-bridge-        |
- |  |    <version>.zip                   |  <-- drop the archive here
- |  |- config/                          |
- |  |    teamcity-github-bridge.properties |  <-- plugin-owned settings/secret (primary)
- |  |    internal.properties            |  <-- teamcity.github.bridge.webhook.secret (legacy fallback)
- |  |    teamcity-server-log4j.xml          <-- optional log tuning
- +--------------------------------------+
+```text
+<TC_DATA_DIR>/                                   the TeamCity Data Directory
+├── plugins/
+│   └── teamcity-github-bridge-<version>.zip     drop the archive here
+└── config/
+    ├── teamcity-github-bridge.properties        plugin-owned settings + secret (primary)
+    ├── internal.properties                      teamcity.github.bridge.webhook.secret
+    │                                            (legacy fallback only)
+    └── teamcity-server-log4j.xml                optional log tuning
+
+<TC_DATA_DIR>/logs/
+└── teamcity-github-bridge.log                   the plugin's dedicated log
 ```
 
 > The plugin owns `config/teamcity-github-bridge.properties` (written
@@ -119,13 +119,9 @@ in [webhook-setup.md](webhook-setup.md).
 
 Go to `Administration -> Plugins List`. You should see:
 
-```
-+----------------------------------------------------+
-| TeamCity GitHub Bridge                  v1.x       |
-|  by Damien Lachouette                   enabled  ON|
-|  Min API: 222521                                   |
-+----------------------------------------------------+
-```
+| Plugin | Vendor | Version | Min API | State |
+|---|---|---|---|---|
+| TeamCity GitHub Bridge | Damien Lachouette | 1.9.0 | 222521 | enabled |
 
 If the plugin is greyed out or the version is missing, refer to
 [troubleshooting.md](troubleshooting.md#symptom-plugin-does-not-load).

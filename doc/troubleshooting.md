@@ -21,35 +21,27 @@ Three quick triage stops, in order, before you dig into logs:
    calls etc. are actually happening. Returns 404 when metrics export
    is disabled (see [/metrics returns 404](#symptom-metrics-returns-404)).
 
+```mermaid
+flowchart TB
+    S1["<b>1. Self-test button — start here</b><br/>Admin → Server Admin → GitHub Bridge → Run self-tests<br/>the PASS/WARN/FAIL/SKIP table localises the broken step"]
+    S2["<b>2. Recent events table, /health, /metrics</b><br/>Admin → Server Admin → GitHub Bridge"]
+    S3["<b>3. /info endpoint</b> — one-shot config snapshot<br/>secretConfigured, logConfigured, payloadUrl, logFile"]
+    S4["<b>4. Dedicated plugin log</b><br/>&lt;TC_DATA_DIR&gt;/logs/teamcity-github-bridge.log"]
+    S5["<b>5. Server log fallback</b>, if the dedicated log was overridden<br/>&lt;TC_DATA_DIR&gt;/logs/teamcity-server.log<br/>grep io.github.dlachouette or teamcity-github-bridge"]
+    S6["<b>6. GitHub App 'Recent Deliveries' panel</b><br/>did GitHub even send it, and what did we answer?"]
+    S7["<b>7. TeamCity queue UI</b><br/>read the wait reason on held builds"]
+
+    S1 -- "not conclusive" --> S2 -- "not conclusive" --> S3 -- "not conclusive" --> S4
+    S4 -- "nothing logged" --> S5 -- "nothing logged" --> S6 -- "delivery accepted,<br/>but no build" --> S7
 ```
-+---------------------------------------------------------------+
-|  1. Self-test button  *** start here ***                     |
-|     Admin -> Server Admin -> GitHub Bridge -> Run self-tests  |
-|     -> PASS/WARN/FAIL/SKIP table localises the broken step    |
-+---------------------------------------------------------------+
-|  2. Admin "Recent events" table + /health + /metrics          |
-|     Admin -> Server Admin -> GitHub Bridge                    |
-|     curl https://<TC_HOST>/app/teamcity-github-bridge/health  |
-|     curl https://<TC_HOST>/app/teamcity-github-bridge/metrics |
-+---------------------------------------------------------------+
-|  3. Plugin /info endpoint (one-shot health snapshot)          |
-|     curl https://<TC_HOST>/app/teamcity-github-bridge/info    |
-|     -> secretConfigured, logConfigured, payloadUrl, logFile   |
-+---------------------------------------------------------------+
-|  4. Dedicated plugin log                                      |
-|     <TC_DATA_DIR>/logs/teamcity-github-bridge.log             |
-+---------------------------------------------------------------+
-|  5. Server log fallback (if dedicated log was overridden)     |
-|     <TC_DATA_DIR>/logs/teamcity-server.log                    |
-|     Grep for `io.github.dlachouette` (package) or             |
-|     `teamcity-github-bridge` (plugin name).                   |
-+---------------------------------------------------------------+
-|  6. GitHub App webhook "Recent Deliveries" panel              |
-|     https://github.com/settings/apps/<your-app>/advanced      |
-+---------------------------------------------------------------+
-|  7. Queue UI                                                  |
-|     Look at the wait reason on held builds                    |
-+---------------------------------------------------------------+
+
+The commands behind steps 2, 3 and 6:
+
+```bash
+curl https://<TC_HOST>/app/teamcity-github-bridge/health
+curl https://<TC_HOST>/app/teamcity-github-bridge/metrics
+curl https://<TC_HOST>/app/teamcity-github-bridge/info
+# Recent Deliveries: https://github.com/settings/apps/<your-app>/advanced
 ```
 
 ### How opt-in works (the model everything below assumes)

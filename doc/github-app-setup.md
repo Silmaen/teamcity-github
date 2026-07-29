@@ -8,23 +8,13 @@ manually and wire a TeamCity connection (**Option B**). See
 
 ## Why a GitHub App and not a PAT
 
-```
-+-----------------------+        +-----------------------+
-|   Personal Access     |        |     GitHub App        |
-|   Token (PAT)         |        |   (this plugin)       |
-+-----------------------+        +-----------------------+
-|  - Tied to a person   |        |  - Tied to a service  |
-|  - Long-lived secret  |        |  - 1h installation    |
-|  - User can leave the |        |    tokens, refreshed  |
-|    company -> token   |        |    automatically      |
-|    revoked, CI breaks |        |  - Survives staff     |
-|  - Same scopes as the |        |    turnover           |
-|    person             |        |  - Scoped permissions |
-|  - Hard to audit      |        |  - Audit log entries  |
-+-----------------------+        +-----------------------+
-              !                              v
-        avoid in CI                    use this
-```
+| | Personal Access Token (PAT) — **avoid in CI** | GitHub App — **what this plugin uses** |
+|---|---|---|
+| Identity | Tied to a person | Tied to a service |
+| Credential lifetime | Long-lived secret | 1 h installation tokens, refreshed automatically |
+| Staff turnover | The person leaves → token revoked → CI breaks | Survives turnover |
+| Permissions | The same scopes as the person | Scoped to what the App declares |
+| Auditability | Hard to audit | Its own audit-log entries |
 
 The plugin assumes **GitHub App authentication only**. No PAT, no
 per-user OAuth tokens. This is a deliberate constraint to keep the
@@ -298,19 +288,12 @@ After save, the connection has an ID visible in the URL:
 This `PROJECT_EXT_<n>` value is what you'll paste as
 `teamcity.github.bridge.connectionId` on each opted-in build type.
 
-```
-Project: MyTeam
-  +------------------------------------------------+
-  |  Connections                                   |
-  |                                                |
-  |  +------------------------------------------+  |
-  |  |  GitHub App (teamcity-bridge)            |  |
-  |  |  ID: PROJECT_EXT_42  <-- copy this       |  |
-  |  |  Type: GitHub App                        |  |
-  |  |  Status: Connected                       |  |
-  |  +------------------------------------------+  |
-  +------------------------------------------------+
-```
+What the *Connections* section of project `MyTeam` then shows — the **ID** is
+the value to copy:
+
+| Connection | Type | ID | Status |
+|---|---|---|---|
+| GitHub App (teamcity-bridge) | GitHub App | `PROJECT_EXT_42` | Connected |
 
 ## Warnings you may see during `Test connection`
 

@@ -17,7 +17,7 @@ flowchart LR
     TC[TeamCity internals]:::trusted
     SECRETS[Plugin settings file<br/>+ connection descriptor]:::trusted
 
-    INET -.spoofed traffic.- BRIDGE
+    INET -. "spoofed traffic" .-> BRIDGE
     GH -- pull_request webhook<br/>signed with shared secret --> BRIDGE
     BRIDGE -- HMAC verify --> BRIDGE
     BRIDGE -- enqueue --> TC
@@ -47,23 +47,25 @@ GitHub signs every webhook delivery with HMAC-SHA256 using the
 shared secret. The plugin computes the expected signature and
 compares using a constant-time equality check (`SignatureVerifier`).
 
-```
-+-------------------+      raw body bytes      +-------------------+
-|     GitHub        | -----------------------> |   PluginWebhook   |
-|                   |                          |   Controller      |
-|  computes:        |     X-Hub-Signature-256  |                   |
-|  hmac_sha256(     | -----------------------> |   1. read body    |
-|    secret,        |  sha256=<hex>            |   2. compute      |
-|    raw_body)      |                          |      HMAC over    |
-|                   |                          |      body         |
-|                   |                          |   3. constant-    |
-|                   |                          |      time compare |
-+-------------------+                          +-------------------+
-                                                        |
-                                            +-----------+-----------+
-                                            |                       |
-                                       match: 200             mismatch: 401
-                                       process payload         drop, log warn
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GH as GitHub
+    participant WH as PluginWebhookController
+    participant SV as SignatureVerifier
+
+    Note over GH: computes hmac_sha256(secret, raw_body)
+    GH->>WH: POST /webhook — raw body bytes<br/>X-Hub-Signature-256: sha256=hex
+    WH->>WH: read the raw body once
+    WH->>SV: expected = HMAC-SHA256(secret, body)
+    SV->>SV: constant-time compare with the header
+    alt signatures match
+        SV-->>WH: valid
+        WH-->>GH: 200 — payload processed
+    else mismatch or missing header
+        SV-->>WH: invalid
+        WH-->>GH: 401 — dropped, warning logged
+    end
 ```
 
 Properties:
@@ -88,7 +90,7 @@ of that protection:
 | Path | Anonymous because |
 |---|---|
 | `/app/teamcity-github-bridge/webhook` | GitHub does not send TeamCity credentials. HMAC-SHA256 over the body is the real auth. |
-| `/app/teamcity-github-bridge/info` and `/info.md` | The response intentionally exposes no secrets - only `secretConfigured: true|false`, the public payload URL, the dedicated log path, and the plugin version. |
+| `/app/teamcity-github-bridge/info` and `/info.md` | The response intentionally exposes no secrets - only `secretConfigured: true` or `false`, the public payload URL, the dedicated log path, and the plugin version. |
 
 The **admin page** (`/admin/...?tab=bridgeAdmin`) is **not** anonymous.
 It is registered through `AdminPage`, which inherits TeamCity's
@@ -146,13 +148,11 @@ secret, but it cannot distinguish the **original** delivery from a
 every delivery carries an opaque `X-GitHub-Delivery` UUID, and the
 plugin tracks the recently-seen ids in a bounded LRU.
 
-```
-signature OK ──> deliveryId seen within TTL?
-                   │                    │
-              yes (replay)          no (new)
-                   │                    │
-        200 "duplicate delivery     record id,
-        ignored" — NOT re-processed  process normally
+```mermaid
+flowchart TB
+    SIG(["Signature verified OK"]) --> Q{"deliveryId already<br/>seen within the TTL?"}
+    Q -- "yes — replay" --> DUP["200 'duplicate delivery ignored'<br/>NOT re-processed<br/>logged SKIPPED, counted webhooks.replayed"]
+    Q -- "no — new" --> NEW["record the id in the LRU<br/>process the payload normally"]
 ```
 
 - **Order:** the signature is verified **first**; the replay check

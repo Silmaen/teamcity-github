@@ -110,64 +110,83 @@ flowchart TB
 
 ## Packages
 
-```
+```text
 io.github.dlachouette.teamcity.github
-+-- TeamCityGitHubBridgePlugin   (main lifecycle bean)
-+-- api/
-|   +-- GitHubClient              (open class, HTTP + Jackson: getPr, listPrFiles, postCheckRun, listIssueComments, createIssueComment, deleteIssueComment, listInstallations, createInstallationToken)
-|   +-- PrInfo                    (data class)
-|   +-- RepoCoords                (data class + parser)
-|   +-- TokenResolver             (self-mint primary, credentials-manager fallback; returns ResolvedAccess = token + apiBase)
-|   +-- ResolvedAccess            (data class: token + apiBase)
-|   +-- AppTokenMinter            (signs RS256 JWT, lists installations, mints ghs_* token)
-|   +-- RsaKeyParser              (PEM/PKCS#1+#8 private-key parsing, extracted from AppTokenMinter; pure, own tests)
-|   +-- AppTokenCache             (per-installation TTL cache for minted tokens)
-|   +-- InstallationInfo / CreatedToken (data classes for the App-level REST API)
-|   +-- CheckRunRequest / CheckRunStatus / CheckRunConclusion
-+-- cache/
-|   +-- PrInfoCache               (TTL-based, ConcurrentHashMap)
-+-- config/
-|   +-- WebhookConfig             (reads webhook secret from plugin file + internal.properties fallback)
-|   +-- PluginSettingsStorage     (reads/writes plugin-owned settings file)
-|   +-- PluginLogConfigurator     (attaches RollingFileAppender at startup)
-|   +-- LogPathResolver           (state of the dedicated log file)
-|   +-- BridgeServerSettings      (typed accessor for every server-global setting/flag; resolves plugin-file -> legacy internal property -> default; pushes live values via applyTo)
-+-- enrich/
-|   +-- PrBuildEnricher           (BuildServerAdapter.buildStarted)
-|   +-- PrPromotionTagger         (BuildServerAdapter.buildTypeAddedToQueue)
-+-- filter/
-|   +-- DraftAwareBuildFilter     (StartBuildPrecondition)
-+-- parameters/
-|   +-- PrParameterProvider  (publishes teamcity.github.bridge.isdraft)
-+-- report/
-|   +-- DraftCheckRunReporter         (draft/branch/path skip -> "Skipped" Check Run)
-|   +-- BuildStatusCheckRunPublisher  (queued/started/interrupted/finished/queue-removed -> Check Run lifecycle; drives the sticky PR comment)
-|   +-- PrSummaryCommenter            (single sticky per-PR summary comment, one row per check; JSON state in an HTML-comment marker; delete-then-create since HttpURLConnection cannot PATCH; off by default)
-+-- queue/
-|   +-- DraftBuildQueueCleaner    (removes queued draft PR builds; bypassed for manual user triggers)
-+-- retrigger/
-|   +-- PullRequestEventListener  (opened/ready_for_review/synchronize/closed + review-approved + comment-command + check_run re-run -> BuildTypeEx.addToQueue; external-API triggerBuild; path filtering; closed-PR queue cancellation)
-+-- selftest/
-|   +-- PluginSelfTester          (7 end-to-end checks driven by the admin button)
-+-- web/
-    +-- PluginWebhookController       (POST /webhook, HMAC, replay guard, records to RecentEventsLog; fans events out to the listener)
-    +-- WebhookInfoController         (GET /info, /info.md)
-    +-- WebhookInfo                   (config snapshot DTO)
-    +-- WebhookPayloadParser          (Jackson on pull_request / pull_request_review / pull_request_review_comment / issue_comment / check_run payloads)
-    +-- SignatureVerifier             (HMAC SHA-256 + constant-time eq)
-    +-- DeliveryReplayGuard           (bounded LRU + TTL of X-GitHub-Delivery ids; drops replayed deliveries)
-    +-- RecentEventsLog               (ring buffer, capacity 100)
-    +-- BridgeMetrics                 (in-process counter registry; Prometheus text + JSON snapshots)
-    +-- RequestUrlBuilder             (single home for X-Forwarded-* absolute-URL reconstruction behind the proxy)
-    +-- HealthController              (GET /health, anonymous; "ok"/"degraded" liveness JSON)
-    +-- MetricsController             (GET /metrics, anonymous; Prometheus text; 404 when metrics disabled)
-    +-- ApiController                 (authenticated external API: GET /api/status|events|metrics, POST /api/trigger; bearer-token auth)
-    +-- AdminConsolePage              (AdminPage, JSP at admin/bridgeAdmin.jsp)
-    +-- AdminSettingsController       (POST /admin/bridge/saveSecret.html, CSRF-protected)
-    +-- AdminTestController           (POST /admin/bridge/runTests.html, CSRF-protected)
-    +-- BridgeProjectSettingsTab      (EditProjectTab in the Integrations group; form for the project-level bridge params)
-    +-- BridgeProjectSettingsController (POST backing the tab; writes own project params, requires EDIT_PROJECT)
-    +-- BranchEnrichmentPageExtension (SimplePageExtension, JSP at display/bridgeBranchEnrichment.jsp)
+├── TeamCityGitHubBridgePlugin       main lifecycle bean
+├── api/
+│   ├── GitHubClient                 open class, HTTP + Jackson: getPr, prsForCommit, listPrFiles,
+│   │                                postCheckRun, issue comments, installations, tokens
+│   ├── PrInfo, RepoCoords           PR snapshot (draft, head sha/ref, head repo, title, body,
+│   │                                labels) and the owner/repo parser
+│   ├── TokenResolver                self-mint primary, credentials-manager fallback → ResolvedAccess
+│   ├── AppTokenMinter, AppJwt       RS256 JWT signing and ghs_* installation-token minting
+│   ├── AppTokenCache                per-installation TTL cache of minted tokens
+│   ├── AppManager                   managed-App credentials, GET /app verification (AppVerification)
+│   ├── RsaKeyParser                 PEM PKCS#1/PKCS#8 private-key parsing, pure + own tests
+│   └── CheckRunRequest / Status / Conclusion / Annotation / AnnotationLevel, InstallationInfo,
+│                                    CreatedToken, IssueComment, AppInfo, ManifestConversion, HttpResponse
+├── cache/
+│   └── PrInfoCache                  TTL-based, ConcurrentHashMap
+├── config/
+│   ├── WebhookConfig                webhook secret: plugin file → internal.properties fallback
+│   ├── PluginSettingsStorage        reads/writes the plugin-owned settings file
+│   ├── BridgeServerSettings         typed accessor for every server-global setting and flag
+│   ├── PluginLogConfigurator        attaches the RollingFileAppender at startup
+│   └── LogPathResolver              state of the dedicated log file
+├── enrich/
+│   ├── PrBuildEnricher              buildStarted: PR parameters, draft/ready + pr-N tags
+│   │                                (EnrichmentPlan is the pure, tested core)
+│   └── PrPromotionTagger            buildTypeAddedToQueue: tags the promotion (TagPlan)
+├── feature/
+│   ├── GitHubBridgeBuildFeature     the per-BuildType opt-in build feature
+│   ├── BridgeFeatureConfig          BridgeFeatureConfig + BridgeFeatureReader + BridgeProjectParams,
+│   │                                BridgeGate.decide → GateDecision, PrBuildRef (pull | branch)
+│   ├── GateContextResolver          GateContext: branch, PR number, PrInfo, trigger source
+│   ├── BridgeTrigger                AUTO | COMMAND | MANUAL + BridgeTriggerMarker (promotion stamp)
+│   ├── BridgeRefs                   pull/N ref building and parsing
+│   ├── BranchSpecMatcher            +:/-: branch-list matching
+│   └── BundledPublisherDetector     spots a bundled commitStatusPublisher on the same BuildType
+├── filter/
+│   └── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
+├── parameters/
+│   └── PrParameterProvider          publishes teamcity.github.bridge.isdraft
+├── queue/
+│   ├── DraftBuildQueueCleaner       removes out-of-scope automatic builds, reuses a passed commit;
+│   │                                QueueCleanupPolicy is the pure removal rule
+│   └── PublisherConflictReporter    one startup WARN listing double-publisher BuildTypes
+├── report/
+│   ├── BuildStatusCheckRunPublisher Check Run lifecycle (queued/started/interrupted/finished/removed),
+│   │                                artifact links, annotations; drives the sticky PR comment
+│   ├── DraftCheckRunReporter        skip and reused-success rows (SkipReason)
+│   ├── BuildProblemAnnotations      compiler diagnostics → output.annotations, max 50
+│   ├── PrSummaryCommenter           single sticky per-PR comment, one row per check
+│   └── ReportHelpers                shared formatting used by the reporters
+├── retrigger/
+│   └── PullRequestEventListener     PR/review/comment/re-run events → addToQueue; fork guard,
+│                                    path filtering, retro-association, closed-PR cancellation
+├── selftest/
+│   └── PluginSelfTester             the 8 checks behind the admin button (TestResult, Status)
+└── web/
+    ├── PluginWebhookController      POST /webhook: HMAC, replay guard, RecentEventsLog, fan-out
+    ├── WebhookPayloadParser         Jackson over pull_request, pull_request_review,
+    │                                pull_request_review_comment, issue_comment, check_run, check_suite
+    ├── SignatureVerifier            HMAC SHA-256 + constant-time equality
+    ├── DeliveryReplayGuard          bounded LRU + TTL of X-GitHub-Delivery ids
+    ├── RecentEventsLog              ring buffer, capacity 100 (RecentEvent, Outcome)
+    ├── BridgeMetrics                in-process counters, Prometheus text + JSON
+    ├── RequestUrlBuilder            X-Forwarded-* absolute-URL reconstruction
+    ├── WebhookInfoController        GET /info, /info.md (WebhookInfo, WebhookEvents)
+    ├── HealthController             GET /health, anonymous liveness JSON
+    ├── MetricsController            GET /metrics, anonymous Prometheus text
+    ├── ApiController                external API: GET status|events|metrics, POST trigger
+    ├── AdminConsolePage             AdminPage → admin/bridgeAdmin.jsp
+    ├── AdminSettingsController      POST saveSecret.html, CSRF-protected
+    ├── AdminTestController          POST runTests.html, CSRF-protected
+    ├── AppManifestController        the App-manifest create/convert flow
+    ├── BridgeProjectSettingsTab     EditProjectTab for the project-level params
+    ├── BridgeProjectSettingsController  POST behind that tab, requires EDIT_PROJECT
+    ├── BridgeBuildsTab              ProjectTab "Branches & PRs" (BridgeBuildRow, search + sort)
+    └── BranchEnrichmentPageExtension    draft/ready pill CSS + JS on every page
 ```
 
 ## Spring DI wiring
@@ -385,18 +404,26 @@ Where we plug into TC:
 
 Build output is a single zip:
 
-```
+```text
 teamcity-github-bridge-<version>.zip
-+-- teamcity-plugin.xml                          (descriptor, root)
-+-- server/
-    +-- teamcity-github-bridge-<version>.jar    (our code + Spring XML)
-    +-- kotlin-stdlib-1.9.25.jar
-    +-- kotlin-reflect-1.7.22.jar
-    +-- jackson-core-2.17.2.jar
-    +-- jackson-databind-2.17.2.jar
-    +-- jackson-annotations-2.17.2.jar
-    +-- jackson-module-kotlin-2.17.2.jar
-    +-- annotations-13.0.jar
+├── teamcity-plugin.xml                        descriptor, at the root; its <version>
+│                                              is filtered from the POM at build time
+├── buildServerResources/                      the JSPs, served by the web layer
+│   ├── admin/bridgeAdmin.jsp
+│   ├── display/bridgeBranchEnrichment.jsp
+│   ├── feature/bridgeFeatureEdit.jsp
+│   ├── project/bridgeBuilds.jsp
+│   └── project/bridgeProjectSettings.jsp
+└── server/
+    ├── teamcity-github-bridge-<version>.jar   our code + the Spring XML
+    ├── kotlin-stdlib-1.9.25.jar
+    ├── kotlin-reflect-1.7.22.jar
+    ├── jackson-core-2.17.2.jar
+    ├── jackson-databind-2.17.2.jar
+    ├── jackson-annotations-2.17.2.jar
+    ├── jackson-module-kotlin-2.17.2.jar
+    ├── java-jwt-4.4.0.jar
+    └── annotations-13.0.jar
 ```
 
 `teamcity-plugin.xml` declares
