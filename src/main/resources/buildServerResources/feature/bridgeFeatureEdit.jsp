@@ -54,8 +54,10 @@
             Release/*, etc.).
         </label>
         <div class="bridge-feature-help">
-            HARD: when unchecked, even an operator clicking "Run" on a
-            non-PR branch is blocked. Defaults to checked.
+            When unchecked, the bridge never triggers this build configuration
+            on a non-PR branch and never removes such a build either — a Run,
+            a schedule or a VCS trigger still works, and still reports.
+            Defaults to checked.
         </div>
     </td>
 </tr>
@@ -69,8 +71,47 @@
             transitions from draft to ready).
         </label>
         <div class="bridge-feature-help">
-            HARD: when unchecked, even manual triggers on PR branches are
-            blocked. Defaults to checked.
+            When unchecked, this build configuration is not part of the PR
+            check set: the bridge never enqueues it from a PR event and posts
+            no "Skipped" row for it. An explicit Run, a schedule or a GitHub
+            command still works — and still reports. Defaults to checked.
+        </div>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="publishChecks">Publish to GitHub:</label></th>
+    <td>
+        <props:checkboxProperty name="publishChecks"/>
+        <label for="publishChecks" style="font-weight:normal;">
+            This build configuration reports its status to GitHub.
+        </label>
+        <div class="bridge-feature-help">
+            The only thing publication depends on — deliberately independent of
+            what started the build. Checked: every build reports (PR event, VCS
+            trigger, schedule, manual Run, GitHub command alike). Unchecked:
+            this build configuration is invisible on GitHub, whatever happens,
+            while still benefiting from the PR parameters and tags.
+            Defaults to checked.
+        </div>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="skipIfCommitPassed">Reuse a passed commit:</label></th>
+    <td>
+        <props:checkboxProperty name="skipIfCommitPassed"/>
+        <label for="skipIfCommitPassed" style="font-weight:normal;">
+            Drop an automatic build when this commit already passed here, and
+            republish that success.
+        </label>
+        <div class="bridge-feature-help">
+            The queued build is removed and the earlier success is re-posted at
+            the same commit (GitHub keys a Check Run on name + commit, so it is
+            the same row). Applies to <b>automatic</b> triggers only: a manual
+            Run, a GitHub command and the Re-run buttons mean "do it again".
+            Leave it <b>off</b> for scheduled suites — a nightly is expected to
+            re-run on an unchanged commit. Defaults to unchecked.
         </div>
     </td>
 </tr>
@@ -83,10 +124,10 @@
             The listener also enqueues this BuildType on draft PR events.
         </label>
         <div class="bridge-feature-help">
-            HARD: when unchecked AND PR is draft, the listener posts a
-            <em>"Skipped: draft PR"</em> Check Run on GitHub; manual triggers
-            on a draft PR are blocked. Requires <em>Run on PR (ready)</em>
-            to be checked. Defaults to checked.
+            When unchecked, an automatic build for a draft PR is dropped and
+            a "Skipped: draft PR" row is posted instead. An explicit Run or
+            GitHub command on a draft still runs. Defaults to checked, and
+            requires "Run on PR (ready)".
         </div>
         <span class="error" id="error_triggerOnPrDraft"></span>
     </td>

@@ -40,6 +40,9 @@ into rules; §9 keeps the short audit trail.
 | 2026-07-28 | Merge preview | Never used: builds validate the **source branch**, not `refs/pull/*/merge`. | R18 |
 | 2026-07-28 | `pull/N` refs | Replace them with **branch-source builds** (per-project switch); rewriting TeamCity's Branch column is cosmetic and dropped. | R19 |
 | 2026-07-28 | Bundled `commitStatusPublisher` | The plugin **warns only**, never disables anything — correct configuration is the user's responsibility, and it must be written in the user docs. | R10 |
+| 2026-07-29 | Two kinds of TC task | **Publication** is a per-build-configuration switch (`publishChecks`) and depends on **nothing else** — not on the trigger source. **Triggering** is separate: the `triggerOn*` flags say what the bridge starts automatically, and the bridge never removes a build it did not start. | — |
+| 2026-07-29 | Draft skip | Applies to the automatic path only; an explicit Run or command on a draft runs and reports. Settles the 1.3.0-vs-1.5.0 divergence in favour of "no silence after an explicit request". | — |
+| 2026-07-29 | Reuse a passed commit | Opt-in per build configuration (`skipIfCommitPassed`): an **automatic** build of a commit that already passed is removed and the success republished. Keyed on the **commit alone**, any ref. A manual Run and the Re-run buttons always re-run; scheduled suites leave it off. | — |
 | 2026-07-28 | Backlog order | `G11 → G19 → G18 → G13 → G12/G12b → G14`. | — |
 
 **Still open:** the pre-PR build policy (R7 / F1 — on demand vs automatic on

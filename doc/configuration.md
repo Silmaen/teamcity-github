@@ -340,15 +340,28 @@ Run lifecycle. The feature is read through the BuildType's
 `resolvedSettings`, so a feature inherited from a **BuildType template**
 counts even without re-attaching it locally.
 
-The feature exposes per-task fields. Some are **HARD** (enforced for
-every trigger source, including manual operator runs); the branch/path
-lists are **SOFT** (a manual "Run" bypasses them).
+The feature exposes per-task fields along **two independent axes**:
+
+- **Publication** — `publishChecks` alone decides whether this build
+  configuration reports to GitHub. It does **not** depend on what started the
+  build: a PR event, a VCS trigger, a schedule, a manual Run and a GitHub
+  command all report, or none do.
+- **Triggering** — the `triggerOn*` flags and the branch/path/metadata filters
+  decide what the bridge *starts*, and what it may drop from the queue. They
+  only ever apply to **automatic** builds: an explicit Run or GitHub command is
+  never removed from the queue by the bridge.
+
+The bridge takes a build out of the queue in exactly two cases, both automatic:
+a scope filter excluded it (draft PR, branch list, path filter, PR metadata), or
+`skipIfCommitPassed` found the same commit already green.
 
 | Feature param | Kind | Default | Feature-form field | Purpose |
 |---|---|---|---|---|
-| `triggerOnBranch` | HARD | `true` | Run on non-PR branches | Does this BuildType run on non-PR branch triggers? Unchecked blocks even manual runs on non-PR branches. |
-| `triggerOnPrReady` | HARD | `true` | Run on PR (ready) | Does this BuildType run on ready PRs (and on draft→ready transitions)? Unchecked blocks even manual runs on PR branches. |
-| `triggerOnPrDraft` | HARD | `true` | Run on PR (draft) | Also run on draft PR events. **Requires `triggerOnPrReady=true`** (validated at save; a stored `ready=off, draft=on` is clamped to off). When unchecked and the PR is draft, auto triggers post a `Skipped: draft PR` Check Run; manual runs on a draft PR are blocked. |
+| `publishChecks` | publication | `true` | Publish to GitHub | Does this build configuration report to GitHub at all? Unchecked = invisible on GitHub whatever happens (no Check Run, no skip row, no PR comment) while still receiving the PR parameters and tags. This is the **only** input to publication — see the two axes above. |
+| `triggerOnBranch` | trigger | `true` | Run on non-PR branches | Does the bridge trigger this build configuration on non-PR branches? Unchecked = no automatic branch build **and nothing removed either**: a Run, a schedule or a VCS trigger still works, and still reports. |
+| `triggerOnPrReady` | trigger | `true` | Run on PR (ready) | Is this build configuration part of the PR check set (ready PRs and draft→ready transitions)? Unchecked = the bridge never enqueues it from a PR event and posts no `Skipped` row for it; an explicit Run or command still works and reports. |
+| `triggerOnPrDraft` | trigger | `true` | Run on PR (draft) | Also trigger on draft PR events. **Requires `triggerOnPrReady=true`** (validated at save; a stored `ready=off, draft=on` is clamped to off). Unchecked: an **automatic** draft build is dropped with a `Skipped: draft PR` Check Run, while an explicit Run or GitHub command on a draft still runs. |
+| `skipIfCommitPassed` | trigger | `false` | Reuse a passed commit | When an **automatic** build is queued for a commit that already passed in this build configuration, drop it and republish that success (`Build passed (reused #87)`, linking to the build that ran). Matched on the commit alone, any ref — GitHub keys a Check Run on `(name, commit)`, so two refs of one commit are one row. A manual Run, a GitHub command and the Re-run buttons always re-run. **Leave off for scheduled suites**: a nightly is expected to re-run on an unchanged commit. |
 | `branchTriggerBranchesOverride` | SOFT | _empty_ (inherit) | Branches list override (non-PR) | When set, **REPLACES** the project's `branchTrigger.branches` for this BuildType. Same VCS branch-filter syntax. Empty = inherit project's list. |
 | `prTriggerBranchesOverride` | SOFT | _empty_ (inherit) | Branches list override (PR source) | When set, **REPLACES** the project's `prTrigger.branches` for this BuildType. Matched against the PR source branch. Empty = inherit. Auto enqueues for excluded PRs post a `Skipped: branch out of scope` Check Run. |
 | `pathFilter` | SOFT | _empty_ (= all paths) | Changed-path filter (monorepo) | **New.** When set, the listener only enqueues this BuildType for a PR if at least one of the PR's changed files matches. VCS-filter syntax (`+:src/api/**` / `-:docs/*` per line; `*` spans `/`). Enforced **only for PR webhook triggers** (it needs the PR file list from GitHub). A non-matching PR gets a `Skipped: paths out of scope` Check Run. |

@@ -8,6 +8,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Publication and triggering are two independent switches.** New build-feature
+  flag **`publishChecks`** (default on) is now the *only* input to "does this
+  build configuration report to GitHub?" — deliberately independent of what
+  started the build: a PR event, a VCS trigger, a schedule, a manual Run and a
+  GitHub command all report, or none do. Unchecked, the build configuration is
+  invisible on GitHub while still receiving the PR parameters and tags.
+
+- **Reuse a commit that already passed.** New build-feature flag
+  **`skipIfCommitPassed`** (default off): when an **automatic** build is queued
+  for a commit that already went green in that build configuration, it is
+  removed from the queue and the earlier success is republished
+  (`Build passed (reused #87)`, linking to the build that ran). Matched on the
+  commit alone, any ref — GitHub keys a Check Run on `(name, commit)`, so two
+  refs of one commit are one row. Explicit requests (manual Run, comment
+  command, the Re-run buttons) always re-run. Leave it off for scheduled
+  suites, which are expected to re-run on an unchanged commit.
+
 - **Explicit GitHub commands are no longer undone by the filters.** A build
   the bridge enqueues from a PR comment, a review approval, the *Re-run*
   button or `POST /api/trigger` is stamped with
@@ -121,6 +138,22 @@ released separately.)
   call) and from `GET /pulls/{n}` on the queue/filter paths.
 
 ### Changed
+
+- **The bridge no longer removes a build it did not start.** `triggerOnBranch`
+  and `triggerOnPrReady` used to be HARD blocks that removed even a manual Run
+  from the queue — clicking "Run" on such a build configuration silently did
+  nothing. They now mean "the bridge does not trigger this automatically": an
+  explicit Run, a schedule or a VCS trigger goes through untouched and reports.
+  Same for a draft PR on a build configuration with `triggerOnPrDraft` off —
+  the automatic build is still dropped with a `Skipped: draft PR` row, but an
+  explicit request runs. Queue cleanup is now limited to two automatic cases: a
+  scope filter excluded the build, or `skipIfCommitPassed` matched
+  (`QueueCleanupPolicy`).
+
+  This is a **behaviour change** for anyone who relied on those flags to
+  prevent manual runs; use `publishChecks` to silence a build configuration on
+  GitHub, and TeamCity's own permissions to control who may run what.
+
 
 - **Comment triggers now fire on `pull_request_review_comment`** (inline
   PR diff comments) instead of `issue_comment`. GitHub only exposes the

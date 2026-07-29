@@ -44,6 +44,7 @@ class GitHubBridgeBuildFeature(
         PARAM_TRIGGER_ON_BRANCH to "true",
         PARAM_TRIGGER_ON_PR_READY to "true",
         PARAM_TRIGGER_ON_PR_DRAFT to "true",
+        PARAM_PUBLISH_CHECKS to "true",
     )
 
     override fun describeParameters(params: Map<String, String>): String {
@@ -53,11 +54,14 @@ class GitHubBridgeBuildFeature(
             if (params[PARAM_TRIGGER_ON_PR_DRAFT] != "false") flags += "PR (ready + draft)"
             else flags += "PR (ready only)"
         }
-        val triggers = if (flags.isEmpty()) "manual only" else flags.joinToString(" + ")
+        if (params[PARAM_SKIP_IF_COMMIT_PASSED] == "true") flags += "reuse passed commits"
+        val triggers = if (flags.isEmpty()) "on demand only" else flags.joinToString(" + ")
+        val publish = if (params[PARAM_PUBLISH_CHECKS] == "false") "; GitHub publication OFF" else ""
         val overrides = mutableListOf<String>()
         if (!params[PARAM_BRANCH_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "branch list override"
         if (!params[PARAM_PR_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "PR list override"
-        return if (overrides.isEmpty()) "triggers: $triggers" else "triggers: $triggers; ${overrides.joinToString(", ")}"
+        val base = if (overrides.isEmpty()) "triggers: $triggers" else "triggers: $triggers; ${overrides.joinToString(", ")}"
+        return base + publish
     }
 
     override fun getParametersProcessor(): PropertiesProcessor = PropertiesProcessor { input ->
@@ -122,5 +126,7 @@ class GitHubBridgeBuildFeature(
         const val PARAM_REQUIRE_PHRASE: String = "requirePhrase"
         const val PARAM_SKIP_PHRASE: String = "skipPhrase"
         const val PARAM_LABEL_FILTER: String = "labelFilter"
+        const val PARAM_SKIP_IF_COMMIT_PASSED: String = "skipIfCommitPassed"
+        const val PARAM_PUBLISH_CHECKS: String = "publishChecks"
     }
 }

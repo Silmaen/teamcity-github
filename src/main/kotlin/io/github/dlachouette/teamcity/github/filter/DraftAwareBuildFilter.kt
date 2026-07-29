@@ -5,6 +5,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateContextResolver
 import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.queue.QueueCleanupPolicy
 import jetbrains.buildServer.BuildAgent
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.buildDistribution.BuildDistributorInput
@@ -38,15 +39,17 @@ class DraftAwareBuildFilter(
         val ctx = gateContextResolver.resolve(promotion, config, triggeredByUser) ?: return null
         val headRef = ctx.pr?.headRef
 
-        return when (BridgeGate.decide(
+        val decision = BridgeGate.decide(
             config, ctx.branchName, ctx.prNumber, ctx.pr?.draft, headRef, ctx.trigger,
             ctx.pr?.title.orEmpty(), ctx.pr?.body.orEmpty(), ctx.pr?.labels.orEmpty(),
-        )) {
-            GateDecision.ALLOW -> null
-            GateDecision.SUPPRESS_HARD -> {
-                LOG.info("Holding ${buildType.externalId} on ${ctx.branchName} (HARD-blocked by GitHub Bridge feature)")
-                SimpleWaitReason("Build excluded by the GitHub Bridge feature on this BuildType")
-            }
+        )
+        // Hold only what the cleaner would have removed: a build somebody
+        // started explicitly must never be blocked here, and "this build
+        // configuration is not part of that path" is not a reason to hold
+        // anything either.
+        if (!QueueCleanupPolicy.removes(decision, ctx.trigger)) return null
+
+        return when (decision) {
             GateDecision.SUPPRESS_DRAFT -> {
                 LOG.info("Holding draft-PR build of ${buildType.externalId} on ${ctx.branchName}")
                 SimpleWaitReason("PR is draft and this BuildType has triggerOnPrDraft=false")
@@ -63,6 +66,7 @@ class DraftAwareBuildFilter(
                 LOG.info("Holding metadata-excluded PR build of ${buildType.externalId} on ${ctx.branchName}")
                 SimpleWaitReason("PR title/body or labels are excluded by this BuildType's metadata filter")
             }
+            GateDecision.ALLOW, GateDecision.SUPPRESS_HARD -> null
         }
     }
 
