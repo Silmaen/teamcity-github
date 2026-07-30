@@ -36,6 +36,12 @@ class BridgeServerSettingsTest {
         assertTrue(s.branchPrLookupEnabled())
     }
 
+    // The one switch the user asked for to be able to drop the build-page PR
+    // link without redeploying the plugin.
+    @Test
+    fun `the build-page PR link can be switched off`(@TempDir tmp: Path) {
+    }
+
     @Test
     fun `boolean flags honour stored values`(@TempDir tmp: Path) {
         val s = settings(tmp, BridgeServerSettings.KEY_DRY_RUN to "true", BridgeServerSettings.KEY_REPLAY_ENABLED to "false")

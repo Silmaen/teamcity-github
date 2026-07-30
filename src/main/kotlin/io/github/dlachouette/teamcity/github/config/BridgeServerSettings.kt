@@ -87,6 +87,20 @@ class BridgeServerSettings(
     // worst case is simply no annotation.
     fun checkRunAnnotationsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_ANNOTATIONS, true)
 
+    // Report the build's test outcome in the Check Run: the counts in the
+    // title GitHub shows in the merge box, and the failing tests (new failures
+    // first, muted ones counted apart) in the body. Read from TeamCity's
+    // `shortStatistics`, so a build configuration that runs no test pays
+    // nothing and says nothing.
+    fun checkRunTestStatsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_TEST_STATS, true)
+
+    // Report where the build's wall-clock went: run time, and the queue time
+    // split into "waiting for its dependencies" and "waiting for a free
+    // agent" — two different problems with two different owners. Also sends
+    // `started_at`/`completed_at`, which is what lets GitHub display the
+    // duration itself.
+    fun checkRunTimingsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_TIMINGS, true)
+
     // Master switch for everything that takes a build OUT of the queue:
     // draft suppression, the scope filters, the already-passed reuse and the
     // drain of a closed PR. Off = the bridge only ever adds builds and reports
@@ -107,6 +121,7 @@ class BridgeServerSettings(
     fun prTagPrefix(): String =
         storage.get(KEY_PR_TAG_PREFIX)?.trim()?.takeIf { it.isNotEmpty() && !it.contains(' ') }
             ?: DEFAULT_PR_TAG_PREFIX
+
 
     // Bearer token for the external API. null = API disabled. Stored
     // separately (set/cleared from its own admin form) so a bulk settings
@@ -168,6 +183,7 @@ class BridgeServerSettings(
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
                 "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
                 "queueCleanup=${queueCleanupEnabled()}, annotations=${checkRunAnnotationsEnabled()}, " +
+                "testStats=${checkRunTestStatsEnabled()}, timings=${checkRunTimingsEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -208,6 +224,8 @@ class BridgeServerSettings(
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
         const val KEY_CHECK_RUN_ANNOTATIONS: String = "checkRun.annotations"
+        const val KEY_CHECK_RUN_TEST_STATS: String = "checkRun.testStats"
+        const val KEY_CHECK_RUN_TIMINGS: String = "checkRun.timings"
         const val KEY_QUEUE_CLEANUP: String = "queueCleanup.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"

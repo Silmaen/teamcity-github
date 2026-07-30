@@ -104,6 +104,8 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 | `prComment.enabled` | `false` | Sticky PR summary comment | Post/update a summary comment on the PR thread. Needs the App's pull-requests/issues **write** permission, hence off by default. |
 | `checkRun.artifactLinks` | `true` | List artifacts in the Check Run and PR comment | Add an **Artifacts** section (top-level artifact files, capped at 10) to the completed Check Run and one link per file to each row of the sticky comment. Every link is a **direct download** (`/repository/download/<bt>/<buildId>:id/<path>`), not the artifacts tab, so a reviewer or a tester gets the file in one click. The root URL is read per project, since TeamCity lets a project override it. Costs one local artifact listing per finished build; no GitHub call. |
 | `checkRun.annotations` | `true` | Annotate the diff with compiler diagnostics | Emit GitHub Check Run **annotations** (`output.annotations`, max 50) for the compiler diagnostics TeamCity reported as build problems, so an error is pinned to its file and line in the PR's diff. Parsed from the build-problem descriptions — no build-log scanning — in both GNU/clang (`file:42:7: error: …`) and MSVC (`file(42,7): error C2065: …`) shapes. A diagnostic whose file is not under the build's checkout directory is skipped: GitHub rejects a path that is not in the repository. |
+| `checkRun.testStats` | `true` | Report the test outcome | Put the build's test verdict where a reviewer sees it: the counts in the Check Run **title** GitHub shows in the merge box ("Build failed — 3 of 1046 tests failed (2 new)"), and the failing tests in the body — **new failures first and marked**, with their duration, their failure text folded into a `<details>` block, and the build where a pre-existing failure first broke. Muted tests are counted apart and never listed as failures. Read from TeamCity's `shortStatistics`, so a build configuration that runs no test says nothing. Capped at 20 listed tests. |
+| `checkRun.timings` | `true` | Report the build's timings | Put the build's clock in the Check Run **summary**, directly under the title (nothing can precede the title): `- **Total** — 11m 13s` / `- **Run** — 7m 12s on \`agent-3\`` / `- **Wait** — 4m 1s (dependencies 3m, free agent 1m, other 1s)`. The dependency share runs to the instant the last snapshot dependency finished, so it **includes the wait of the dependency itself**. The agent share is only what **TeamCity** attributes to there being no free compatible agent (read from its queue wait-reason statistics), and is stated even when sub-second — "was the pool the problem?" is answered with a number, not with silence. The dependency share appears whenever the build has dependencies, even when they cost it nothing. Wait that neither explains is counted in the total and shown as "other" once it reaches a second, since it names no cause. The body then follows a fixed order: failure cause, tests, artifacts, link to the build in TeamCity. Also sends `started_at`/`completed_at`, which is what lets GitHub render the duration itself. |
 | `queueCleanup.enabled` | `true` | Queue cleanup | Master switch for everything that takes a build **out** of the queue: draft suppression, the scope filters, `skipIfCommitPassed` and the drain of a closed PR. Off = the bridge only ever *adds* builds and reports on them; it never removes nor holds one, whatever the gate decided. Only ever applied to build configurations carrying the build feature (see the scope invariant above). |
 | `prTag.enabled` | `true` | Tag PR builds with their PR number | Persist the PR number as a build tag, so a build stays findable by PR long after it ran — it is what the **Branches & PRs** project tab and TeamCity's own tag filter search on. Turn it off to keep the tag list clean; the PR column then falls back to what the ref says (`pull/N` yes, a work branch no). |
 | `rerunAll.onlyFailed` | `false` | "Re-run all checks" re-runs only the failed ones | Restrict `check_suite.rerequested` (the GitHub **Re-run all checks** button) to build configurations whose last build at that commit **failed**. Off = re-run every opted-in build configuration, which is what the button says. A configuration that never ran at that commit has no failure to re-run and is left alone either way. |
@@ -344,6 +346,20 @@ The feature exposes per-task fields along **two independent axes**:
   decide what the bridge *starts*, and what it may drop from the queue. They
   only ever apply to **automatic** builds: an explicit Run or GitHub command is
   never removed from the queue by the bridge.
+
+> **Personal builds are the one exception to both axes (1.10.0+).** A personal
+> build verifies a patch that exists only in the developer's working copy, so:
+>
+> - it **never reports to GitHub** — no `queued`, no `in_progress`, no
+>   conclusion, no PR comment, whatever `publishChecks` says. Before 1.10.0 it
+>   published, and left a Check Run stuck on "Queued" in the pull request;
+> - it is **outside the queue dedup**, both ways — it never counts as "this
+>   commit is already covered" (the real build still runs), its success is never
+>   reused by `skipIfCommitPassed`, and the bridge never takes it out of the
+>   queue;
+> - but it **resolves its pull request** like any other build: PR parameters,
+>   `pr-N` and `draft`/`ready` tags, retro-association on a PR event. That is
+>   the point of running a patch against a PR.
 
 The bridge takes a build out of the queue in exactly two cases, both automatic:
 a scope filter excluded it (draft PR, branch list, path filter, PR metadata), or

@@ -514,6 +514,13 @@ open class GitHubClient {
                     ?: error("CheckRunRequest with status=COMPLETED must carry a conclusion")
                 root.put("conclusion", conclusion.apiValue)
             }
+            request.startedAt?.let { root.put("started_at", it) }
+            // `completed_at` is only meaningful once the run is over; GitHub
+            // ignores it otherwise, and sending it on an in-progress row would
+            // claim a finish that has not happened.
+            if (request.status == CheckRunStatus.COMPLETED) {
+                request.completedAt?.let { root.put("completed_at", it) }
+            }
             val output: ObjectNode = root.putObject("output")
             output.put("title", request.outputTitle)
             output.put("summary", request.outputSummary)
@@ -572,6 +579,12 @@ data class CheckRunRequest(
     // Optional line-level annotations (GitHub `output.annotations`, max 50 per
     // request). Pin a failure to the file and line that caused it.
     val annotations: List<CheckRunAnnotation> = emptyList(),
+    // ISO-8601 instants. GitHub renders the elapsed time in the Checks panel
+    // itself from these two ("Successful in 7m"), which it cannot do from the
+    // delivery time of our requests — a Check Run posted late would otherwise
+    // look like a build that took no time at all.
+    val startedAt: String? = null,
+    val completedAt: String? = null,
 )
 
 // One GitHub Check Run annotation: a diagnostic pinned to a repo-relative

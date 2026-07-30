@@ -24,6 +24,7 @@ import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.SQueuedBuild
 import jetbrains.buildServer.serverSide.SRunningBuild
+import jetbrains.buildServer.serverSide.STestRun
 import jetbrains.buildServer.serverSide.artifacts.BuildArtifactsViewMode
 import jetbrains.buildServer.serverSide.WebLinks
 import jetbrains.buildServer.serverSide.executors.ExecutorServices
@@ -44,6 +45,9 @@ import java.util.concurrent.TimeUnit
 // The "queued" publish is retried on a scheduler because the VCS
 // revision (needed for head_sha) is resolved by a background task and
 // is frequently not ready yet when buildTypeAddedToQueue fires.
+//
+// Personal builds are excluded at every one of those transitions — see
+// `isPersonal`.
 class BuildStatusCheckRunPublisher(
     buildServer: SBuildServer,
     private val tokenResolver: TokenResolver,
@@ -62,6 +66,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
+        if (isPersonal(queuedBuild.buildPromotion)) return
         try {
             attemptPublishQueued(queuedBuild, attempt = 1)
         } catch (e: Exception) {
@@ -70,6 +75,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     override fun buildStarted(build: SRunningBuild) {
+        if (isPersonal(build.buildPromotion)) return
         try {
             publishInProgress(build)
         } catch (e: Exception) {
@@ -78,6 +84,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     override fun buildFinished(build: SRunningBuild) {
+        if (isPersonal(build.buildPromotion)) return
         try {
             publishCompleted(build)
         } catch (e: Exception) {
@@ -86,6 +93,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     override fun buildInterrupted(build: SRunningBuild) {
+        if (isPersonal(build.buildPromotion)) return
         try {
             publishCompleted(build)
         } catch (e: Exception) {
@@ -106,11 +114,33 @@ class BuildStatusCheckRunPublisher(
     // such as a failed snapshot dependency — leaving their "Queued"
     // Check Run stuck forever on GitHub.
     override fun buildRemovedFromQueue(queuedBuild: SQueuedBuild, user: User?, comment: String) {
+        if (isPersonal(queuedBuild.buildPromotion)) return
         try {
             publishQueueRemoved(queuedBuild, user, comment)
         } catch (e: Exception) {
             LOG.warn("Failed publishing Check Run for queue removal of ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
+    }
+
+    // A personal build verifies a patch that exists only in one developer's
+    // working copy: its outcome describes that patch, not the commit GitHub
+    // knows, so it must never speak for that commit — no "Queued", no
+    // "Building", no conclusion, no PR comment.
+    //
+    // Before this guard a personal build reported like any other, and
+    // triggering one by hand left a Check Run stuck on "Queued" on the PR
+    // for good — the reported symptom. Keeping such a row up to date is not
+    // the fix: the row must never be opened.
+    //
+    // Publication is the ONLY thing a personal build loses. It still resolves
+    // its pull request and receives the PR parameters and the `pr-N` /
+    // `draft`/`ready` tags (PrBuildEnricher, PrParameterProvider) — a
+    // developer running a patch against a PR wants that context — and it is
+    // outside queue dedup rather than subject to it.
+    private fun isPersonal(promotion: BuildPromotion): Boolean {
+        if (publishesFor(personal = promotion.isPersonal)) return false
+        LOG.debug("Skipping Check Run publication for personal build of ${promotion.buildType?.externalId}")
+        return true
     }
 
     // Publishes the "Queued" Check Run. At the instant buildTypeAddedToQueue
@@ -213,6 +243,8 @@ class BuildStatusCheckRunPublisher(
             outputTitle = "Building",
             outputSummary = "TeamCity build #${build.buildNumber} is running.",
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
+            // From here on GitHub counts the elapsed time itself.
+            startedAt = build.startDate?.time?.let { BuildTimeline.iso(it) },
         )
         post(ctx, request, "in-progress")
     }
@@ -225,20 +257,33 @@ class BuildStatusCheckRunPublisher(
         val revisions = build.revisions.ifEmpty { build.buildPromotion.revisions }
         val ctx = resolveContext(build.buildType, revisions) ?: return
         val mapping = mapBuildOutcome(build.buildStatus, build.isInterrupted)
-        val summary = build.statusDescriptor.text.orEmpty()
-            .takeIf { it.isNotBlank() }
-            ?: "TeamCity build finished with status ${build.buildStatus}"
-
+        val tests = testOutcomeOf(build)
         val request = CheckRunRequest(
             name = checkRunName(ctx.buildType),
             headSha = ctx.headSha,
             status = CheckRunStatus.COMPLETED,
             conclusion = mapping.conclusion,
-            outputTitle = mapping.title,
-            outputSummary = truncateSummary(summary),
+            outputTitle = titleWithTests(mapping.title, tests?.counts),
+            // The summary is the highest place a Check Run lets us write: GitHub
+            // renders its own header, then `output.title`, then this, then the
+            // body. The timing therefore goes HERE to sit as close to the top as
+            // the API allows — nothing can precede the title.
+            outputSummary = truncateSummary(
+                joinSections(timingBlock(build), statusTextOf(build)).orEmpty()
+                    .ifBlank { mapping.title },
+            ),
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
-            outputText = joinSections(failureDetails(build), artifactSection(build)),
+            // Then, most-asked question first: why did it fail, what did the
+            // tests say, what did it produce, and where to go for the rest.
+            outputText = joinSections(
+                failureDetails(build),
+                tests?.let { TestReport.section(it.counts, it.failed) },
+                artifactSection(build),
+                teamCityLink(build),
+            ),
             annotations = annotationsFor(build),
+            startedAt = build.startDate?.time?.let { BuildTimeline.iso(it) },
+            completedAt = BuildTimeline.iso(finishInstantOf(build)),
         )
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
         maybeUpdatePrComment(build, ctx, mapping)
@@ -406,6 +451,180 @@ class BuildStatusCheckRunPublisher(
         val apiBase: String,
     )
 
+    private data class TestOutcome(val counts: TestCounts, val failed: List<FailedTestRun>)
+
+    // The build's test outcome, or null when the feature is off, the build ran
+    // no test at all, or TeamCity could not produce the statistics.
+    //
+    // `shortStatistics` is the cheap read: the counts plus the failing runs,
+    // without materialising every passed test of a 10 000-test suite. The
+    // failing list it returns already excludes muted tests, which is what we
+    // want — a muted failure is a deliberate exception, reported as a count
+    // and not as a failure someone should chase.
+    private fun testOutcomeOf(build: SBuild): TestOutcome? {
+        if (!serverSettings.checkRunTestStatsEnabled()) return null
+        val stats = try {
+            build.shortStatistics
+        } catch (e: Exception) {
+            LOG.debug("Could not read test statistics of build ${build.buildId}: ${e.message}")
+            return null
+        }
+        val counts = TestCounts(
+            total = stats.allTestCount,
+            passed = stats.passedTestCount,
+            failed = stats.failedTestCount,
+            ignored = stats.ignoredTestCount,
+            muted = stats.mutedTestsCount,
+            newFailed = stats.newFailedCount,
+        )
+        if (!counts.ran) return null
+        val failed = try {
+            // One page beyond what we list, so "…and N more" is honest without
+            // walking a suite where everything failed.
+            stats.failedTests.asSequence().take(TestReport.MAX_LISTED + 1).map { failedRunOf(it) }.toList()
+        } catch (e: Exception) {
+            LOG.debug("Could not read the failing tests of build ${build.buildId}: ${e.message}")
+            emptyList()
+        }
+        return TestOutcome(counts, failed)
+    }
+
+    private fun failedRunOf(run: STestRun): FailedTestRun = FailedTestRun(
+        name = run.test.name.asString,
+        newFailure = run.isNewFailure,
+        durationMillis = run.duration.toLong(),
+        // Where it broke, for a failure this build did not introduce: it tells
+        // a reviewer "not you" in one glance.
+        firstFailedInBuildNumber = try {
+            run.firstFailed?.buildNumber
+        } catch (e: Exception) {
+            null
+        },
+        failureText = try {
+            run.failureInfo?.shortStacktrace?.takeIf { it.isNotBlank() } ?: run.statusText
+        } catch (e: Exception) {
+            null
+        },
+    )
+
+    // "Ran 7m 12s on `agent-3`, after 4m queued (3m waiting for its
+    // dependencies, 1m for a free agent)." — null when the feature is off or
+    // the build never started.
+    // TeamCity's own one-line verdict ("Tests passed: 5", "Exit code 1"), when
+    // it says something the title does not.
+    //
+    // At `buildFinished` the status descriptor has NOT been recomputed yet —
+    // same lag as the null `finishDate` — so it still reads "Running", which is
+    // how a finished, green Check Run ended up summarised as "Running". A stale
+    // running text is dropped rather than published: the title already carries
+    // the verdict, so nothing is lost.
+    private fun statusTextOf(build: SBuild): String? = try {
+        build.statusDescriptor.text?.takeIf { isInformativeStatusText(it) }
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun timingBlock(build: SBuild): String? {
+        if (!serverSettings.checkRunTimingsEnabled()) return null
+        val timings = BuildTimeline.compute(
+            queuedAt = build.queuedDate?.time,
+            startedAt = build.startDate?.time,
+            finishedAt = finishInstantOf(build),
+            lastDependencyFinishedAt = lastDependencyFinish(build.buildPromotion),
+            agentWaitHintMillis = agentWaitHint(build),
+            hasDependencies = hasDependencies(build.buildPromotion),
+        ) ?: return null
+        // No heading: in the summary, right under the title, the three lines are
+        // the first thing on the row and need no label.
+        return BuildTimeline.describeBlock(timings, agentNameOf(build))
+    }
+
+    // Where to go for everything a Check Run cannot hold: the log, the tests
+    // tab, the changes. `details_url` already points here, but that link lives
+    // in GitHub's chrome and gets missed — a link in the body is one the reader
+    // actually sees.
+    private fun teamCityLink(build: SBuild): String? {
+        val url = safeUrl { webLinks.getViewResultsUrl(build) } ?: return null
+        return "[Build #${build.buildNumber} in TeamCity]($url)"
+    }
+
+    private fun hasDependencies(promotion: BuildPromotion): Boolean = try {
+        promotion.dependencies.isNotEmpty()
+    } catch (e: Exception) {
+        false
+    }
+
+    // How much of the queue time TeamCity itself attributes to there being no
+    // free compatible agent — the only way to tell a real agent shortage from
+    // the rest of the queue time (collecting changes, queue synchronisation,
+    // the distribution process), which the dates cannot distinguish.
+    //
+    // TeamCity records the wait per reason as build statistic values, but the
+    // open API declares NEITHER the key naming NOR the unit, so this matches
+    // defensively and errs low: an unrecognised layout returns null and the
+    // whole remainder becomes unattributed `misc`, reported as a wait with no
+    // stated cause rather than as an agent shortage. The debug line lists the
+    // keys the build actually carries, which is what to look at on a live
+    // server if the agent share never shows up.
+    private fun agentWaitHint(build: SBuild): Long? {
+        val values = try {
+            build.statisticValues
+        } catch (e: Exception) {
+            LOG.debug("Could not read the statistic values of build ${build.buildId}: ${e.message}")
+            return null
+        }
+        val waitReasons = values.filterKeys { it.contains("waitreason", ignoreCase = true) }
+        if (waitReasons.isEmpty()) {
+            LOG.debug("Build ${build.buildId} carries no queue wait-reason statistic; " +
+                "keys present: ${values.keys.sorted()}")
+            return null
+        }
+        val agentReasons = waitReasons.filterKeys { key -> AGENT_WAIT_MARKERS.any { key.contains(it, ignoreCase = true) } }
+        if (agentReasons.isEmpty()) {
+            LOG.debug("Build ${build.buildId} waited in the queue for reasons none of which names agent " +
+                "availability: ${waitReasons.keys.sorted()}")
+            return null
+        }
+        LOG.debug("Build ${build.buildId} agent-wait statistics: $agentReasons")
+        return agentReasons.values.sumOf { it.toLong() }.takeIf { it > 0 }
+    }
+
+    // When the build stopped working.
+    //
+    // `finishDate` is NOT set yet on the build object handed to buildFinished —
+    // TeamCity fills it while persisting the finished record, after the
+    // listeners run. Reading it there yields null, which made every Check Run
+    // report a run time of zero ("Ran <1s") no matter how long the build
+    // actually took, and dropped `completed_at` from the payload.
+    //
+    // We are called from buildFinished/buildInterrupted, i.e. at the moment the
+    // build stops, so "now" is that instant to within the callback's own
+    // latency. `Build.getDuration()` is deliberately NOT used as the fallback:
+    // it is expressed in seconds, and one wrong unit here would misreport every
+    // build by a factor of a thousand.
+    private fun finishInstantOf(build: SBuild): Long =
+        build.finishDate?.time ?: System.currentTimeMillis()
+
+    // The instant the LAST snapshot dependency finished, i.e. the moment this
+    // build became eligible for an agent. Only DIRECT dependencies are read: a
+    // transitive one necessarily finished before the direct one waiting on it,
+    // so it cannot move the maximum.
+    private fun lastDependencyFinish(promotion: BuildPromotion): Long? = try {
+        promotion.dependencies.asSequence()
+            .mapNotNull { it.dependOn.associatedBuild?.finishDate?.time }
+            .maxOrNull()
+    } catch (e: Exception) {
+        LOG.debug("Could not read the dependencies of promotion ${promotion.id}: ${e.message}")
+        null
+    }
+
+    private fun agentNameOf(build: SBuild): String? = try {
+        if (build.isAgentLessBuild) null else build.agent.name.takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+        // A finished build whose agent is long gone: the duration still holds.
+        null
+    }
+
     // Line-level annotations for the failing diagnostics, so the PR's diff
     // shows them where they happened. Empty for a build that reported no
     // problem, and for problems whose file is not in the checkout.
@@ -487,6 +706,12 @@ class BuildStatusCheckRunPublisher(
         const val MAX_QUEUED_ATTEMPTS: Int = 8
         const val QUEUED_RETRY_DELAY_MS: Long = 750L
 
+        // The publication rule for personal builds, as a pure predicate:
+        // they never report. Deliberately independent of `publishChecks`,
+        // of the trigger and of the ref — a personal build is not a state
+        // of the repository, so no GitHub row may describe it.
+        fun publishesFor(personal: Boolean): Boolean = !personal
+
         // Pure decision for the "queued" publish, given whether the VCS
         // revision is resolved yet and which attempt this is. Testable
         // without TC SDK fixtures. Lifecycle aborts (build already started /
@@ -527,6 +752,37 @@ class BuildStatusCheckRunPublisher(
         // TeamCity's own parameter for the agent-side checkout directory,
         // used to turn an absolute diagnostic path into a repo-relative one.
         private const val CHECKOUT_DIR_PARAM: String = "teamcity.build.checkoutDir"
+
+        // GitHub caps output.title at 255 characters.
+        const val TITLE_MAX: Int = 255
+
+        // Is TeamCity's status text worth publishing on a FINISHED build? Not
+        // when it is the running-state text the descriptor still carries at
+        // `buildFinished` ("Running", "Running: step 2 of 5"): on a completed
+        // Check Run that is simply wrong. Everything else — "Tests passed: 5",
+        // "Exit code 1", a custom `##teamcity[buildStatus text=…]` — is exactly
+        // what we want to relay, since carrying the real status text instead of
+        // GitHub's canned wording is the point of this plugin.
+        fun isInformativeStatusText(text: String): Boolean {
+            val trimmed = text.trim()
+            return trimmed.isNotEmpty() && !trimmed.startsWith("Running", ignoreCase = true)
+        }
+
+        // Fragments that identify a queue wait-reason statistic as "no agent
+        // could take this build". TeamCity's own wording is of the shape "There
+        // are no idle compatible agents which can run this build"; matching on
+        // the words rather than on a full string keeps this working across
+        // wordings and locales, and anything unmatched simply stays
+        // unattributed.
+        val AGENT_WAIT_MARKERS: List<String> = listOf("agent", "compatible")
+
+        // "Build failed" + the test verdict = the single line GitHub shows in
+        // the PR's merge box. Unchanged when the build ran no test, which is
+        // most build configurations.
+        fun titleWithTests(base: String, counts: TestCounts?): String {
+            val suffix = counts?.let { TestReport.titleSuffix(it) } ?: return base
+            return "$base — $suffix".take(TITLE_MAX)
+        }
 
         fun truncateSummary(text: String): String =
             if (text.length <= SUMMARY_MAX) text

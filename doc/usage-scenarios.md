@@ -1023,6 +1023,7 @@ they never write a skip row.
 | Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
 | Build type not opted in | None | No change |
 | Build configuration with `publishChecks` off | Nothing published, whatever the trigger | Invisible on GitHub; PR parameters and tags still applied |
+| Personal build triggered on a PR ref (1.10.0+) | Every publisher hook returns immediately (`promotion.isPersonal`); dedup and cleanup skip it | Nothing published at any stage — the patch is not in the repository, so no row may describe the commit. Outside the queue dedup both ways: it never blocks the real build, is never reused as a passed commit, is never removed from the queue. It **does** get the PR parameters and the `pr-N` / `draft`/`ready` tags |
 | Automatic build of a commit that already passed (`skipIfCommitPassed`) | Removed from the queue, earlier success republished | `Build passed (reused #87)` at the same commit |
 | Trusted collaborator comments the trigger phrase | `PullRequestEventListener.handleCommentCommand` enqueues matching BTs | Builds run; outside commenters are ignored |
 | PR review approved | `handleReviewApproved` enqueues run-on-approval BTs | Gated suites run |

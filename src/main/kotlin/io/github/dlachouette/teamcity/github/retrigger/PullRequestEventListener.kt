@@ -218,7 +218,7 @@ class PullRequestEventListener(
     private fun lastBuildFailedAt(bt: BuildTypeEx, branchName: String, headSha: String): Boolean {
         val build = bt.history.asSequence()
             .take(HISTORY_SCAN_DEPTH)
-            .firstOrNull { it.canceledInfo == null && buildMatchesBranchAndSha(it, branchName, headSha) }
+            .firstOrNull { it.canceledInfo == null && coversCommit(it, branchName, headSha) }
             ?: return false
         return build.buildStatus.isFailed
     }
@@ -234,8 +234,8 @@ class PullRequestEventListener(
         trigger: BridgeTrigger = BridgeTrigger.AUTO,
         ignoreFinished: Boolean = false,
     ) {
-        val running = bt.runningBuilds.any { buildMatchesBranchAndSha(it, branchName, headSha) }
-        val queued = bt.getQueuedBuilds(null).any { queuedMatchesBranchAndSha(it, branchName, headSha) }
+        val running = bt.runningBuilds.any { coversCommit(it, branchName, headSha) }
+        val queued = bt.getQueuedBuilds(null).any { queuedCoversCommit(it, branchName, headSha) }
         if (running || queued) {
             LOG.info("Skipping ${bt.externalId} on $branchName: already ${if (running) "running" else "queued"}")
             return
@@ -453,7 +453,9 @@ class PullRequestEventListener(
         candidates.forEach { (bt, config) ->
             val branchName = prBuildRefFor(config, payload.prNumber, payload.headRef)
             bt.getQueuedBuilds(null)
-                .filter { it.buildPromotion.branch?.name == branchName }
+                // Never a personal build: the bridge did not enqueue it, and
+                // whoever did is verifying a patch, not the PR.
+                .filter { !it.buildPromotion.isPersonal && it.buildPromotion.branch?.name == branchName }
                 .forEach eachQueued@{ qb ->
                     if (serverSettings.dryRun()) {
                         LOG.info("[dry-run] would remove queued ${bt.externalId} for ${payload.repo.slug}#${payload.prNumber}")
@@ -580,19 +582,19 @@ class PullRequestEventListener(
         headSha: String,
     ): String? {
         val running = buildType.runningBuilds.firstOrNull { build ->
-            buildMatchesBranchAndSha(build, branchName, headSha)
+            coversCommit(build, branchName, headSha)
         }
         if (running != null) return "already running (build #${running.buildNumber})"
 
         val queued = buildType.getQueuedBuilds(null).firstOrNull { qb ->
-            queuedMatchesBranchAndSha(qb, branchName, headSha)
+            queuedCoversCommit(qb, branchName, headSha)
         }
         if (queued != null) return "already queued"
 
         val finished = buildType.history.asSequence()
             .take(HISTORY_SCAN_DEPTH)
             .firstOrNull { build ->
-                build.canceledInfo == null && buildMatchesBranchAndSha(build, branchName, headSha)
+                build.canceledInfo == null && coversCommit(build, branchName, headSha)
             }
         if (finished != null) return "already finished (build #${finished.buildNumber}, status=${finished.buildStatus.text})"
 
@@ -602,8 +604,24 @@ class PullRequestEventListener(
     private fun buildMatchesBranchAndSha(build: SBuild, branchName: String, headSha: String): Boolean =
         matchesBranchAndSha(build.branch?.name, build.revisions.map { it.revision }, branchName, headSha)
 
-    private fun queuedMatchesBranchAndSha(qb: SQueuedBuild, branchName: String, headSha: String): Boolean {
+    // Does an existing build make the bridge's own build unnecessary at
+    // (ref, sha), or carry the verdict for it? A personal build never does:
+    // it verified a patch that is not in the repository and it published
+    // nothing, so letting it stand in for the real build would leave the PR
+    // with no status at all. It stays out of the queue dedup in both
+    // directions — it neither replaces a build nor is replaced by one.
+    //
+    // This is only about dedup and verdicts. A personal build still resolves
+    // its pull request like any other: PR parameters, `pr-N` and
+    // `draft`/`ready` tags, retro-association on a PR event — see
+    // PrBuildEnricher and `retroAssociate`, which match it with
+    // `buildMatchesBranchAndSha` above.
+    private fun coversCommit(build: SBuild, branchName: String, headSha: String): Boolean =
+        !build.buildPromotion.isPersonal && buildMatchesBranchAndSha(build, branchName, headSha)
+
+    private fun queuedCoversCommit(qb: SQueuedBuild, branchName: String, headSha: String): Boolean {
         val promo = qb.buildPromotion
+        if (promo.isPersonal) return false
         return matchesBranchAndSha(promo.branch?.name, promo.revisions.map { it.revision }, branchName, headSha)
     }
 

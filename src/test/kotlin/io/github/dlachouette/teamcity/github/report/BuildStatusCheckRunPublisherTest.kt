@@ -4,6 +4,7 @@ import io.github.dlachouette.teamcity.github.api.CheckRunConclusion
 import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
 import jetbrains.buildServer.messages.Status
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -77,6 +78,16 @@ class BuildStatusCheckRunPublisherTest {
         )
     }
 
+    // A personal build verifies a patch that is not in the repository, so no
+    // Check Run may describe it. Before 1.10.0 one published like any other
+    // build, and a manually-triggered personal build left a "Queued" row
+    // stuck on the PR for good.
+    @Test
+    fun `personal builds never publish`() {
+        assertFalse(BuildStatusCheckRunPublisher.publishesFor(personal = true))
+        assertTrue(BuildStatusCheckRunPublisher.publishesFor(personal = false))
+    }
+
     @Test
     fun `queued action retries while the revision is not resolved yet`() {
         assertEquals(QueuedAction.RETRY, BuildStatusCheckRunPublisher.decideQueuedAction(revisionReady = false, attempt = 1))
@@ -104,6 +115,50 @@ class BuildStatusCheckRunPublisherTest {
     // BridgeFeatureConfigTest exercising BridgeFeatureReader.fromParams.
 
     // G14: output.text stitches the optional Markdown sections together.
+    // The merge box shows one line; it should say whether the reviewer's own
+    // diff is implicated.
+    @Test
+    fun `the title carries the test verdict when tests ran`() {
+        val failed = TestCounts(total = 1046, passed = 1043, failed = 3, ignored = 0, muted = 0, newFailed = 2)
+        assertEquals(
+            "Build failed — 3 of 1046 tests failed (2 new)",
+            BuildStatusCheckRunPublisher.titleWithTests("Build failed", failed),
+        )
+        // No tests, or the feature off: the title is untouched.
+        assertEquals("Build failed", BuildStatusCheckRunPublisher.titleWithTests("Build failed", null))
+        assertEquals(
+            "Build passed",
+            BuildStatusCheckRunPublisher.titleWithTests("Build passed", TestCounts(0, 0, 0, 0, 0, 0)),
+        )
+    }
+
+    @Test
+    fun `the title stays within GitHub's limit`() {
+        val huge = TestCounts(total = 1, passed = 0, failed = 1, ignored = 0, muted = 0, newFailed = 1)
+        val title = BuildStatusCheckRunPublisher.titleWithTests("x".repeat(300), huge)
+        assertEquals(BuildStatusCheckRunPublisher.TITLE_MAX, title.length)
+    }
+
+    // A finished build whose descriptor still says "Running" (TeamCity has not
+    // recomputed it when buildFinished fires) must not publish that as its
+    // summary — a green Check Run summarised "Running" is simply wrong.
+    @Test
+    fun `the stale running status text is not published`() {
+        assertFalse(BuildStatusCheckRunPublisher.isInformativeStatusText("Running"))
+        assertFalse(BuildStatusCheckRunPublisher.isInformativeStatusText("  running  "))
+        assertFalse(BuildStatusCheckRunPublisher.isInformativeStatusText("Running: step 2 of 5"))
+        assertFalse(BuildStatusCheckRunPublisher.isInformativeStatusText("   "))
+    }
+
+    // Relaying TeamCity's real status text instead of GitHub's canned wording is
+    // the point of the plugin, so everything else goes through.
+    @Test
+    fun `a real status text is published`() {
+        assertTrue(BuildStatusCheckRunPublisher.isInformativeStatusText("Tests passed: 5"))
+        assertTrue(BuildStatusCheckRunPublisher.isInformativeStatusText("Exit code 1"))
+        assertTrue(BuildStatusCheckRunPublisher.isInformativeStatusText("Tests failed: 3 (1 new), passed: 1043"))
+    }
+
     @Test
     fun `joinSections keeps the non-blank sections in order`() {
         assertEquals(

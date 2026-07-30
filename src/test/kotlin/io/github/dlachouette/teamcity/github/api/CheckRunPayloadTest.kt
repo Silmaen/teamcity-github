@@ -192,4 +192,56 @@ class CheckRunPayloadTest {
             ObjectMapper().readTree(json).path("output").path("annotations").size(),
         )
     }
+
+    // GitHub renders "Successful in 7m" from these two, which it cannot do
+    // from the delivery time of our request — a Check Run posted late would
+    // otherwise look instantaneous.
+    @Test
+    fun `carries the build's own start and finish instants`() {
+        val request = CheckRunRequest(
+            name = "TeamCity / Build",
+            headSha = "abc",
+            status = CheckRunStatus.COMPLETED,
+            conclusion = CheckRunConclusion.SUCCESS,
+            outputTitle = "Build passed",
+            outputSummary = "ok",
+            startedAt = "2026-07-30T14:19:07Z",
+            completedAt = "2026-07-30T14:26:19Z",
+        )
+        val node = mapper.readTree(GitHubClient.encodeCheckRunPayload(request))
+        assertEquals("2026-07-30T14:19:07Z", node.path("started_at").asText())
+        assertEquals("2026-07-30T14:26:19Z", node.path("completed_at").asText())
+    }
+
+    @Test
+    fun `an in-progress row claims a start but never a finish`() {
+        val request = CheckRunRequest(
+            name = "TeamCity / Build",
+            headSha = "abc",
+            status = CheckRunStatus.IN_PROGRESS,
+            conclusion = null,
+            outputTitle = "Building",
+            outputSummary = "running",
+            startedAt = "2026-07-30T14:19:07Z",
+            completedAt = "2026-07-30T14:26:19Z",
+        )
+        val node = mapper.readTree(GitHubClient.encodeCheckRunPayload(request))
+        assertEquals("2026-07-30T14:19:07Z", node.path("started_at").asText())
+        assertTrue(node.path("completed_at").isMissingNode)
+    }
+
+    @Test
+    fun `omits both instants when the build dates are unknown`() {
+        val request = CheckRunRequest(
+            name = "TeamCity / Build",
+            headSha = "abc",
+            status = CheckRunStatus.QUEUED,
+            conclusion = null,
+            outputTitle = "Queued",
+            outputSummary = "waiting",
+        )
+        val node = mapper.readTree(GitHubClient.encodeCheckRunPayload(request))
+        assertTrue(node.path("started_at").isMissingNode)
+        assertTrue(node.path("completed_at").isMissingNode)
+    }
 }

@@ -4,6 +4,110 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - unreleased
+
+### Added
+
+- **The Check Run reports the test outcome** (`checkRun.testStats`, default on).
+  The title GitHub shows in the merge box stops being "Build failed" and becomes
+  **"Build failed — 3 of 1046 tests failed (2 new)"**; the body lists the failing
+  tests, **new failures first and marked as such**, each with its duration, its
+  failure text folded into a `<details>` block, and — for a failure this build
+  did not introduce — the build number where it first broke. Muted tests are
+  counted apart and never listed as failures, so a green conclusion cannot hide
+  them. Read from TeamCity's `shortStatistics`, so a build configuration that
+  runs no test pays nothing and says nothing.
+
+- **The Check Run reports where the build's time went** (`checkRun.timings`,
+  default on), as the **summary** — the highest place the API offers, directly
+  under the title (GitHub renders its own header, then the title, then this):
+
+  ```
+  - **Total** — 11m 13s
+  - **Run** — 7m 12s on `agent-3`
+  - **Wait** — 4m 1s (dependencies 3m, free agent 1m, other 1s)
+  ```
+
+  "Run" is the time the build actually worked, never the waiting. The dependency
+  share is measured to the instant the last snapshot dependency finished, so it
+  **includes the time that dependency itself spent waiting** — which is what
+  someone reading a pull request wants to know — and it appears whenever the
+  build has dependencies at all, even when they cost it nothing. The agent share
+  is only ever what **TeamCity itself** attributes to there being no free
+  compatible agent, since the dates say how long a build waited past its
+  dependencies but never why; it is stated even when sub-second, because "was the
+  pool the problem?" is answered with a number and not with silence. Wait that
+  neither explains is counted in the total and shown as "other" once it reaches a
+  second — it names no cause, so it has to be big enough to explain something.
+
+  The body then follows a fixed reading order: **failure cause, tests, artifacts,
+  then a link to the build in TeamCity** (the `details_url` link lives in
+  GitHub's chrome and gets missed).
+
+- **`started_at` / `completed_at` are now sent**, which is what lets GitHub
+  render the duration itself ("Successful in 7m") instead of inferring it from
+  when our request happened to arrive — a Check Run posted late used to look
+  like a build that took no time at all.
+
+- **The `draft` / `ready` pill links to the pull request.** Clicking it opens
+  the PR on GitHub (or on your GitHub Enterprise host, derived from the same API
+  base the publisher uses) in a new tab. The PR number is read from the row's
+  `pr-189` tag, or from a `pull/189` ref. When the server has more than one
+  repository in play and the page gives no way to tell which one a row belongs
+  to, the pill stays unlinked rather than pointing at another repository's #189.
+
+### Fixed
+
+- **Personal builds no longer report to GitHub.** A personal build verifies a
+  patch that exists only in one developer's working copy, so its outcome
+  describes that patch and not the commit GitHub knows about. It used to
+  publish like any other build, and triggering one by hand left a Check Run
+  stuck on **"Queued"** in the pull request for good. Personal builds now
+  publish nothing at any lifecycle transition — no `queued`, no `in_progress`,
+  no conclusion, no PR summary comment — whatever `publishChecks` says.
+
+- **Personal builds are outside the queue dedup**, in both directions, for the
+  same reason: one running or queued on a PR's ref no longer counts as "this
+  commit is already covered" (which used to make the bridge skip enqueueing the
+  real build, leaving the PR with no status at all), a personal success is never
+  reused by `skipIfCommitPassed`, and the bridge never takes a personal build
+  out of the queue — not on a scope filter, not as a duplicate, not when the PR
+  closes.
+
+  **They still resolve their pull request.** Publication and queue dedup are the
+  only two things a personal build is excluded from: it gets the PR parameters,
+  the `pr-N` and `draft`/`ready` tags and the retro-association on a PR event
+  exactly like any other build, because a developer testing a patch against a PR
+  needs that context.
+
+- **A finished build no longer reports "Running" as its summary.** TeamCity has
+  not recomputed the build's status descriptor when `buildFinished` fires — the
+  same lag that made `finishDate` null — so a green Check Run was published with
+  "Running" underneath it. A stale running text is now dropped instead of
+  relayed; the title already carries the verdict, and a real status text
+  ("Tests passed: 5", "Exit code 1") still comes through.
+
+- **The `draft`/`ready` tag pills are actually coloured now** — `ready` green,
+  `draft` a neutral grey (a draft is "not ready yet", not a warning), with a
+  dark-theme palette. The colours were keyed on TeamCity's own tag classes
+  (`.buildTag`, `.tag`) while the script matched a wider set of markup
+  (`a.tagLabel`, `a[href*="tag:"]`), so on the pages using that markup the pill
+  got its shape and no colour — it looked exactly like TeamCity's stock grey
+  chip. Both sides now agree on one `bridge-pill--<tag>` class.
+
+  The `pr-189` tag is deliberately left as TeamCity renders it: the Branch
+  column is narrow, and a second pill next to `draft`/`ready` cost more
+  legibility than it bought.
+
+  The colour is applied to the **chip**, not to its label. On the React pages
+  TeamCity uses Ring UI, whose chip is `.ring-tag-container > a.ring-tag-tag >
+  .ring-tag-content` with the grey background on the container; the text match
+  lands on the innermost span, so the first attempt painted a rectangle *inside*
+  Ring's grey chip — a green label in a grey block. The pill class now climbs to
+  the chip, Ring's inner layers are made transparent, and the geometry (padding,
+  radius) is only drawn on the classic pages, where no chip exists. TeamCity's
+  own dark-theme markers are honoured too, not just the OS preference.
+
 ## [1.9.0] - 2026-07-30
 
 Branching workflows: pull requests build on their own branch, publication
