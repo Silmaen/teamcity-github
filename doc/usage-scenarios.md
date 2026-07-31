@@ -395,7 +395,7 @@ What appears on the PR:
 | Cancelled in queue (user removes it) | Check Run "Cancelled before start", conclusion `cancelled`. Only fires for user-initiated removals (the draft-suppression cleaner is silent so its `Skipped` row stays). |
 | Success | Check Run "Build passed", `output.summary` = the build's `statusDescriptor.text` (e.g. "3 warnings; 0 errors") |
 | Failure | Check Run "Build failed", same summary source |
-| Failure, but CI's fault | Check Run "Infrastructure failure: `<cause>`", conclusion `neutral` — see below (v1.10.0+, `checkRun.infraNeutral`) |
+| Failure, but CI's fault | Check Run "Infrastructure failure: `<cause>`" — the cause is named in the title; the conclusion stays `failure` unless `checkRun.infraNeutral` is on (v1.10.0+) — see below |
 | Failure of a snapshot dependency | Check Run "Build failed: Snapshot dependency failure", conclusion `failure` — named, but still red |
 | Cancelled (finished) | Check Run "Build cancelled" (any underlying status, when `isInterrupted` is true) |
 
@@ -418,14 +418,24 @@ Infrastructure failure: Unable to collect changes
 > **CI infrastructure failure, not a problem with the code.** The build
 > could not run to completion for a reason outside the repository
 > (Unable to collect changes), so this commit has not been verified —
-> re-run the build. Reported as neutral, so it does not block the merge.
+> re-run the build. Still reported as a failure, so the merge stays
+> blocked until it is re-run.
 ```
 
-`neutral` is what makes the difference on the PR: GitHub counts a
-required check concluding `neutral` as satisfied, so the merge is no
-longer held up by a CI hiccup. Untick *"An infrastructure failure does
-not block the merge"* (`checkRun.infraNeutral`) to keep it red — the
-title still names the cause; only the conclusion changes.
+**The title is the part that always happens**: a reviewer reads "re-run
+this" instead of going through their own diff looking for the bug. The
+**conclusion** is a separate decision, and it defaults to `failure` — the
+merge stays blocked. Telling "our CI broke" from "your code is broken" is a
+subtle call, and unblocking a merge on a wrong guess would let an
+unverified commit through; naming the cause costs nothing if the guess is
+wrong.
+
+Tick *"An infrastructure failure does not block the merge"*
+(`checkRun.infraNeutral`) once you trust the classification on your own
+builds, and the same row concludes `neutral` instead — GitHub counts a
+required check concluding `neutral` as satisfied, so a CI hiccup stops
+holding the merge up. Only the conclusion changes; the title names the
+cause either way.
 
 Two cases deliberately stay the code's problem:
 
@@ -477,9 +487,9 @@ The page is one column of cards, in this order:
    - API base override, API version, PR-info cache TTL, stale grace,
      HTTP retry attempts and base delay.
    - Feature flags: webhook replay protection, dry-run, metrics endpoint,
-     legacy `teamcity.pullRequest.*` aliases, sticky PR summary comment,
+     legacy `teamcity.pullRequest.*` aliases,
      attach branch builds to their PR, "Re-run all checks" re-runs only the
-     failed ones, list artifacts in the Check Run and PR comment, annotate
+     failed ones, list artifacts in the Check Run, annotate
      the diff with compiler diagnostics, **queue cleanup** (the server-wide
      off switch), and tag PR builds with their PR number.
    - Repository allowlist and comment-trigger authors.
@@ -834,7 +844,7 @@ stage a rollout without side effects.
 
 **Expected outcome**: every mutating action is logged with a
 `[dry-run]` prefix but not performed - no builds enqueued, no builds
-removed from the queue, no Check Runs or PR comments posted. Webhook
+removed from the queue, no Check Runs posted. Webhook
 verification, candidate matching, gating, and path filtering still
 run, so the log shows exactly what *would* have happened.
 
@@ -948,6 +958,24 @@ restricted to build configurations whose last build at that commit failed.
 > created earlier, **Verify App configuration** on the admin page reports
 > `check_suite` as a missing event — add it in the App's webhook settings,
 > otherwise the "Re-run all checks" button stays silent.
+
+> **If you cannot find the button.** The per-row **Re-run** link
+> (`check_run.rerequested`) is the one GitHub reliably renders for a
+> third-party App's check runs, and it is what a reviewer actually uses. The
+> **suite-level** control is GitHub's own UI and it is not always offered — in
+> particular for a check suite GitHub created implicitly when the App posted
+> check runs directly, rather than one the App requested. The plugin's handling
+> does not depend on the button: the same webhook can be triggered through the
+> API the button calls, which is also how to verify the wiring —
+>
+> ```bash
+> # the suite id comes from: GET /repos/{owner}/{repo}/commits/{sha}/check-suites
+> curl -X POST -H "Authorization: Bearer <token>" \
+>   https://api.github.com/repos/{owner}/{repo}/check-suites/{suite_id}/rerequest
+> ```
+>
+> A `check_suite.rerequested` delivery then shows up in the App's *Advanced →
+> Recent Deliveries* and in the bridge's recent-events list.
 
 ## Scenario 24: finding the builds of a branch — or of a PR
 
@@ -1124,7 +1152,7 @@ they never write a skip row.
 | PR from a fork | Event dropped (logged, `fork_events_ignored`) | Nothing runs — the bridge serves one repository, never its forks |
 | Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: the scope filters are bypassed and nothing removes it afterwards | The build actually runs (no "Skipped" row comes back to undo it) |
 | "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |
-| Build finishes with artifacts | Check Run `output.text` lists them; sticky comment gains an `[artifacts]` link | One click from the PR to the installer/package |
+| Build finishes with artifacts | Check Run `output.text` lists them; an `[artifacts]` link | One click from the PR to the installer/package |
 | Build fails with compiler diagnostics | `BuildProblemAnnotations` parses them into `output.annotations` | Errors/warnings pinned to their line in the PR's diff |
 | Label added / removed, title edited | Re-evaluated: newly eligible builds are enqueued, **no** skip row posted | The green rows of that commit are left untouched |
 | PR reopened | Treated like `opened` | Full check set runs again |

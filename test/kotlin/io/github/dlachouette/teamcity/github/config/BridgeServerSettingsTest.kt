@@ -32,17 +32,40 @@ class BridgeServerSettingsTest {
         assertTrue(s.metricsEnabled())
         assertFalse(s.dryRun())
         assertFalse(s.legacyAliasesEnabled())
-        assertFalse(s.prCommentEnabled())
         assertTrue(s.branchPrLookupEnabled())
     }
 
     // Whether a CI hiccup should still block a merge is a policy, so it is a
-    // checkbox — on by default, because a build that never judged the commit
-    // has nothing to hold against it.
+    // checkbox — **off** by default: telling "our CI broke" from "your code is
+    // broken" is a subtle call, and unblocking a merge on a wrong guess lets an
+    // unverified commit through. Naming the suspected cause is always on and
+    // costs nothing if the guess is wrong.
     @Test
-    fun `an infrastructure failure is neutral by default and can be kept red`(@TempDir tmp: Path) {
-        assertTrue(settings(tmp).infraFailureNeutralEnabled())
-        assertFalse(settings(tmp, BridgeServerSettings.KEY_INFRA_NEUTRAL to "false").infraFailureNeutralEnabled())
+    fun `an infrastructure failure stays red by default and can be made neutral`(@TempDir tmp: Path) {
+        assertFalse(settings(tmp).infraFailureNeutralEnabled())
+        assertTrue(settings(tmp, BridgeServerSettings.KEY_INFRA_NEUTRAL to "true").infraFailureNeutralEnabled())
+    }
+
+    // Two questions, two toggles: whether the PR number is persisted as a tag
+    // (searchable by TeamCity itself) and whether that tag is shown. TeamCity's
+    // Tags column is narrow enough that a second tag costs the draft/ready pill
+    // its legibility, so hiding the chip while keeping the tag is a real answer.
+    @Test
+    fun `showing the PR tag is on by default and can be switched off independently`(@TempDir tmp: Path) {
+        assertTrue(settings(tmp).prTagEnabled())
+        assertTrue(settings(tmp).prTagDisplayEnabled())
+
+        val hidden = settings(tmp, BridgeServerSettings.KEY_PR_TAG_DISPLAY to "false")
+        assertTrue(hidden.prTagEnabled(), "hiding the chip must not stop the tag being written")
+        assertFalse(hidden.prTagDisplayEnabled())
+    }
+
+    // The build-log fallback for diff annotations: on by default, because
+    // without it the annotations do nothing for a Command Line build.
+    @Test
+    fun `the annotation log scan is on by default and can be switched off`(@TempDir tmp: Path) {
+        assertTrue(settings(tmp).checkRunLogScanEnabled())
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_CHECK_RUN_LOG_SCAN to "false").checkRunLogScanEnabled())
     }
 
     @Test

@@ -196,7 +196,7 @@ the Option A manifest requests):
 |---|---|---|
 | **Metadata** | Read | Mandatory baseline (GitHub Apps always need this) |
 | **Checks** | Write | Post Check Runs with rich state |
-| **Pull requests** | Write | Read for `GET /repos/{owner}/{repo}/pulls/{N}` (draft status); write is needed only for the optional sticky PR summary comment, but request write to match the managed-App manifest |
+| **Pull requests** | Read | `GET /repos/{owner}/{repo}/pulls/{N}` for the draft status, and the commit-to-PR lookup. **Read is enough**: the plugin's only write is the Check Run lifecycle, which is the *Checks* permission. |
 | **Contents** | Read | Required transitively for repository visibility |
 
 Do **not** grant **Commit statuses** or **Webhooks** — this plugin

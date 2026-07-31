@@ -9,12 +9,15 @@ import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.api.PrInfoCache
+import io.github.dlachouette.teamcity.github.feature.AnnotationGate
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateDecision
 import io.github.dlachouette.teamcity.github.queue.QueueCleanupPolicy
 import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
+import jetbrains.buildServer.BuildProblemTypes
 import jetbrains.buildServer.messages.Status
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.BuildRevision
@@ -57,7 +60,6 @@ class BuildStatusCheckRunPublisher(
     private val gateContextResolver: io.github.dlachouette.teamcity.github.feature.GateContextResolver,
     private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
     private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
-    private val prSummaryCommenter: PrSummaryCommenter,
     private val executorServices: ExecutorServices,
 ) : BuildServerAdapter() {
 
@@ -286,59 +288,19 @@ class BuildStatusCheckRunPublisher(
             // Then, most-asked question first: why did it fail, what did the
             // tests say, what did it produce, and where to go for the rest.
             outputText = joinSections(
-                failureDetails(build),
+                // The test section, when there is one, says "12 failed (12 new)"
+                // and names them: TeamCity's own "12 failed tests detected"
+                // above it is the same sentence with less in it.
+                failureDetails(build, testsReported = tests != null),
                 tests?.let { TestReport.section(it.counts, it.failed) },
                 artifactSection(build),
                 teamCityLink(build),
             ),
-            annotations = annotationsFor(build),
+            annotations = annotationsFor(build, ctx.config),
             startedAt = build.startDate?.time?.let { BuildTimeline.iso(it) },
             completedAt = BuildTimeline.iso(finishInstantOf(build)),
         )
         post(ctx, request, "completed (${mapping.conclusion.apiValue})")
-        maybeUpdatePrComment(build, ctx, mapping)
-    }
-
-    // Optional sticky PR summary comment (off by default). Only for builds
-    // that belong to a PR; skipped in dry-run. Reuses the build's
-    // installation token, which must carry the App's pull-requests write
-    // permission.
-    private fun maybeUpdatePrComment(build: SBuild, ctx: PrBuildContext, mapping: BuildOutcomeMapping) {
-        if (!serverSettings.prCommentEnabled() || serverSettings.dryRun()) return
-        val prNumber = resolvePrNumber(build, ctx) ?: return
-        val emoji = when (mapping.conclusion) {
-            CheckRunConclusion.SUCCESS -> "✅"
-            CheckRunConclusion.FAILURE, CheckRunConclusion.TIMED_OUT -> "❌"
-            CheckRunConclusion.CANCELLED -> "⚪"
-            else -> "⚠️"
-        }
-        prSummaryCommenter.upsert(
-            accessToken = ctx.accessToken,
-            repo = ctx.repo,
-            prNumber = prNumber,
-            apiBase = ctx.apiBase,
-            checkName = checkRunName(ctx.buildType),
-            row = PrSummaryCommenter.Row(
-                emoji = emoji,
-                text = mapping.title,
-                url = safeUrl { webLinks.getViewResultsUrl(build) },
-                // Direct download links, so the cell takes a reviewer to the
-                // installer rather than to a TeamCity page.
-                artifacts = if (serverSettings.artifactLinksEnabled()) artifactLinks(build) else emptyList(),
-            ),
-        )
-    }
-
-    // The PR this build reports into, if any: straight from the `pull/N`
-    // ref, or — for a build launched on a plain branch ref — the open PR
-    // whose head is the built commit. The Check Run itself needs none of
-    // this (GitHub attaches it to the commit, and every PR whose head is
-    // that commit shows it); only the comment needs an issue number.
-    private fun resolvePrNumber(build: SBuild, ctx: PrBuildContext): Int? {
-        val branch = build.branch?.name ?: return null
-        if (branch.startsWith("pull/")) return branch.removePrefix("pull/").toIntOrNull()
-        if (!ctx.config.resolvesPrFromCommit(serverSettings.branchPrLookupEnabled())) return null
-        return prInfoCache.getForCommit(ctx.repo, ctx.headSha, ctx.accessToken, ctx.apiBase)?.number
     }
 
     private fun publishQueueRemoved(queuedBuild: SQueuedBuild, user: User?, comment: String) {
@@ -507,23 +469,44 @@ class BuildStatusCheckRunPublisher(
         return TestOutcome(counts, failed)
     }
 
-    private fun failedRunOf(run: STestRun): FailedTestRun = FailedTestRun(
-        name = run.test.name.asString,
-        newFailure = run.isNewFailure,
-        durationMillis = run.duration.toLong(),
-        // Where it broke, for a failure this build did not introduce: it tells
-        // a reviewer "not you" in one glance.
-        firstFailedInBuildNumber = try {
-            run.firstFailed?.buildNumber
-        } catch (e: Exception) {
-            null
-        },
-        failureText = try {
-            run.failureInfo?.shortStacktrace?.takeIf { it.isNotBlank() } ?: run.statusText
-        } catch (e: Exception) {
-            null
-        },
-    )
+    private fun failedRunOf(run: STestRun): FailedTestRun {
+        val name = run.test.name.let { TestReport.displayName(it.asString, it.nameWithoutSuite, it.suite) }
+        return FailedTestRun(
+            name = name,
+            newFailure = run.isNewFailure,
+            durationMillis = run.duration.toLong(),
+            // Where it broke, for a failure this build did not introduce: it
+            // tells a reviewer "not you" in one glance.
+            firstFailedInBuildNumber = try {
+                run.firstFailed?.buildNumber
+            } catch (e: Exception) {
+                null
+            },
+            failureText = try {
+                failureTextOf(run, name)
+            } catch (e: Exception) {
+                null
+            },
+        )
+    }
+
+    // The most informative failure text TeamCity has for this run, or null when
+    // it has none.
+    //
+    // `shortStacktrace` is the right answer for a runner that produces one
+    // (JUnit, NUnit, pytest…). An importer that does not — CTest, a hand-rolled
+    // XML report — leaves both it and `statusText` at a bare "Failure", and the
+    // actual output of the test lives only in `fullText`. So the cheap reads
+    // come first and `fullText` is paid for only when they said nothing: it
+    // materialises the whole output of the test, which for a chatty test is
+    // not small.
+    private fun failureTextOf(run: STestRun, name: String): String? {
+        val info = run.failureInfo
+        sequenceOf(info?.shortStacktrace, info?.stacktraceMessage, run.statusText).forEach { candidate ->
+            TestReport.informativeFailure(candidate, name)?.let { return it }
+        }
+        return TestReport.informativeFailure(run.fullText, name)
+    }
 
     // "Ran 7m 12s on `agent-3`, after 4m queued (3m waiting for its
     // dependencies, 1m for a free agent)." — null when the feature is off or
@@ -666,21 +649,76 @@ class BuildStatusCheckRunPublisher(
     // Line-level annotations for the failing diagnostics, so the PR's diff
     // shows them where they happened. Empty for a build that reported no
     // problem, and for problems whose file is not in the checkout.
-    private fun annotationsFor(build: SBuild): List<CheckRunAnnotation> {
-        if (!serverSettings.checkRunAnnotationsEnabled()) return emptyList()
-        val descriptions = try {
-            build.failureReasons.mapNotNull { it.description }
-        } catch (e: Exception) {
-            LOG.debug("Could not read failure reasons of build ${build.buildId} for annotations: ${e.message}")
-            return emptyList()
-        }
-        if (descriptions.isEmpty()) return emptyList()
+    private fun annotationsFor(build: SBuild, config: BridgeFeatureConfig): List<CheckRunAnnotation> {
+        if (!annotationsAllowed(build, config)) return emptyList()
         val checkoutDir = try {
             build.parametersProvider.get(CHECKOUT_DIR_PARAM)
         } catch (e: Exception) {
             null
         }
-        return BuildProblemAnnotations.parse(descriptions, checkoutDir)
+        val descriptions = try {
+            build.failureReasons.mapNotNull { it.description }
+        } catch (e: Exception) {
+            LOG.debug("Could not read failure reasons of build ${build.buildId} for annotations: ${e.message}")
+            emptyList()
+        }
+        val fromProblems = BuildProblemAnnotations.parse(descriptions, checkoutDir)
+        if (fromProblems.isNotEmpty()) return fromProblems
+        return annotationsFromLog(build, checkoutDir)
+    }
+
+    // Three levels have a veto over writing on somebody's diff: the server, any
+    // project in the chain, and the build configuration. `AnnotationGate` holds
+    // the rule; this reads the chain.
+    //
+    // Own parameters, project by project from the root down — deliberately not
+    // `project.parameters`, which resolves to the nearest definition and would
+    // let a sub-project overrule the `no` of its parent.
+    private fun annotationsAllowed(build: SBuild, config: BridgeFeatureConfig): Boolean {
+        val chain = try {
+            build.buildType?.project?.projectPath
+                ?.map { it.ownParameters[BridgeProjectParams.ANNOTATIONS_ENABLED] }
+                .orEmpty()
+        } catch (e: Exception) {
+            LOG.debug("Could not read the project chain of build ${build.buildId} for annotations: ${e.message}")
+            emptyList()
+        }
+        return AnnotationGate.enabled(
+            serverEnabled = serverSettings.checkRunAnnotationsEnabled(),
+            projectChain = chain,
+            feature = config.annotateDiff,
+        )
+    }
+
+    // The fallback: read the failed build's log.
+    //
+    // A Command Line runner reports "Process exited with code 1" and nothing
+    // else, so for a CMake/ninja build the diagnostics only ever exist in the
+    // log — which is exactly the case this feature was supposed to serve.
+    //
+    // Only for a build that did not succeed (a green build has no diagnostic
+    // worth pinning, and this is the expensive path), and the iterator is
+    // consumed lazily so the read stops at the 50th annotation or the line
+    // budget, whichever comes first.
+    private fun annotationsFromLog(build: SBuild, checkoutDir: String?): List<CheckRunAnnotation> {
+        if (!serverSettings.checkRunLogScanEnabled()) return emptyList()
+        if (build.buildStatus.isSuccessful) return emptyList()
+        return try {
+            val messages = build.buildLog.messagesIterator
+            val lines = sequence {
+                while (messages.hasNext()) {
+                    yield(messages.next()?.text.orEmpty())
+                }
+            }
+            BuildProblemAnnotations.scan(lines, checkoutDir).also {
+                if (it.isNotEmpty()) {
+                    LOG.debug("Scanned the log of build ${build.buildId}: ${it.size} annotation(s)")
+                }
+            }
+        } catch (e: Exception) {
+            LOG.debug("Could not scan the log of build ${build.buildId} for annotations: ${e.message}")
+            emptyList()
+        }
     }
 
     // Artefact links, so a reviewer or a tester reaches the installer or the
@@ -709,12 +747,12 @@ class BuildStatusCheckRunPublisher(
     // The root URL is read per project (`getRootUrlByProjectExternalId`), not
     // globally: TeamCity lets a project override it, and a link built from the
     // wrong host would 404 for exactly the people we are trying to help.
-    internal fun artifactLinks(build: SBuild): List<PrSummaryCommenter.ArtifactLink> {
+    internal fun artifactLinks(build: SBuild): List<ArtifactLink> {
         if (!build.isArtifactsExists) return emptyList()
         val projectId = build.buildType?.project?.externalId ?: return emptyList()
         val root = safeUrl { webLinks.getRootUrlByProjectExternalId(projectId) } ?: return emptyList()
         return topLevelArtifactNames(build).map { name ->
-            PrSummaryCommenter.ArtifactLink(name, artifactDownloadUrl(root, build, name))
+            ArtifactLink(name, artifactDownloadUrl(root, build, name))
         }
     }
 
@@ -834,13 +872,17 @@ class BuildStatusCheckRunPublisher(
         fun joinSections(vararg sections: String?): String? =
             sections.filterNot { it.isNullOrBlank() }.joinToString("\n").takeIf { it.isNotBlank() }
 
-        fun failureDetails(build: SBuild): String? {
-            val reasons = try {
+        fun failureDetails(build: SBuild, testsReported: Boolean = false): String? {
+            val all = try {
                 build.failureReasons
             } catch (e: Exception) {
                 LOG.debug("Could not read failure reasons for build ${build.buildId}: ${e.message}")
                 return null
             }
+            // Drop the "N failed tests detected" problem when the test section
+            // is going to say it properly, with the names. Kept when there is
+            // no section (stats off or unreadable): then it is all we have.
+            val reasons = if (testsReported) all.filterNot { it.type == BuildProblemTypes.TC_FAILED_TESTS_TYPE } else all
             if (reasons.isEmpty()) return null
             val body = buildString {
                 append("### Failure details\n\n")
@@ -917,7 +959,10 @@ class BuildStatusCheckRunPublisher(
             val cause = failure.cause?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
             val verdict =
                 if (conclusion == CheckRunConclusion.NEUTRAL) "Reported as neutral, so it does not block the merge."
-                else "Still reported as a failure, as this server is configured to."
+                // The default. Not phrased as "this server is configured to":
+                // holding the merge until a human has looked is the ordinary
+                // behaviour, not an unusual choice somebody made.
+                else "Still reported as a failure, so the merge stays blocked until it is re-run."
             return "> **CI infrastructure failure, not a problem with the code.** The build could not " +
                 "run to completion for a reason outside the repository$cause, so this commit has not " +
                 "been verified — re-run the build. $verdict"

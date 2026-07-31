@@ -10,7 +10,14 @@ data class WebhookInfo(
     val secretConfigured: Boolean,
     val logFile: String,
     val logConfigured: Boolean,
+    // The plugin's own version, from the plugin descriptor. It used to be filled
+    // with `SBuildServer.fullServerVersion` — TeamCity's version — so `/info`
+    // reported "2026.1.3 (build 222742)" as its plugin version while `/health`
+    // reported the real one. Two endpoints, one key, two different answers.
     val pluginVersion: String,
+    // TeamCity's version, which an info endpoint is a fair place to state — as
+    // long as it says which is which.
+    val teamcityVersion: String,
 ) {
     // Jackson handles escaping; the hand-rolled serializer it replaced
     // was an avoidable correctness liability when Jackson is already a
@@ -39,7 +46,7 @@ data class WebhookInfo(
         |Expected path: `$logFile`
         |Status: ${if (logConfigured) "configured (file exists)" else "**not configured** - merge the log4j snippet shipped with the plugin into `teamcity-server-log4j.xml`"}
         |
-        |Plugin version: $pluginVersion
+        |Plugin version: $pluginVersion (TeamCity $teamcityVersion)
         |""".trimMargin()
 
     companion object {

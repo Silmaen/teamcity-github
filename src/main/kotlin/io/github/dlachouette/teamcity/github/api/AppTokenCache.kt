@@ -37,5 +37,19 @@ class AppTokenCache {
         entries.remove(installationId)
     }
 
+    // Drop every cached token, and say how many.
+    //
+    // An installation token carries the permissions it had **when it was
+    // minted**. So granting the App a new permission — and having the
+    // installation accept it — changes nothing until the cached token expires:
+    // up to the full TTL of calls still failing with 403 for a permission the
+    // App visibly has. That is a confusing enough half-hour to be worth a
+    // button on the admin page.
+    fun clear(): Int {
+        val size = entries.size
+        entries.clear()
+        return size
+    }
+
     private data class Entry(val token: String, val expiresAt: Instant)
 }

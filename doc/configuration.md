@@ -101,15 +101,16 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 | `dryRun` | `false` | Dry-run | Log intended actions, perform none. |
 | `metrics.enabled` | `true` | Metrics endpoint | Expose the metrics endpoint. |
 | `legacyAliases.enabled` | `false` | Publish legacy `teamcity.pullRequest.*` aliases | Also publish the bundled feature's variable names alongside the `teamcity.github.bridge.pullRequest.*` ones. |
-| `prComment.enabled` | `false` | Sticky PR summary comment | Post/update a summary comment on the PR thread. Needs the App's pull-requests/issues **write** permission, hence off by default. |
-| `checkRun.artifactLinks` | `true` | List artifacts in the Check Run and PR comment | Add an **Artifacts** section (top-level artifact files, capped at 10) to the completed Check Run and one link per file to each row of the sticky comment. Every link is a **direct download** (`/repository/download/<bt>/<buildId>:id/<path>`), not the artifacts tab, so a reviewer or a tester gets the file in one click. The root URL is read per project, since TeamCity lets a project override it. Costs one local artifact listing per finished build; no GitHub call. |
-| `checkRun.annotations` | `true` | Annotate the diff with compiler diagnostics | Emit GitHub Check Run **annotations** (`output.annotations`, max 50) for the compiler diagnostics TeamCity reported as build problems, so an error is pinned to its file and line in the PR's diff. Parsed from the build-problem descriptions — no build-log scanning — in both GNU/clang (`file:42:7: error: …`) and MSVC (`file(42,7): error C2065: …`) shapes. A diagnostic whose file is not under the build's checkout directory is skipped: GitHub rejects a path that is not in the repository. |
-| `checkRun.testStats` | `true` | Report the test outcome | Put the build's test verdict where a reviewer sees it: the counts in the Check Run **title** GitHub shows in the merge box ("Build failed — 3 of 1046 tests failed (2 new)"), and the failing tests in the body — **new failures first and marked**, with their duration, their failure text folded into a `<details>` block, and the build where a pre-existing failure first broke. Muted tests are counted apart and never listed as failures. Read from TeamCity's `shortStatistics`, so a build configuration that runs no test says nothing. Capped at 20 listed tests. |
+| `checkRun.artifactLinks` | `true` | List artifacts in the Check Run | Add an **Artifacts** section (top-level artifact files, capped at 10) to the completed Check Run. Every link is a **direct download** (`/repository/download/<bt>/<buildId>:id/<path>`), not the artifacts tab, so a reviewer or a tester gets the file in one click. The root URL is read per project, since TeamCity lets a project override it. Costs one local artifact listing per finished build; no GitHub call. |
+| `checkRun.annotations` | `true` | Annotate the diff with compiler diagnostics | Emit GitHub Check Run **annotations** (`output.annotations`, max 50) for the build's compiler diagnostics, so an error is pinned to its file and line in the PR's diff. Both GNU/clang (`file:42:7: error: …`) and MSVC (`file(42,7): error C2065: …`) shapes. Read first from the **build-problem descriptions**, which is where the compiler-aware runners (MSBuild, Visual Studio) put the diagnostic; when those carry none, from the **build log** — see `checkRun.annotationLogScan`. A diagnostic whose file is not under the build's checkout directory is skipped: GitHub rejects a path that is not in the repository. |
+| `checkRun.annotationLogScan` | `true` | Read the build log when the build problems carry no diagnostic | The fallback that makes the annotations real for a **Command Line** runner — how nearly every CMake/ninja C++ build is wired. Such a build reports exactly one problem, *"Process exited with code 1"*, and the compiler's output never becomes a build problem at all, so without this the annotations feature silently does nothing for it. Bounded on every axis: only a build that **did not succeed**, only when the build problems produced **no** annotation, and the log iterator is consumed lazily so the read stops at the 50th annotation or after `MAX_SCANNED_LINES` (200 000) lines, whichever comes first. Turn it off on a server where reading big build logs is not wanted; the build-problem path keeps working. |
+| `checkRun.testStats` | `true` | Report the test outcome | Put the build's test verdict where a reviewer sees it: the counts in the Check Run **title** GitHub shows in the merge box ("Build failed — 3 of 1046 tests failed (2 new)"), and the failing tests in the body — **new failures first and marked**, with their duration, their failure text, and the build where a pre-existing failure first broke. The failure text is rendered by what it is worth: a one-liner goes on the bullet itself, a longer one is folded into a `<details>` block labelled with its first line, and a text that says nothing (a bare `Failure`, which is what TeamCity's CTest/XML importers report) is dropped rather than folded. When the cheap SDK reads say nothing, the test's full output is read instead. An empty suite (`(empty): `) is stripped from the displayed name. Muted tests are counted apart and never listed as failures. Read from TeamCity's `shortStatistics`, so a build configuration that runs no test says nothing. Capped at 20 listed tests. |
 | `checkRun.timings` | `true` | Report the build's timings | Put the build's clock in the Check Run **summary**, directly under the title (nothing can precede the title): `- **Total** — 11m 13s` / `- **Run** — 7m 12s on \`agent-3\`` / `- **Wait** — 4m 1s (dependencies 3m, free agent 1m, other 1s)`. The dependency share runs to the instant the last snapshot dependency finished, so it **includes the wait of the dependency itself**. The agent share is only what **TeamCity** attributes to there being no free compatible agent (read from its queue wait-reason statistics), and is stated even when sub-second — "was the pool the problem?" is answered with a number, not with silence. The dependency share appears whenever the build has dependencies, even when they cost it nothing. Wait that neither explains is counted in the total and shown as "other" once it reaches a second, since it names no cause. The body then follows a fixed order: failure cause, tests, artifacts, link to the build in TeamCity. Also sends `started_at`/`completed_at`, which is what lets GitHub render the duration itself. |
-| `checkRun.infraNeutral` | `true` | An infrastructure failure does not block the merge | Tell "your code is broken" from "our CI broke". The build's problems are classified from their `BuildProblemData.getType()`: a type TeamCity itself counts as an **internal error** (lost checkout, unable to collect changes, artifacts resolving failed, failed to create a directory, cannot start the build runner, inaccessible external dependency) makes the failure **infrastructural** — the Check Run title becomes "Infrastructure failure: Unable to collect changes", the summary opens with a line saying the commit was **not** verified and to re-run the build, and the conclusion is `neutral` instead of `failure`. GitHub counts a required check concluding `neutral` as satisfied, so the merge is no longer blocked by a CI hiccup; turn this off to keep it red and make a human re-run the build. The **title names the cause either way** — what broke is a fact, whether it blocks a merge is the policy this flag holds. Two deliberate exceptions: one problem the build itself produced (a failing test, a compile error, a non-zero exit code) makes the whole failure the **code's**, however many infrastructure problems came with it; and a failed **snapshot dependency** is named ("Build failed: Snapshot dependency failure") but stays `failure`, because that dependency may well have failed on this PR's own code. |
+| `checkRun.infraNeutral` | `false` | An infrastructure failure does not block the merge | Tell "your code is broken" from "our CI broke". The build's problems are classified from their `BuildProblemData.getType()`: a type TeamCity itself counts as an **internal error** (lost checkout, unable to collect changes, artifacts resolving failed, failed to create a directory, cannot start the build runner, inaccessible external dependency) makes the failure **infrastructural** — the Check Run title becomes "Infrastructure failure: Unable to collect changes", the summary opens with a line saying the commit was **not** verified and to re-run the build, and the conclusion is `neutral` instead of `failure`. GitHub counts a required check concluding `neutral` as satisfied, so the merge is no longer blocked by a CI hiccup; turn this off to keep it red and make a human re-run the build. The **title names the cause either way** — what broke is a fact, whether it blocks a merge is the policy this flag holds. Two deliberate exceptions: one problem the build itself produced (a failing test, a compile error, a non-zero exit code) makes the whole failure the **code's**, however many infrastructure problems came with it; and a failed **snapshot dependency** is named ("Build failed: Snapshot dependency failure") but stays `failure`, because that dependency may well have failed on this PR's own code. |
 | `queueCleanup.enabled` | `true` | Queue cleanup | Master switch for everything that takes a build **away**: draft suppression, the scope filters, `skipIfCommitPassed`, the drain of a closed PR, and (v1.10.0+) stopping the running builds a new push made obsolete. Off = the bridge only ever *adds* builds and reports on them; it never removes, holds nor stops one, whatever the gate decided. Only ever applied to build configurations carrying the build feature (see the scope invariant above). |
 | `cancelObsolete.enabled` | `true` | Stop running builds whose result has nowhere to go | Stop a build **already running** once nothing will read its verdict, in the two cases TeamCity handles by itself in neither: a **new commit pushed** to the PR (`pull_request.synchronize` — the builds on the previous head would judge a commit nobody will look at again, while the build for the new head queues behind them) and a **closed or merged** PR. `buildInterrupted` publishes the cancellation, so the commit keeps an honest "Build cancelled" row instead of an `in_progress` one that never resolves — and on a push it cannot collide with the new commit's row, which is keyed on a different SHA. Only *running* builds: removing **queued** ones is `queueCleanup.enabled`'s business (TeamCity drops obsolete queued builds itself on a push; the bridge removes them for a closed PR). Never stopped, in both cases: a **personal** build (it verifies a patch that is not in the repository, so neither event speaks for it) and one somebody **started by hand** (they may be watching it). On a push, two more: a build whose **revision TeamCity has not resolved** yet, and the **last build in flight** for that branch — that last rule is what keeps an out-of-order webhook delivery from leaving the pull request with nothing running, and it means a suppressed PR (a draft, a filtered branch) keeps what it already had. Neither applies to a closed PR: nothing will replace those builds, and that is the point. Counted as `builds_stopped`. Subordinate to `queueCleanup.enabled`. |
-| `prTag.enabled` | `true` | Tag PR builds with their PR number | Persist the PR number as a build tag, so a build stays findable by PR long after it ran — it is what the **Branches & PRs** project tab and TeamCity's own tag filter search on. Turn it off to keep the tag list clean; the PR column then falls back to what the ref says (`pull/N` yes, a work branch no). |
+| `prTag.enabled` | `true` | Tag PR builds with their PR number | Persist the PR number as a build tag, so a build stays findable by PR through **TeamCity's own tag filter and search** long after it ran. Not required for the **Branches & PRs** tab: since 1.9.6 its PR column resolves the number from the tag, else the `pull/N` ref, else the build's published `…pullRequest.number` parameter — so the column is populated either way, including for builds that ran before the tag existed. |
+| `prTag.display` | `true` | … and show it in build lists | Whether that tag's chip is *rendered*. TeamCity's Tags column is narrow: a second tag on a build collapses the column into a count, and the `draft`/`ready` pill — the state worth seeing at a glance — stops being legible. Off keeps the tag (searchable, and still shown in the plugin's own PR column) and hides its chip, client-side, the same way the pills are coloured. Only ever hides `<prefix><digits>`, anchored at both ends, so a team's own `pr-review-notes` is untouched. |
 | `rerunAll.onlyFailed` | `false` | "Re-run all checks" re-runs only the failed ones | Restrict `check_suite.rerequested` (the GitHub **Re-run all checks** button) to build configurations whose last build at that commit **failed**. Off = re-run every opted-in build configuration, which is what the button says. A configuration that never ran at that commit has no failure to re-run and is left alone either way. |
 | `branchPrLookup.enabled` | `true` | Attach branch builds to their PR | For a build launched on a plain branch ref (not a `pull/N` ref), resolve the pull request from the built commit (`GET /commits/{sha}/pulls`) so the build gets the PR parameters, the `draft`/`ready` tag and the summary comment. Only **open** PRs whose **head** is that exact commit qualify; the answer (including "no PR") is cached for the PR-info TTL. Off = branch builds stay strictly PR-unaware. |
 
@@ -247,7 +248,7 @@ both secrets listed in the tables above (`api.base`, `api.version`,
 `prinfo.cache.ttl.seconds`, `prinfo.cache.staleGrace.seconds`,
 `http.retry.maxAttempts`, `http.retry.baseDelayMs`, `repo.allowlist`,
 `comment.allowedAssociations`, `webhook.replay.enabled`, `dryRun`,
-`metrics.enabled`, `legacyAliases.enabled`, `prComment.enabled`,
+`metrics.enabled`, `legacyAliases.enabled`,
 `branchPrLookup.enabled`, `webhook.secret`, `api.token`) plus, when a
 managed App has been created
 (v1.7.0+), the managed-App credentials `app.id`, `app.privateKey` (PEM)
@@ -295,6 +296,7 @@ branches like `main`, `Release/*`) and `prTrigger` (PR branches,
 | `teamcity.github.bridge.branchTrigger.branches` | _empty_ (= all) | Non-PR branch filter | VCS branch-filter syntax (`+:pattern` / `-:pattern` per line, `/regex/` for Java regex). Empty = match every branch. |
 | `teamcity.github.bridge.prTrigger.enabled` | `true` (anything but `false`) | Trigger on pull requests | Project-level kill switch for the PR path. Off = the bridge never triggers PR builds for this project. |
 | `teamcity.github.bridge.prTrigger.branches` | _empty_ (= all) | PR source-branch filter | Matched against the PR's **source** branch name (e.g. `Feature/foo`), not the `pull/N` literal. Empty = match every PR. |
+| `teamcity.github.bridge.annotations.enabled` | `true` (anything but `false`) | Annotate the diff | May the bridge pin compiler diagnostics to the pull request's diff for this project's builds? **Read own-per-project over the whole chain, not resolved** — unlike every other key in this table: a `false` on an ancestor project holds for its entire subtree and a sub-project setting `true` does **not** take it back. The verdict is the AND of the server flag, every project in the chain, and the build configuration's `annotateDiff` — one `false` anywhere wins. Nothing else the bridge reports is affected. See [Who may annotate a diff](#who-may-annotate-a-diff). |
 | `teamcity.github.bridge.prBuildRef` | `pull` | Build PRs on their own branch | Which ref a PR build runs on. `pull` (default) = the synthetic `pull/N` ref, mapped by the VCS root's branch spec — the only option that works for PRs from forks. `branch` = the PR's **own head branch** (e.g. `Feature/foo`): readable in every TeamCity screen, and a push builds **once** instead of twice once a PR exists, because there is no second ref for the same commit. See [Branch-source PR builds](#branch-source-pr-builds-v190) below. |
 
 A BuildType participates only when (a) the surrounding project chain
@@ -353,7 +355,7 @@ The feature exposes per-task fields along **two independent axes**:
 > build verifies a patch that exists only in the developer's working copy, so:
 >
 > - it **never reports to GitHub** — no `queued`, no `in_progress`, no
->   conclusion, no PR comment, whatever `publishChecks` says. Before 1.10.0 it
+>   conclusion, whatever `publishChecks` says. Before 1.10.0 it
 >   published, and left a Check Run stuck on "Queued" in the pull request;
 > - it is **outside the queue dedup**, both ways — it never counts as "this
 >   commit is already covered" (the real build still runs), its success is never
@@ -383,6 +385,7 @@ a scope filter excluded it (draft PR, branch list, path filter, PR metadata), or
 | Feature param | Kind | Default | Feature-form field | Purpose |
 |---|---|---|---|---|
 | `publishChecks` | publication | `true` | Publish to GitHub | Does this build configuration report to GitHub at all? Unchecked = invisible on GitHub whatever happens (no Check Run, no skip row, no PR comment) while still receiving the PR parameters and tags. This is the **only** input to publication — see the two axes above. |
+| `annotateDiff` | publication | `true` | Annotate the diff | May this build configuration pin its compiler diagnostics to the pull request's diff? Unticking it silences the annotations of one configuration — a nightly warning sweep, a legacy target — while keeping everything else it reports. A tick does **not** overrule a project or a server that turned annotations off: one `false` anywhere wins. See [Who may annotate a diff](#who-may-annotate-a-diff). |
 | `triggerOnBranch` | trigger | `true` | Run on non-PR branches | Does the bridge trigger this build configuration on non-PR branches? Unchecked = no automatic branch build **and nothing removed either**: a Run, a schedule or a VCS trigger still works, and still reports. |
 | `triggerOnPrReady` | trigger | `true` | Run on PR (ready) | Is this build configuration part of the PR check set (ready PRs and draft→ready transitions)? Unchecked = the bridge never enqueues it from a PR event and posts no `Skipped` row for it; an explicit Run or command still works and reports. |
 | `triggerOnPrDraft` | trigger | `true` | Run on PR (draft) | Also trigger on draft PR events. **Requires `triggerOnPrReady=true`** (validated at save; a stored `ready=off, draft=on` is clamped to off). Unchecked: an **automatic** draft build is dropped with a `Skipped: draft PR` Check Run, while an explicit Run or GitHub command on a draft still runs. |
@@ -640,6 +643,51 @@ The switch is **per project** and defaults to `pull`, so existing
 installations are unaffected: nothing changes until you tick the box.
 Builds that already ran on `pull/N` stay in the history as builds of a ref
 that stops receiving new ones.
+
+## Who may annotate a diff
+
+Annotations are the only thing the bridge writes **on somebody else's
+review surface** — pinned to a line of the diff, in the reviewer's face,
+not in a panel they chose to open. So it is the only setting with a veto at
+every level, and the rule is the opposite of the rest of this page: it is
+an **AND**, and nothing overrules a "no".
+
+```mermaid
+flowchart LR
+    classDef no fill:#ffebee,stroke:#c62828,color:#b71c1c
+    classDef yes fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+
+    S["<b>Server</b><br/>checkRun.annotations"]
+    P["<b>Every project in the chain</b><br/>teamcity.github.bridge.annotations.enabled<br/>own value, root → leaf"]
+    B["<b>Build configuration</b><br/>annotateDiff"]
+    Y["Annotations posted"]:::yes
+    N["No annotation"]:::no
+
+    S -- "false" --> N
+    P -- "false anywhere" --> N
+    B -- "false" --> N
+    S -- "otherwise" --> P -- "otherwise" --> B -- "otherwise" --> Y
+```
+
+Three consequences worth being explicit about:
+
+- **A `true` never overrules a `false`.** A sub-project or a build
+  configuration cannot re-enable what a parent project turned off. "No
+  annotations from this tree" has to be enforceable in one place, or it is
+  not enforceable at all; somebody who wants them back removes the `no`
+  where it was written.
+- **The project value is read own-per-project, not resolved.** Every other
+  project parameter here resolves to its nearest definition — this one is
+  read on each project of the chain, so an ancestor's `false` still counts
+  after a descendant has written its own value. The project's **GitHub
+  Bridge** tab says so, naming the ancestor that vetoes.
+- **Only the literal `false` decides.** Absent, blank, `true` or a typo all
+  abstain: a misspelt value must not silently switch a reporting feature
+  off.
+
+Everything else the bridge reports — the status, the timings, the test
+outcome, the artifact links — is unaffected by these
+switches.
 
 ## Forks are out of scope
 

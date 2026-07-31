@@ -55,12 +55,23 @@ class BranchEnrichmentPageExtension(
     // own tags. It is handed to the JSP, which interpolates it into a JS
     // string literal — hence the sanitising.
     override fun fillModel(model: MutableMap<String, Any>, request: HttpServletRequest) {
-        model[MODEL_PR_TAG_PREFIX] = sanitizeTagPrefix(serverSettings.prTagPrefix())
+        val prefix = sanitizeTagPrefix(serverSettings.prTagPrefix())
+        model[MODEL_PR_TAG_PREFIX] = prefix
+        // Hiding needs two things: the operator asking for it, and a prefix that
+        // survived sanitising (without one, a `pr-189` chip cannot be told from a
+        // team's own tag, and hiding the wrong chip is worse than showing ours).
+        //
+        // Deliberately NOT conditioned on `prTagEnabled`: switching tagging off
+        // stops writing new tags, it does not remove the ones already on past
+        // builds. Somebody who unticks the display wants those gone from the
+        // column too.
+        model[MODEL_HIDE_PR_TAG] = !serverSettings.prTagDisplayEnabled() && prefix.isNotEmpty()
     }
 
     companion object {
         const val EXTENSION_ID: String = "bridgeBranchEnrichment"
         const val MODEL_PR_TAG_PREFIX: String = "bridgePrTagPrefix"
+        const val MODEL_HIDE_PR_TAG: String = "bridgeHidePrTag"
 
         private val LOG = Logger.getInstance(BranchEnrichmentPageExtension::class.java.name)
 

@@ -304,7 +304,7 @@ flowchart TD
 at the built commit. With the `branchPrLookup.enabled` server flag (the
 "attach branch builds to their PR" setting), a build launched on the plain
 branch ref also resolves the open PR whose head is that commit, so it
-gets the PR parameters, the `draft`/`ready` tag and the summary comment —
+gets the PR parameters and the `draft`/`ready` tag —
 i.e. a manual experimental build looks the same whether it was started
 from `Experiment/raytracing` or from `pull/N`.
 
@@ -870,7 +870,7 @@ flowchart TD
     B -->|"Feature/* or Bugfix/*"| E{"Attached to an open PR?"}
     E -->|no| F["Build stays PR-unaware"]
     E -->|yes| G["GET /commits/{sha}/pulls<br/>open PR whose head is this commit"]
-    G --> H["PR resolved: parameters, draft/ready tag,<br/>PR tag, summary comment, Check Run on the PR"]
+    G --> H["PR resolved: parameters, draft/ready tag,<br/>PR tag, Check Run on the PR"]
     C --> I["Searchable by branch AND by PR"]
     H --> I
 ```
@@ -898,10 +898,11 @@ TeamCity, the builds normally reserved for long-life branches — installer,
 deployment. It works, but QA needs TeamCity knowledge, the choice of build is
 implicit, and the artefacts are discoverable only inside TeamCity.
 
-**What the pull request carries instead.** The sticky summary comment is the
-hand-off document: one row per check, its result, a link to the build, and a
-**direct download link per artifact** — the installer itself, not a TeamCity
-page. A tester who can read the PR needs nothing else.
+**What the pull request carries instead.** The **Checks** panel is the hand-off
+document: one row per build configuration, its result, a link to the build, and
+in the completed row's body a **direct download link per artifact** — the
+installer itself, not a TeamCity page. A tester who can read the PR needs
+nothing else.
 
 For a release-branch campaign there is no pull request to carry the table;
 the **Branches & PRs** tab filtered on that branch is the shareable

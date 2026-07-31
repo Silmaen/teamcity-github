@@ -193,7 +193,8 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
   "secretConfigured": true,
   "logFile": "/data/teamcity_server/datadir/logs/teamcity-github-bridge.log",
   "logConfigured": true,
-  "pluginVersion": "TeamCity 2026.1 (build 222521)"
+  "pluginVersion": "1.9.10",
+  "teamcityVersion": "TeamCity 2026.1 (build 222521)"
 }
 ```
 
@@ -206,7 +207,8 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
 | `secretConfigured` | boolean | `true` when `teamcity.github.bridge.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
 | `logFile` | string | Absolute path where the plugin's dedicated log file lives (or *would* live) - always `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`. |
 | `logConfigured` | boolean | `true` when the dedicated log file currently exists, i.e. an operator has merged the log4j snippet (`teamcity-github-bridge-log4j-snippet.xml`) into `teamcity-server-log4j.xml`. |
-| `pluginVersion` | string | The TeamCity server version string. Used as a sanity check (the plugin is alive). |
+| `pluginVersion` | string | The **plugin's** version, from its descriptor, or `"unknown"`. Before 1.9.10 this field carried TeamCity's version instead — the same key answered differently here and on `/health`. |
+| `teamcityVersion` | string | The TeamCity server version string. Useful as a sanity check (the plugin is alive, inside *that* server). **New in 1.9.10.** |
 
 ### Response codes
 
@@ -275,7 +277,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/health
 ```json
 {
   "status": "ok",
-  "pluginVersion": "TeamCity 2026.1 (build 222521)",
+  "pluginVersion": "1.9.10",
   "secretConfigured": true,
   "logConfigured": true,
   "dryRun": false,
@@ -400,7 +402,7 @@ curl -H "Authorization: Bearer $BRIDGE_API_TOKEN" \
 
 ```json
 {
-  "pluginVersion": "TeamCity 2026.1 (build 222521)",
+  "pluginVersion": "1.9.10",
   "secretConfigured": true,
   "dryRun": false,
   "replayProtection": true,

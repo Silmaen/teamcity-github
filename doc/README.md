@@ -18,6 +18,7 @@ GitHub App → configure a project → see a Check Run.
 | See concrete end-to-end walkthroughs | [usage-scenarios.md](usage-scenarios.md) |
 | Map our branch model (default / `Release/*` / cascade / QA) onto pipelines | [branching-workflows.md](branching-workflows.md) |
 | Call the plugin's HTTP API from another app | [api-reference.md](api-reference.md) |
+| Decide whether to adopt it (vs. bundled, vs. an external relay) | [why-this-plugin.md](why-this-plugin.md) |
 | Understand the security/trust model | [security.md](security.md) |
 | Diagnose a problem | [troubleshooting.md](troubleshooting.md) |
 | Understand the internals | [architecture.md](architecture.md) |

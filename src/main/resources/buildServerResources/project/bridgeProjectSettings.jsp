@@ -54,7 +54,7 @@
                 <input type="text" id="connectionId" name="connectionId" value="<c:out value='${connectionId}'/>" placeholder="managed or PROJECT_EXT_42" required/>
                 <div class="bridge-help">
                     Required. Use <code>managed</code> to use the server-managed GitHub App
-                    created from <em>Administration &rarr; GitHub Bridge</em> — <strong>or</strong>
+                    created from <em>Administration &rarr; GitHub Bridge</em> &mdash; <strong>or</strong>
                     the internal ID of a TeamCity GitHub App connection (e.g.
                     <code>PROJECT_EXT_42</code>, found under
                     <em>Administration &rarr; &lt;project&gt; &rarr; Connections</em>).
@@ -101,10 +101,35 @@
                 <input type="checkbox" id="prBuildRefBranch" name="prBuildRefBranch" <c:if test="${prBuildRefBranch}">checked</c:if>/>
                 <div class="bridge-help">
                     Off (default): a PR build runs on the synthetic <code>pull/N</code> ref.<br/>
-                    On: it runs on the PR's own head branch (e.g. <code>Feature/foo</code>) — readable in every
+                    On: it runs on the PR's own head branch (e.g. <code>Feature/foo</code>) &mdash; readable in every
                     TeamCity screen, and a push builds <em>once</em> instead of twice once a PR exists.
                     Requires the head branches to be in the VCS root's branch spec
                     (e.g. <code>+:refs/heads/Feature/*</code>); pull requests from forks are ignored either way.
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <th><label for="annotationsEnabled">Annotate the diff:</label></th>
+            <td>
+                <input type="checkbox" id="annotationsEnabled" name="annotationsEnabled" <c:if test="${annotationsEnabled}">checked</c:if>/>
+                <label for="annotationsEnabled" style="font-weight:normal;">
+                    This project's builds may pin compiler errors and warnings to the pull request's diff.
+                </label>
+                <div class="bridge-help">
+                    Three levels can each say no &mdash; the server (<em>Administration &rarr; GitHub Bridge</em>),
+                    this project chain, and each build configuration's <em>GitHub Bridge integration</em>
+                    feature &mdash; and <strong>one &quot;no&quot; anywhere wins</strong>. Unticking it here holds
+                    annotations off for this project <em>and every project under it</em>: a sub-project
+                    ticking its own box does not take that back. Everything else the bridge reports
+                    (status, timings, tests, artifacts) is unaffected.
+                    <c:if test="${not empty annotationsVetoedBy}">
+                        <div style="margin-top:.5em;padding:.4em .6em;background:#fff4e5;border-left:3px solid #e8a33d;color:#663c00;">
+                            <strong>Already off above.</strong> The parent project
+                            <strong><c:out value="${annotationsVetoedBy}"/></strong> has annotations
+                            turned off, so no build in this project annotates a diff whatever this
+                            checkbox says. Remove the &quot;no&quot; there to change that.
+                        </div>
+                    </c:if>
                 </div>
             </td>
         </tr>

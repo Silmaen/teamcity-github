@@ -28,6 +28,13 @@ object BridgeProjectParams {
 
     const val PR_TRIGGER_ENABLED: String = "teamcity.github.bridge.prTrigger.enabled"
     const val PR_TRIGGER_BRANCHES: String = "teamcity.github.bridge.prTrigger.branches"
+
+    // May the bridge write on the diff of this project's pull requests?
+    //
+    // Read **own-only, over the whole chain** and not resolved like every other
+    // key here: a `false` on an ancestor holds for its whole subtree and a
+    // sub-project cannot take it back. See `AnnotationGate`.
+    const val ANNOTATIONS_ENABLED: String = "teamcity.github.bridge.annotations.enabled"
 }
 
 // Which ref the bridge enqueues a PR build on.
@@ -105,6 +112,11 @@ data class BridgeFeatureConfig(
     // on GitHub whatever happens. Trigger gates and filters decide what
     // *runs*, not what is *reported*.
     val publishChecks: Boolean = true,
+    // This build configuration's say on annotating the diff — **raw**, not a
+    // Boolean, because "says nothing" and "says no" are different answers here:
+    // the verdict is the AND of this, the project chain and the server flag.
+    // See `AnnotationGate`.
+    val annotateDiff: String? = null,
 )
 
 object BridgeFeatureReader {
@@ -196,6 +208,7 @@ object BridgeFeatureReader {
             prBuildRef = PrBuildRef.parse(projectParams[BridgeProjectParams.PR_BUILD_REF]),
             skipIfCommitPassed = featureParams[GitHubBridgeBuildFeature.PARAM_SKIP_IF_COMMIT_PASSED] == "true",
             publishChecks = featureParams[GitHubBridgeBuildFeature.PARAM_PUBLISH_CHECKS] != "false",
+            annotateDiff = featureParams[GitHubBridgeBuildFeature.PARAM_ANNOTATE_DIFF],
         )
     }
 }

@@ -10,8 +10,8 @@
 
   STYLING ONLY. Turning a tag into a link to the pull request was tried
   and removed: in TeamCity a tag *is* a filter, the React pages bind that
-  behaviour by delegation on an ancestor — whose CAPTURE listener runs
-  before anything we can attach to the pill — and a re-render drops
+  behaviour by delegation on an ancestor -- whose CAPTURE listener runs
+  before anything we can attach to the pill -- and a re-render drops
   attributes set on a node React owns. Both are properties of TC's own UI,
   not bugs to work around. Putting the link on the build page instead
   (BUILD_SUMMARY / BUILD_ACTIONS) was tried too and also removed: those
@@ -19,7 +19,7 @@
   what it is good at, a search/filter key.
 
   No GitHub API calls. No DOM dependencies beyond TC's stock tag
-  markup. Safe to ship — if TC's tag markup changes in a future
+  markup. Safe to ship -- if TC's tag markup changes in a future
   release the selectors simply find nothing and the page renders as
   before.
 --%>
@@ -29,7 +29,7 @@
        overview), `.tag` (build summary) or `a.tagLabel` depending on the
        page; keying the colours on those classes left every tag the JS
        matched through a selector the CSS did not repeat (`a.tagLabel`,
-       `a[href*="tag:"]`) with no custom property at all — hence a pill
+       `a[href*="tag:"]`) with no custom property at all -- hence a pill
        with a transparent background, indistinguishable from TC's stock
        grey chip. One class per tag name, and the mismatch cannot recur. */
     .bridge-pill--draft {
@@ -63,7 +63,7 @@
 
     /* The media query only catches an OS-level preference, and TeamCity's theme
        is a per-user setting that can disagree with it. These are the markers
-       TeamCity/Ring put on the document for its dark theme — whichever exists
+       TeamCity/Ring put on the document for its dark theme -- whichever exists
        here wins, and the ones that do not simply never match. `:where` keeps
        the specificity at zero so ordering alone decides, hence: after the
        media query. */
@@ -89,7 +89,7 @@
 
     /* Classic pages: no chip exists, so we draw the whole pill. Excluded on the
        React pages, where Ring already provides the padding, the radius and the
-       border — adding ours there would double its geometry. */
+       border -- adding ours there would double its geometry. */
     .bridge-pill:not(.ring-tag-container) {
         display: inline-block;
         padding: 1px 8px;
@@ -102,7 +102,15 @@
         margin-right: 4px;
     }
 
-    /* Ring stacks three painted layers — container, link, content — and the
+    /* A PR chip the operator chose not to display. Hidden, not removed: the tag
+       stays on the build, so TeamCity's own tag filter and search still find it
+       -- it simply stops competing for the narrow Tags column, where a second
+       tag costs the draft/ready pill its legibility. */
+    .bridge-pill--hidden {
+        display: none !important;
+    }
+
+    /* Ring stacks three painted layers -- container, link, content -- and the
        inner two would cover the colour we just put on the chip, which is
        exactly what made a green label sit inside a grey block. Let ours show
        through, and keep the label's own weight. */
@@ -121,7 +129,7 @@
     // TeamCity renders a tag differently per page and per UI generation: the
     // classic pages use `.buildTag` / `.tag` / `a.tagLabel`, while the React
     // (Sakura) pages use CSS-module classes whose names are hashed
-    // (`Tag__tag_a1b2c3`) — which is why an explicit class list found nothing
+    // (`Tag__tag_a1b2c3`) -- which is why an explicit class list found nothing
     // there and the pills stayed uncoloured. Hence the substring matches, case
     // insensitive, plus `data-test` which the React UI sets.
     var TAG_SELECTOR = '.buildTag, .tag, a.tagLabel, a[href*="tag:"], ' +
@@ -129,29 +137,52 @@
 
     // The configured PR tag prefix (`prTag.prefix`, default `pr-`), sanitised
     // server-side by BranchEnrichmentPageExtension. Not used to build
-    // anything — it is reported in the diagnostic below so a support question
+    // anything -- it is reported in the diagnostic below so a support question
     // can be answered with what the page actually received.
     var PR_PREFIX = '${bridgePrTagPrefix}';
+
+    // Whether to hide the `<prefix><n>` chip: `prTag.display` off, with a usable
+    // prefix. Decided server-side.
+    //
+    // Interpolated as a STRING and compared, never as a bare dollar-brace
+    // expression: a missing model attribute renders nothing at all, and
+    // `var x = ;` is a syntax error that would take the whole fragment down with
+    // it -- pills included. A cosmetic overlay must not be able to do that.
+    var HIDE_PR_TAG = '${bridgeHidePrTag}' === 'true';
 
     function isStateTag(el) {
         var text = (el.textContent || '').trim().toLowerCase();
         return (text === 'draft' || text === 'ready') ? text : null;
     }
 
+    // A PR tag chip: exactly the configured prefix followed by digits. Anchored
+    // on both ends so a team's own `pr-review-notes` is never touched.
+    function isPrTag(el) {
+        if (!HIDE_PR_TAG || !PR_PREFIX) return false;
+        var text = (el.textContent || '').trim();
+        if (text.length <= PR_PREFIX.length) return false;
+        if (text.slice(0, PR_PREFIX.length) !== PR_PREFIX) return false;
+        return /^[0-9]+$/.test(text.slice(PR_PREFIX.length));
+    }
+
     // The elements to consider. The tag selector is tried first; when it finds
-    // none of our tags — a TeamCity page whose tag markup we do not recognise —
+    // none of our tags -- a TeamCity page whose tag markup we do not recognise --
     // fall back to scanning for LEAF elements whose whole text is exactly
     // "draft" or "ready", which is what a tag chip looks like whatever classes
     // it carries. The leaf restriction keeps the pill on the chip instead of on
     // a container that happens to hold only it.
+    function isOurs(el) {
+        return isStateTag(el) !== null || isPrTag(el);
+    }
+
     function candidates() {
         var matched = [];
         document.querySelectorAll(TAG_SELECTOR).forEach(function (el) {
-            if (isStateTag(el) && !el.querySelector(TAG_SELECTOR)) matched.push(el);
+            if (isOurs(el) && !el.querySelector(TAG_SELECTOR)) matched.push(el);
         });
         if (matched.length > 0) return matched;
         document.querySelectorAll('span, a, button, div, td').forEach(function (el) {
-            if (el.children.length === 0 && isStateTag(el)) matched.push(el);
+            if (el.children.length === 0 && isOurs(el)) matched.push(el);
         });
         return matched;
     }
@@ -162,10 +193,10 @@
     //     span.ring-tag-container  <- the grey background lives here
     //       a.ring-tag-tag
     //         span.ring-tag-content   <- the deepest thing that looks like a tag
-    //           span.MiddleEllipsis…  <- the text
+    //           span.MiddleEllipsis...  <- the text
     //
     // and the text match lands on `.ring-tag-content`. Painting that painted a
-    // rectangle INSIDE Ring's grey chip — a green label in a grey block. So
+    // rectangle INSIDE Ring's grey chip -- a green label in a grey block. So
     // climb to the chip and paint the chip.
     function pillHost(el) {
         return el.closest('.ring-tag-container, .buildTag, .tag, a.tagLabel') || el;
@@ -176,7 +207,16 @@
     function enrich() {
         try {
             var enriched = 0;
+            var hidden = 0;
             candidates().forEach(function (el) {
+                if (isPrTag(el)) {
+                    var prHost = pillHost(el);
+                    if (!prHost.classList.contains('bridge-pill--hidden')) {
+                        prHost.classList.add('bridge-pill--hidden');
+                        hidden++;
+                    }
+                    return;
+                }
                 var text = isStateTag(el);
                 if (!text) return;
                 var host = pillHost(el);
@@ -187,7 +227,7 @@
                 host.setAttribute('data-tag-name', text);
                 enriched++;
             });
-            report(enriched);
+            report(enriched, hidden);
         } catch (e) {
             // Never break the host page over a cosmetic enhancement.
             if (window.console && console.warn) {
@@ -200,11 +240,12 @@
     // Written once, so a support question is one console line instead of a DOM
     // safari.
     var reported = false;
-    function report(enriched) {
+    function report(enriched, hidden) {
         if (reported || !window.console || !console.debug) return;
         reported = true;
-        console.debug('teamcity-github-bridge: ' + enriched + ' tag pill(s) styled; ' +
-            'prTagPrefix=' + JSON.stringify(PR_PREFIX));
+        console.debug('teamcity-github-bridge: ' + enriched + ' tag pill(s) styled, ' +
+            hidden + ' PR tag(s) hidden; prTagPrefix=' + JSON.stringify(PR_PREFIX) +
+            ', hidePrTag=' + HIDE_PR_TAG);
     }
 
     if (document.readyState === 'loading') {

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-class GitHubClientFilesCommentsTest {
+class GitHubClientFilesAndAppTest {
 
     init { LoggerBootstrap.install() }
 
@@ -19,15 +19,6 @@ class GitHubClientFilesCommentsTest {
     fun `parsePrFileNames tolerates non-array and garbage`() {
         assertTrue(GitHubClient.parsePrFileNames("{}").isEmpty())
         assertTrue(GitHubClient.parsePrFileNames("not json").isEmpty())
-    }
-
-    @Test
-    fun `parseIssueComments extracts id and body`() {
-        val json = """[{"id":11,"body":"hello"},{"id":12,"body":"world"},{"body":"no id"}]"""
-        val comments = GitHubClient.parseIssueComments(json)
-        assertEquals(2, comments.size)
-        assertEquals(11L, comments[0].id)
-        assertEquals("hello", comments[0].body)
     }
 
     @Test

@@ -2,6 +2,7 @@ package io.github.dlachouette.teamcity.github.web
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.AppManager
+import io.github.dlachouette.teamcity.github.api.AppTokenCache
 import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
@@ -32,6 +33,7 @@ class AdminSettingsController(
     private val gitHubClient: GitHubClient,
     private val prInfoCache: PrInfoCache,
     private val appManager: AppManager,
+    private val appTokenCache: AppTokenCache,
 ) : BaseController() {
 
     init {
@@ -64,12 +66,24 @@ class AdminSettingsController(
             "setApiToken" -> handleSetApiToken(request, user)
             "clearApiToken" -> handleClearApiToken(user)
             "verifyApp" -> handleVerifyApp(request)
+            "clearTokens" -> handleClearTokens(user)
             else -> "error"
         }
 
         // Redirect back to the admin page (PRG pattern, avoids resubmit on refresh).
         val redirect = request.contextPath.trimEnd('/') + "/admin/admin.html?item=bridgeAdmin&tab=bridgeAdmin&bridgeResult=$result"
         return ModelAndView(RedirectView(redirect, true))
+    }
+
+    // Drop the cached installation tokens, so the next call mints one with the
+    // App's current permissions. The recovery path after granting a permission
+    // and accepting it on the installation: without it, the plugin keeps using a
+    // token minted under the old scopes until it expires.
+    private fun handleClearTokens(user: SUser): String {
+        val dropped = appTokenCache.clear()
+        prInfoCache.clear()
+        LOG.info("Cleared $dropped cached installation token(s) and the PR-info cache, by ${user.username}")
+        return "tokensCleared"
     }
 
     private fun handleSet(request: HttpServletRequest, user: SUser): String {
@@ -148,17 +162,18 @@ class AdminSettingsController(
             putBool(BridgeServerSettings.KEY_DRY_RUN, request.getParameter("dryRun") != null)
             putBool(BridgeServerSettings.KEY_METRICS_ENABLED, request.getParameter("metricsEnabled") != null)
             putBool(BridgeServerSettings.KEY_LEGACY_ALIASES, request.getParameter("legacyAliases") != null)
-            putBool(BridgeServerSettings.KEY_PR_COMMENT_ENABLED, request.getParameter("prComment") != null)
             putBool(BridgeServerSettings.KEY_BRANCH_PR_LOOKUP, request.getParameter("branchPrLookup") != null)
             putBool(BridgeServerSettings.KEY_RERUN_ONLY_FAILED, request.getParameter("rerunAllOnlyFailed") != null)
             putBool(BridgeServerSettings.KEY_ARTIFACT_LINKS, request.getParameter("artifactLinks") != null)
             putBool(BridgeServerSettings.KEY_CHECK_RUN_ANNOTATIONS, request.getParameter("annotations") != null)
+            putBool(BridgeServerSettings.KEY_CHECK_RUN_LOG_SCAN, request.getParameter("annotationLogScan") != null)
             putBool(BridgeServerSettings.KEY_CHECK_RUN_TEST_STATS, request.getParameter("testStats") != null)
             putBool(BridgeServerSettings.KEY_CHECK_RUN_TIMINGS, request.getParameter("timings") != null)
             putBool(BridgeServerSettings.KEY_INFRA_NEUTRAL, request.getParameter("infraNeutral") != null)
             putBool(BridgeServerSettings.KEY_QUEUE_CLEANUP, request.getParameter("queueCleanup") != null)
             putBool(BridgeServerSettings.KEY_CANCEL_OBSOLETE, request.getParameter("cancelObsolete") != null)
             putBool(BridgeServerSettings.KEY_PR_TAG_ENABLED, request.getParameter("prTag") != null)
+            putBool(BridgeServerSettings.KEY_PR_TAG_DISPLAY, request.getParameter("prTagDisplay") != null)
             put(BridgeServerSettings.KEY_PR_TAG_PREFIX, request.getParameter("prTagPrefix"))
 
             serverSettings.applyTo(gitHubClient, prInfoCache)

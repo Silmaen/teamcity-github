@@ -173,6 +173,16 @@ class BridgeFeatureConfigTest {
         assertEquals(false, BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("publishChecks" to "false"))!!.publishChecks)
     }
 
+    // Carried raw, not as a Boolean: "says nothing" and "says no" are different
+    // answers, because the verdict is an AND across three levels
+    // (`AnnotationGate`) and only an explicit `false` vetoes.
+    @Test
+    fun `the diff-annotation say of a build configuration is carried verbatim`() {
+        assertEquals(null, BridgeFeatureReader.fromInputs(mandatoryProjectParams, emptyMap())!!.annotateDiff)
+        assertEquals("true", BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("annotateDiff" to "true"))!!.annotateDiff)
+        assertEquals("false", BridgeFeatureReader.fromInputs(mandatoryProjectParams, mapOf("annotateDiff" to "false"))!!.annotateDiff)
+    }
+
     @Test
     fun `reusing a passed commit is opt-in`() {
         assertEquals(false, BridgeFeatureReader.fromInputs(mandatoryProjectParams, emptyMap())!!.skipIfCommitPassed)

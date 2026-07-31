@@ -7,11 +7,16 @@ import io.github.dlachouette.teamcity.github.api.CheckRunAnnotationLevel
 // failure is pinned to the line that caused it in the PR's diff instead of
 // only linking out to TeamCity.
 //
-// The input is the text TeamCity already gives us — build-problem
-// descriptions (`SBuild.failureReasons`), which is where TeamCity's compiler
-// output processor puts the diagnostic line. No build-log scanning: it would
-// cost a lot for a marginal gain, and a diagnostic that never reached a build
-// problem is usually not the reason the build failed.
+// Two inputs, in order of cost:
+//
+//  1. **Build-problem descriptions** (`SBuild.failureReasons`) — where
+//     TeamCity's compiler output processor puts the diagnostic, for the runners
+//     that have one (MSBuild, Visual Studio, IDEA-based).
+//  2. **The failed build's log**, when the first said nothing. This is not a
+//     luxury: a **Command Line** runner reports one build problem, "Process
+//     exited with code 1", and the compiler's own output never becomes a build
+//     problem at all — so for a CMake/ninja C++ build, which is the shape that
+//     needs annotations most, the first input is always empty.
 //
 // Only diagnostics whose file can be expressed **relative to the checkout
 // directory** are emitted: GitHub rejects an annotation whose path is not in
@@ -20,6 +25,11 @@ object BuildProblemAnnotations {
 
     // GitHub accepts at most 50 annotations per request.
     const val MAX_ANNOTATIONS: Int = 50
+
+    // How many log lines a scan looks at before giving up. A broken build shows
+    // its first error early; a build that has produced 200 000 lines without one
+    // matching diagnostic is not going to.
+    const val MAX_SCANNED_LINES: Int = 200_000
 
     // GNU/clang: `src/foo.cpp:42:7: error: no member named 'x'`
     private val UNIX = Regex(
@@ -36,14 +46,24 @@ object BuildProblemAnnotations {
     // Parse every line of every description, keep the first MAX_ANNOTATIONS
     // distinct (path, line, message) triples — a failing build often repeats
     // the same diagnostic across targets.
-    fun parse(descriptions: List<String>, checkoutDir: String?): List<CheckRunAnnotation> {
+    fun parse(descriptions: List<String>, checkoutDir: String?): List<CheckRunAnnotation> =
+        collect(descriptions.asSequence().flatMap { it.lineSequence() }, checkoutDir, Int.MAX_VALUE)
+
+    // Same, over a lazy sequence of log lines and with a line budget.
+    //
+    // The sequence must stay lazy all the way to the caller's iterator: that is
+    // what keeps this from reading a 2 GB build log to find an error on line 900.
+    fun scan(lines: Sequence<String>, checkoutDir: String?, maxLines: Int = MAX_SCANNED_LINES): List<CheckRunAnnotation> =
+        collect(lines.flatMap { it.lineSequence() }, checkoutDir, maxLines)
+
+    private fun collect(lines: Sequence<String>, checkoutDir: String?, maxLines: Int): List<CheckRunAnnotation> {
         val seen = LinkedHashMap<Triple<String, Int, String>, CheckRunAnnotation>()
-        for (description in descriptions) {
-            for (rawLine in description.lineSequence()) {
-                val a = parseLine(rawLine, checkoutDir) ?: continue
-                seen.putIfAbsent(Triple(a.path, a.startLine, a.message), a)
-                if (seen.size >= MAX_ANNOTATIONS) return seen.values.toList()
-            }
+        // `take` and not a counter inside the loop: a counter would already have
+        // pulled the line past the budget out of the iterator.
+        for (rawLine in lines.take(maxLines)) {
+            val a = parseLine(rawLine, checkoutDir) ?: continue
+            seen.putIfAbsent(Triple(a.path, a.startLine, a.message), a)
+            if (seen.size >= MAX_ANNOTATIONS) break
         }
         return seen.values.toList()
     }
@@ -54,7 +74,7 @@ object BuildProblemAnnotations {
         val m = UNIX.find(line) ?: MSVC.find(line) ?: return null
         val lineNumber = m.groups["line"]!!.value.toIntOrNull()?.takeIf { it > 0 } ?: return null
         val path = relativise(m.groups["path"]!!.value, checkoutDir) ?: return null
-        val message = m.groups["msg"]!!.value.trim().takeIf { it.isNotEmpty() } ?: return null
+        val message = cleanMessage(m.groups["msg"]!!.value) ?: return null
         return CheckRunAnnotation(
             path = path,
             startLine = lineNumber,
@@ -63,6 +83,21 @@ object BuildProblemAnnotations {
             message = message,
         )
     }
+
+    // The diagnostic text, minus what the build system appended to it.
+    //
+    // MSBuild ends every line with the project that was building —
+    // `… [D:\BuildAgent\work\…\greeter.vcxproj]` — an absolute path on an agent,
+    // meaningless to a reviewer reading the annotation on their diff, and long
+    // enough to push the actual message out of view.
+    private fun cleanMessage(raw: String): String? =
+        raw.replace(MSBUILD_PROJECT_SUFFIX, "").trim().takeIf { it.isNotEmpty() }
+
+    // A trailing bracketed path to a build-system project file. Anchored to the
+    // end and requiring the extension, so a diagnostic that legitimately ends
+    // in brackets (`[-Wunused-variable]`) is untouched.
+    private val MSBUILD_PROJECT_SUFFIX =
+        Regex("""\s*\[[^\[\]]+\.(vcx|cs|vb|fs|sql|nd)?proj(\.metaproj)?\]\s*$""", RegexOption.IGNORE_CASE)
 
     private fun levelOf(raw: String): CheckRunAnnotationLevel = when {
         raw.equals("warning", ignoreCase = true) -> CheckRunAnnotationLevel.WARNING

@@ -2,6 +2,7 @@ package io.github.dlachouette.teamcity.github.web
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher
+import io.github.dlachouette.teamcity.github.enrich.PrParameterProvider
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeRefs
 import io.github.dlachouette.teamcity.github.report.safeUrl
@@ -128,7 +129,7 @@ class BridgeBuildsTab(
         buildTypeId = bt.externalId,
         buildTypeName = bt.name,
         branch = build.branch?.name.orEmpty(),
-        prNumber = prNumberOf(build.branch?.name, build.tags, prTagPrefix),
+        prNumber = prNumberOf(build.branch?.name, build.tags, prTagPrefix, prNumberParamOf(build)),
         state = state,
         level = level,
         buildNumber = build.buildNumber,
@@ -137,6 +138,16 @@ class BridgeBuildsTab(
         draft = draftOf(build.tags),
         startedAt = build.startDate.time,
     )
+
+    // The PR number the build itself carries. A queued build has no resolved
+    // parameters yet, which is why only real builds get this fallback — and it
+    // costs nothing: the value is stored with the build.
+    private fun prNumberParamOf(build: SBuild): String? = try {
+        build.parametersProvider.get(PrParameterProvider.PARAM_PR_NUMBER)
+    } catch (e: Exception) {
+        LOG.debug("Could not read the PR parameter of build ${build.buildId}: ${e.message}")
+        null
+    }
 
     companion object {
         private val LOG = Logger.getInstance(BridgeBuildsTab::class.java.name)
@@ -152,12 +163,29 @@ class BridgeBuildsTab(
         const val SORT_BRANCH: String = "branch"
         const val SORT_PR: String = "pr"
 
-        // The PR a build belongs to: the PR tag when present (works for any
-        // ref, including a plain branch), else the `pull/N` ref itself. An
-        // empty prefix means PR tagging is off — the ref is all we have.
-        fun prNumberOf(branchName: String?, tags: List<String>, prTagPrefix: String): Int? =
+        // The PR a build belongs to, from the cheapest source that knows it:
+        //
+        //  1. the **PR tag** (`pr-189`) — works for any ref, survives the build,
+        //     and is what TeamCity's own tag filter searches on;
+        //  2. the **ref** — a `pull/N` branch carries the number in its name;
+        //  3. the **published parameter** — `…pullRequest.number`, which every
+        //     opted-in build gets whatever its ref.
+        //
+        // (3) is not redundant. Tagging is optional (`prTag.enabled`) and the tag
+        // is written when the build is queued or started, so a build that ran
+        // before the tag existed — or on a server with tagging off — has no tag,
+        // and in branch-source mode there is no `pull/N` ref to fall back on
+        // either. The column was then empty for builds whose PR the plugin knew
+        // perfectly well: the number was sitting in their parameters.
+        fun prNumberOf(
+            branchName: String?,
+            tags: List<String>,
+            prTagPrefix: String,
+            prNumberParam: String? = null,
+        ): Int? =
             tags.firstNotNullOfOrNull { PrBuildEnricher.prNumberFromTag(it, prTagPrefix) }
                 ?: BridgeRefs.prNumberFromRef(branchName)
+                ?: prNumberParam?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 
         fun draftOf(tags: List<String>): Boolean? = when {
             tags.contains(PrBuildEnricher.TAG_DRAFT) -> true

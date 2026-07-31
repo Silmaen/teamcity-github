@@ -650,26 +650,6 @@ Note: re-run intentionally bypasses the "already finished" skip
 (`ignoreFinished=true`), but it still skips a build that is
 currently running or queued at that head SHA.
 
-## Symptom: the PR summary comment is not posted
-
-### What you see
-
-Builds finish and post Check Runs, but no rolling "TeamCity build
-summary" comment appears on the PR thread.
-
-### Likely causes
-
-| Cause | Fix |
-|---|---|
-| The feature is disabled | The sticky PR comment is **off by default** (`prComment.enabled`). Turn it on in the admin settings. |
-| The App lacks pull-requests write | Posting/deleting issue comments needs the App's **Pull requests: Write** (issues write) permission. Without it the upsert logs `Failed upserting PR summary comment ...`. Add the permission and accept it on the App's installation page. |
-| Dry-run is on | `maybeUpdatePrComment` is skipped in dry-run. |
-| The build is not a PR build | The comment is only posted for builds on a `pull/<n>` branch. |
-
-The comment is a single "sticky" row-per-check summary; because
-`HttpURLConnection` cannot PATCH, an update is delete-then-create,
-so the comment moves to the bottom of the thread on each refresh.
-
 ## Symptom: `/metrics` returns 404
 
 ### What you see
@@ -720,7 +700,7 @@ The plugin uses one logger category per package. Filter by:
 ```
 io.github.dlachouette.teamcity.github.web      -> webhook, endpoints, PR event listener
 io.github.dlachouette.teamcity.github.api      -> GitHub client, tokens, PR info cache
-io.github.dlachouette.teamcity.github.report   -> Check Runs, timings, tests, PR comment
+io.github.dlachouette.teamcity.github.report   -> Check Runs, timings, tests, annotations
 io.github.dlachouette.teamcity.github.queue    -> queue cleanup and the draft-aware filter
 io.github.dlachouette.teamcity.github.feature  -> the build feature and the gate
 io.github.dlachouette.teamcity.github.enrich   -> PR parameters and tags on builds
@@ -827,6 +807,33 @@ not coloured pills.
 | The plugin is loaded but `BranchEnrichmentPageExtension` is not registered | Restart TC after upgrading; verify in the server log: `Registered BranchEnrichmentPageExtension at ALL_PAGES_FOOTER_PLUGIN_CONTAINER`. |
 | TeamCity's tag markup changed | The CSS selectors in `bridgeBranchEnrichment.jsp` target `.buildTag`, `.tag`, `a.tagLabel`. If a TC update changes these classes, our enrichment silently no-ops. Open an issue. |
 | Browser cache | Hard refresh (Ctrl-Shift-R). The fragment is served as part of every page, no separate file to cache, but stale CSS rules on the host page can mask ours. |
+
+## Symptom: there is no "Re-run all checks" button
+
+The per-check **Re-run** link is the one GitHub reliably renders for a
+third-party App's check runs — it appears on the right of each row in the Checks
+tab, and it is what a reviewer actually uses. It sends
+`check_run.rerequested`, which the bridge handles.
+
+The **suite-level** button is GitHub's own UI and it is not always offered,
+notably for a check suite GitHub created implicitly because the App posted check
+runs directly instead of requesting a suite. Nothing in the plugin depends on
+that button existing, and its absence is not a misconfiguration to hunt.
+
+To exercise the same path deterministically — which is also how to verify the
+subscription — call the endpoint the button calls:
+
+```bash
+# suite id: GET /repos/{owner}/{repo}/commits/{sha}/check-suites
+curl -X POST -H "Authorization: Bearer <token>" \
+  https://api.github.com/repos/{owner}/{repo}/check-suites/{suite_id}/rerequest
+```
+
+Then check that a `check_suite.rerequested` delivery arrived (App → *Advanced →
+Recent Deliveries*, or the bridge's recent-events list). If the delivery arrives
+and nothing is enqueued, look for `check_suite` lines in the plugin log: the
+handler names what it decided, including when `rerunAll.onlyFailed` narrowed the
+set to nothing.
 
 ## Debug logging
 

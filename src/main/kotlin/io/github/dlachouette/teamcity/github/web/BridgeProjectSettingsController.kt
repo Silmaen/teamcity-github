@@ -80,6 +80,10 @@ class BridgeProjectSettingsController(
                 if (request.getParameter("prBuildRefBranch") != null) PrBuildRef.BRANCH.name.lowercase()
                 else PrBuildRef.PULL.name.lowercase(),
             )
+            // Written explicitly either way: this is the parameter a parent
+            // project uses to hold annotations off for its whole subtree, so
+            // "what does this project say" must be readable without guessing.
+            applyBool(project, BridgeProjectParams.ANNOTATIONS_ENABLED, request.getParameter("annotationsEnabled") != null)
             project.persist()
             LOG.info("GitHub Bridge project settings for ${project.externalId} updated by ${user.username}")
             "saved"

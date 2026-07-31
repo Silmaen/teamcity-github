@@ -55,7 +55,7 @@
         </label>
         <div class="bridge-feature-help">
             When unchecked, the bridge never triggers this build configuration
-            on a non-PR branch and never removes such a build either — a Run,
+            on a non-PR branch and never removes such a build either &mdash; a Run,
             a schedule or a VCS trigger still works, and still reports.
             Defaults to checked.
         </div>
@@ -74,7 +74,7 @@
             When unchecked, this build configuration is not part of the PR
             check set: the bridge never enqueues it from a PR event and posts
             no "Skipped" row for it. An explicit Run, a schedule or a GitHub
-            command still works — and still reports. Defaults to checked.
+            command still works &mdash; and still reports. Defaults to checked.
         </div>
     </td>
 </tr>
@@ -87,12 +87,34 @@
             This build configuration reports its status to GitHub.
         </label>
         <div class="bridge-feature-help">
-            The only thing publication depends on — deliberately independent of
+            The only thing publication depends on &mdash; deliberately independent of
             what started the build. Checked: every build reports (PR event, VCS
             trigger, schedule, manual Run, GitHub command alike). Unchecked:
             this build configuration is invisible on GitHub, whatever happens,
             while still benefiting from the PR parameters and tags.
             Defaults to checked.
+        </div>
+    </td>
+</tr>
+
+<tr>
+    <th><label for="annotateDiff">Annotate the diff:</label></th>
+    <td>
+        <props:checkboxProperty name="annotateDiff"/>
+        <label for="annotateDiff" style="font-weight:normal;">
+            This build configuration may pin its compiler errors and warnings to
+            the pull request's diff.
+        </label>
+        <div class="bridge-feature-help">
+            Three levels can each say no &mdash; the server (<em>Administration &rarr;
+            GitHub Bridge</em>), the project chain (<em>&lt;project&gt; &rarr;
+            GitHub Bridge</em>) and this checkbox &mdash; and <strong>one "no" anywhere
+            wins</strong>: leaving this ticked does not overrule a project or a
+            server that turned annotations off. Untick it for a configuration
+            whose diagnostics are noise on a review (a nightly warning sweep, a
+            legacy target) while keeping them for the rest. Everything else this
+            configuration reports &mdash; status, timings, tests, artifacts &mdash; is
+            unaffected. Defaults to checked.
         </div>
     </td>
 </tr>
@@ -110,7 +132,7 @@
             the same commit (GitHub keys a Check Run on name + commit, so it is
             the same row). Applies to <b>automatic</b> triggers only: a manual
             Run, a GitHub command and the Re-run buttons mean "do it again".
-            Leave it <b>off</b> for scheduled suites — a nightly is expected to
+            Leave it <b>off</b> for scheduled suites &mdash; a nightly is expected to
             re-run on an unchanged commit. Defaults to unchecked.
         </div>
     </td>
@@ -227,7 +249,7 @@
             Optional. When a comment on the pull request contains this phrase
             (case-insensitive) and the commenter is trusted, this build
             configuration is enqueued. Fires on
-            <code>pull_request_review_comment</code> (inline diff comments) —
+            <code>pull_request_review_comment</code> (inline diff comments) &mdash;
             the managed App subscribes to it by default. General PR conversation
             comments (<code>issue_comment</code>) also work, but GitHub only
             exposes that event if the App is granted the <em>Issues</em>
@@ -265,7 +287,7 @@
         <props:textProperty name="skipPhrase" className="longField"/>
         <div class="bridge-feature-help">
             Optional. <strong>Skip</strong> the build if the PR title or
-            description contains this text — e.g. <code>[skip ci]</code>.
+            description contains this text &mdash; e.g. <code>[skip ci]</code>.
         </div>
     </td>
 </tr>

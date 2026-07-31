@@ -45,6 +45,7 @@ class GitHubBridgeBuildFeature(
         PARAM_TRIGGER_ON_PR_READY to "true",
         PARAM_TRIGGER_ON_PR_DRAFT to "true",
         PARAM_PUBLISH_CHECKS to "true",
+        PARAM_ANNOTATE_DIFF to "true",
     )
 
     override fun describeParameters(params: Map<String, String>): String {
@@ -57,11 +58,12 @@ class GitHubBridgeBuildFeature(
         if (params[PARAM_SKIP_IF_COMMIT_PASSED] == "true") flags += "reuse passed commits"
         val triggers = if (flags.isEmpty()) "on demand only" else flags.joinToString(" + ")
         val publish = if (params[PARAM_PUBLISH_CHECKS] == "false") "; GitHub publication OFF" else ""
+        val annotations = if (params[PARAM_ANNOTATE_DIFF] == "false") "; diff annotations OFF" else ""
         val overrides = mutableListOf<String>()
         if (!params[PARAM_BRANCH_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "branch list override"
         if (!params[PARAM_PR_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "PR list override"
         val base = if (overrides.isEmpty()) "triggers: $triggers" else "triggers: $triggers; ${overrides.joinToString(", ")}"
-        return base + publish
+        return base + publish + annotations
     }
 
     override fun getParametersProcessor(): PropertiesProcessor = PropertiesProcessor { input ->
@@ -128,5 +130,11 @@ class GitHubBridgeBuildFeature(
         const val PARAM_LABEL_FILTER: String = "labelFilter"
         const val PARAM_SKIP_IF_COMMIT_PASSED: String = "skipIfCommitPassed"
         const val PARAM_PUBLISH_CHECKS: String = "publishChecks"
+
+        // This build configuration's say on writing compiler diagnostics on the
+        // pull request's diff. Unchecked stores the literal `false`, which vetoes
+        // — see `AnnotationGate` for why a `true` here cannot overrule a `false`
+        // on the project or the server.
+        const val PARAM_ANNOTATE_DIFF: String = "annotateDiff"
     }
 }

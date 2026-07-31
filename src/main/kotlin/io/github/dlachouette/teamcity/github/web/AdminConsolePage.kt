@@ -69,17 +69,18 @@ class AdminConsolePage(
         model["set_dryRun"] = serverSettings.dryRun()
         model["set_metricsEnabled"] = serverSettings.metricsEnabled()
         model["set_legacyAliases"] = serverSettings.legacyAliasesEnabled()
-        model["set_prComment"] = serverSettings.prCommentEnabled()
         model["set_branchPrLookup"] = serverSettings.branchPrLookupEnabled()
         model["set_rerunAllOnlyFailed"] = serverSettings.rerunAllOnlyFailed()
         model["set_artifactLinks"] = serverSettings.artifactLinksEnabled()
         model["set_annotations"] = serverSettings.checkRunAnnotationsEnabled()
+        model["set_annotationLogScan"] = serverSettings.checkRunLogScanEnabled()
         model["set_testStats"] = serverSettings.checkRunTestStatsEnabled()
         model["set_timings"] = serverSettings.checkRunTimingsEnabled()
         model["set_infraNeutral"] = serverSettings.infraFailureNeutralEnabled()
         model["set_cancelObsolete"] = serverSettings.cancelObsoleteEnabled()
         model["set_queueCleanup"] = serverSettings.queueCleanupEnabled()
         model["set_prTag"] = serverSettings.prTagEnabled()
+        model["set_prTagDisplay"] = serverSettings.prTagDisplayEnabled()
         model["set_prTagPrefix"] = serverSettings.prTagPrefix()
         model["set_commentAssociations"] = serverSettings.commentTriggerAllowedAssociations().joinToString(",")
         model["apiTokenConfigured"] = serverSettings.isApiEnabled()
@@ -149,6 +150,11 @@ class AdminConsolePage(
         "blank" -> mapOf("level" to "warn", "text" to "Submitted secret was blank; nothing changed.")
         "tested" -> mapOf("level" to "ok", "text" to "Self-tests finished; results below.")
         "settingsSaved" -> mapOf("level" to "ok", "text" to "Server settings saved and applied (no restart needed).")
+        "tokensCleared" -> mapOf(
+            "level" to "ok",
+            "text" to "Cached installation tokens dropped. The next GitHub call mints a fresh one, " +
+                "with the App's current permissions. Re-run a build on a pull request to see the effect.",
+        )
         "appCreated" -> mapOf("level" to "ok", "text" to "GitHub App created and its credentials stored. Install it on your org/repos, then set connectionId=managed on your build configurations.")
         "appVerified" -> mapOf("level" to "ok", "text" to "GitHub App verification finished; see the GitHub App card below.")
         "appError" -> mapOf("level" to "bad", "text" to "GitHub App operation failed. Check the dedicated log for details.")

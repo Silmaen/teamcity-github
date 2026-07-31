@@ -155,13 +155,12 @@ io.github.dlachouette.teamcity.github
 │   └── ObsoleteBuildPolicy          pure rule: may the bridge stop this running build?
 ├── report/
 │   ├── BuildStatusCheckRunPublisher Check Run lifecycle (queued/started/interrupted/finished/removed),
-│   │                                artifact links, annotations; drives the sticky PR comment
+│   │                                artifact links, annotationsnt
 │   ├── DraftCheckRunReporter        skip and reused-success rows (SkipReason)
 │   ├── BuildProblemAnnotations      compiler diagnostics → output.annotations, max 50
 │   ├── FailureClassifier            problem types → code / infrastructure / dependency failure
 │   ├── BuildTimeline                where the build's wall-clock went (run, wait, causes)
 │   ├── TestReport                   test counts and failing tests, as GitHub should read them
-│   ├── PrSummaryCommenter           single sticky per-PR comment, one row per check
 │   └── ReportHelpers                shared formatting used by the reporters
 └── web/
     ├── PullRequestEventListener     PR/review/comment/re-run events → addToQueue; fork guard,
@@ -216,7 +215,6 @@ Declared in
     <bean class="...enrich.PrBuildEnricher"/>
     <bean class="...enrich.PrPromotionTagger"/>
     <bean class="...report.DraftCheckRunReporter"/>
-    <bean class="...report.PrSummaryCommenter"/>
     <bean class="...report.BuildStatusCheckRunPublisher"/>
     <bean class="...queue.DraftBuildQueueCleaner"/>
 
@@ -277,7 +275,7 @@ info cache TTL and stale grace) are pushed into the live
 again every time the admin saves settings - so edits take effect
 without a TeamCity restart. Feature flags it gates include
 `dryRun`, `metrics.enabled`, `webhook.replay.enabled`,
-`prComment.enabled`, the external-API `api.token`, the
+the external-API `api.token`, the
 `repo.allowlist`, and `comment.allowedAssociations`.
 
 ## Data flow: inbound (GitHub -> TC)

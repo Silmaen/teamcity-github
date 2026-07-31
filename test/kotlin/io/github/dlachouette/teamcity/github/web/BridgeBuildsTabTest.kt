@@ -45,11 +45,37 @@ class BridgeBuildsTabTest {
     }
 
     @Test
-    fun `with PR tagging off the ref is the only key left`() {
+    fun `with PR tagging off the ref is the only key left, unless the build carries the parameter`() {
         // Empty prefix = disabled: a tagged branch build loses its PR column,
         // a pull ref keeps it.
         assertNull(BridgeBuildsTab.prNumberOf("Feature/x", listOf("pr-189"), ""))
         assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", listOf("pr-7"), ""))
+        // …and the build's own parameter still knows, which is the whole point
+        // of the third source.
+        assertEquals(189, BridgeBuildsTab.prNumberOf("Feature/x", listOf("pr-189"), "", "189"))
+    }
+
+    // The case that was showing an empty column: branch-source mode, no PR tag
+    // (the build predates the tag, or tagging is off), so neither the tag nor the
+    // ref knows the number — but the build's published parameter does.
+    @Test
+    fun `the published parameter is the last resort`() {
+        assertEquals(4, BridgeBuildsTab.prNumberOf("Feature/toto", listOf("draft"), "pr-", "4"))
+        // A tag still wins: it is the explicit answer.
+        assertEquals(9, BridgeBuildsTab.prNumberOf("Feature/toto", listOf("pr-9"), "pr-", "4"))
+        // And so does a pull ref.
+        assertEquals(7, BridgeBuildsTab.prNumberOf("pull/7", emptyList(), "pr-", "4"))
+    }
+
+    // Non-PR builds publish the parameter as an empty string, on purpose, so DSL
+    // conditions never fail on an unresolved parameter. It must not read as a PR.
+    @Test
+    fun `an empty or junk parameter is not a PR number`() {
+        assertNull(BridgeBuildsTab.prNumberOf("main", listOf("ready"), "pr-", ""))
+        assertNull(BridgeBuildsTab.prNumberOf("main", listOf("ready"), "pr-", "  "))
+        assertNull(BridgeBuildsTab.prNumberOf("main", listOf("ready"), "pr-", "not-a-number"))
+        assertNull(BridgeBuildsTab.prNumberOf("main", listOf("ready"), "pr-", "0"))
+        assertNull(BridgeBuildsTab.prNumberOf("main", listOf("ready"), "pr-", null))
     }
 
     @Test

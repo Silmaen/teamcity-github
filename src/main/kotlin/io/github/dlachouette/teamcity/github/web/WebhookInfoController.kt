@@ -5,6 +5,7 @@ import io.github.dlachouette.teamcity.github.config.WebhookConfig
 import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.serverSide.SBuildServer
+import jetbrains.buildServer.web.openapi.PluginDescriptor
 import jetbrains.buildServer.web.openapi.WebControllerManager
 import org.springframework.web.servlet.ModelAndView
 import javax.servlet.http.HttpServletRequest
@@ -16,6 +17,7 @@ class WebhookInfoController(
     private val buildServer: SBuildServer,
     private val webhookConfig: WebhookConfig,
     private val logPathResolver: LogPathResolver,
+    private val pluginDescriptor: PluginDescriptor,
 ) : BaseController() {
 
     init {
@@ -35,7 +37,9 @@ class WebhookInfoController(
             secretConfigured = webhookConfig.isSecretConfigured(),
             logFile = logPathResolver.expectedFile().absolutePath,
             logConfigured = logPathResolver.isConfigured(),
-            pluginVersion = buildServer.fullServerVersion,
+            // Nullable in the SDK; `/health` already defaults it the same way.
+            pluginVersion = pluginDescriptor.pluginVersion ?: "unknown",
+            teamcityVersion = buildServer.fullServerVersion,
         )
 
         return when (request.requestURI.removeSuffix("/")) {

@@ -405,7 +405,7 @@ The plugin requests the minimum access for what it does:
 |---|---|---|
 | Metadata | Read | Mandatory baseline |
 | Checks | Write | Check Run lifecycle |
-| Pull requests | Read & **write** | Read for `GET /repos/.../pulls/N`; **write** is required only for the sticky PR summary comment (off by default — see below) |
+| Pull requests | **Read** | `GET /repos/.../pulls/N` for the draft status, and the commit-to-PR lookup |
 | Contents | Read | Required transitively |
 
 The plugin does **not** require **Commit statuses**, **Webhooks**, or
@@ -418,13 +418,12 @@ to pull requests, not issues — which is why GitHub does not deliver the
 permission (and subscribing to `issue_comment`) is an **opt-in** for
 operators who also want to trigger from PR conversation comments.
 
-Note the **increased scope**: the sticky PR comment feature needs the
-App's pull-requests **write** permission, which previous versions did
-not require. The feature is **off by default**
-(`prComment.enabled=false`): with it disabled the plugin never writes
-to a PR, so operators who do not want the comment can decline the
-write grant. Only enable the write permission if you turn the sticky
-comment on.
+**The plugin never writes to a pull request.** Its only write is the Check Run
+lifecycle, which is the **Checks** permission. Pull-requests **write** was
+required for one feature — the sticky summary comment — and that feature was
+removed in 1.10.0, so the scope came back down to read. An installation that
+still grants write is not exercising it; revoke it if you want the App's
+permissions to match what it does.
 
 ## Fail-open vs fail-closed: where each applies
 
@@ -505,8 +504,8 @@ visible to operators) and only enable `DEBUG` when investigating.
       otherwise.
 - [ ] Comment-trigger allowlist (`comment.allowedAssociations`) kept
       at write-access associations; not emptied on a public repo.
-- [ ] Pull-requests **write** granted only if the sticky PR comment
-      (`prComment.enabled`) is turned on.
+- [ ] Pull requests granted **read**, not write: nothing in the plugin
+      writes to a pull request.
 - [ ] If using a **managed App** (`connectionId=managed`), the plugin
       settings file is protected by filesystem permissions (it holds the
       App private key in plain text); the App is installed on only the

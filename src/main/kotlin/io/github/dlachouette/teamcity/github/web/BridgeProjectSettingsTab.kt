@@ -1,5 +1,6 @@
 package io.github.dlachouette.teamcity.github.web
 
+import io.github.dlachouette.teamcity.github.feature.AnnotationGate
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.PrBuildRef
 import jetbrains.buildServer.controllers.admin.projects.EditProjectTab
@@ -44,6 +45,17 @@ class BridgeProjectSettingsTab(
         model["prTriggerEnabled"] = params[BridgeProjectParams.PR_TRIGGER_ENABLED] != "false"
         model["prTriggerBranches"] = params[BridgeProjectParams.PR_TRIGGER_BRANCHES].orEmpty()
         model["prBuildRefBranch"] = PrBuildRef.parse(params[BridgeProjectParams.PR_BUILD_REF]) == PrBuildRef.BRANCH
+
+        // Annotations are the one setting read own-per-project over the whole
+        // chain rather than resolved, so the form shows two things: this
+        // project's own answer (what the checkbox edits) and, when an **ancestor**
+        // says no, who — because a ticked box under a vetoing parent would
+        // otherwise read as a plugin bug.
+        model["annotationsEnabled"] = project.ownParameters[BridgeProjectParams.ANNOTATIONS_ENABLED] != "false"
+        val ancestors = project.projectPath.filter { it.projectId != project.projectId }
+        AnnotationGate.vetoingProject(
+            ancestors.map { it.name to it.ownParameters[BridgeProjectParams.ANNOTATIONS_ENABLED] },
+        )?.let { model["annotationsVetoedBy"] = it }
 
         model["projectExternalId"] = project.externalId
         model["projectId"] = project.projectId

@@ -57,10 +57,6 @@ class BridgeServerSettings(
 
     fun legacyAliasesEnabled(): Boolean = boolSetting(KEY_LEGACY_ALIASES, false)
 
-    // Sticky PR summary comment. Default off: it needs the App's
-    // pull-requests/issues write permission and posts to the PR thread.
-    fun prCommentEnabled(): Boolean = boolSetting(KEY_PR_COMMENT_ENABLED, false)
-
     // Resolve the PR of a build launched on a plain branch ref (not a
     // `pull/N` ref) from its head commit, so branch builds get the PR
     // parameters, the draft/ready tag and the summary comment. On by
@@ -82,10 +78,25 @@ class BridgeServerSettings(
     fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
 
     // Pin compiler diagnostics to their file and line in the PR's diff, as
-    // GitHub Check Run annotations. Parsed from the build problems TeamCity
-    // already reports — no build-log scanning — so the cost is nil and the
-    // worst case is simply no annotation.
+    // GitHub Check Run annotations. Read from the build problems TeamCity
+    // reports, and — when those carry no diagnostic — from the build log of the
+    // failed build (see `checkRunLogScanEnabled`).
     fun checkRunAnnotationsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_ANNOTATIONS, true)
+
+    // Fall back to reading the failed build's log when its build problems carry
+    // no diagnostic line.
+    //
+    // This is not a nicety: a **Command Line** runner — how nearly every
+    // CMake/ninja C++ build is wired — reports exactly one build problem,
+    // "Process exited with code 1", and the compiler's own output never becomes
+    // a build problem at all. Without this the annotations feature silently
+    // does nothing for those builds, which are the ones that need it most.
+    //
+    // Bounded on every axis: failed builds only, the iterator is lazy so the
+    // scan stops reading as soon as it has 50 annotations or has looked at
+    // `BuildProblemAnnotations.MAX_SCANNED_LINES` lines, and a build whose
+    // problems already carried diagnostics never reaches it.
+    fun checkRunLogScanEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_LOG_SCAN, true)
 
     // Report the build's test outcome in the Check Run: the counts in the
     // title GitHub shows in the merge box, and the failing tests (new failures
@@ -105,11 +116,17 @@ class BridgeServerSettings(
     // infrastructure (lost checkout, unresolvable artifact dependency, a
     // runner that could not start) rather than on the code — GitHub counts a
     // required check concluding `neutral` as satisfied, so a CI hiccup stops
-    // blocking the merge. On by default: nothing was learnt about the commit,
-    // so nothing should be held against it. Off keeps it red, for a team that
-    // wants a human to re-run the build before merging. Either way the Check
-    // Run **says** which of the two it was — that part is not a policy.
-    fun infraFailureNeutralEnabled(): Boolean = boolSetting(KEY_INFRA_NEUTRAL, true)
+    // blocking the merge.
+    //
+    // **Off by default**, and the reason is worth keeping: telling "our CI
+    // broke" from "your code is broken" is a genuinely subtle call, and this
+    // flag turns that call into an unblocked merge. Naming the suspected cause
+    // costs nothing if the guess is wrong; unblocking a merge on a wrong guess
+    // lets an unverified commit through. So the plugin **says** which of the two
+    // it thinks it was — that part is not a policy and is always on — and leaves
+    // the merge red until a human decides. Turn this on once you trust the
+    // classification on your own builds.
+    fun infraFailureNeutralEnabled(): Boolean = boolSetting(KEY_INFRA_NEUTRAL, false)
 
     // Stop a build already **running** once its result has nowhere to go: a new
     // commit was pushed to the pull request (the verdict would be about a commit
@@ -136,6 +153,20 @@ class BridgeServerSettings(
     // own tag filter key on. On by default; turn it off to keep the tag list
     // clean, at the cost of the PR column falling back to what the ref says.
     fun prTagEnabled(): Boolean = boolSetting(KEY_PR_TAG_ENABLED, true)
+
+    // Show the PR tag, or keep it only as a search key.
+    //
+    // The two are separate questions and TeamCity forces the trade-off: its
+    // Tags column is narrow, so a second tag on a build collapses the column
+    // into a count and the `draft`/`ready` pill — the one thing worth seeing at
+    // a glance — stops being legible. Off hides the `<prefix><n>` chip in build
+    // lists, client-side; the tag itself stays on the build, so TeamCity's own
+    // tag filter and search still find it, and the *Branches & PRs* tab still
+    // shows the number in its own column.
+    //
+    // On by default: a tag nobody can see is a surprising default. Turn it off
+    // when the state pill matters more than the number.
+    fun prTagDisplayEnabled(): Boolean = boolSetting(KEY_PR_TAG_DISPLAY, true)
 
     // Prefix of that tag. Configurable because tags are shared with whatever
     // else a team puts there; blank or whitespace-only falls back to the
@@ -203,9 +234,10 @@ class BridgeServerSettings(
                 "dryRun=${dryRun()}, metrics=${metricsEnabled()}, legacyAliases=${legacyAliasesEnabled()}, " +
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
-                "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
+                "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}" +
+                "${if (prTagEnabled() && !prTagDisplayEnabled()) " (hidden)" else ""}, " +
                 "queueCleanup=${queueCleanupEnabled()}, cancelObsolete=${cancelObsoleteEnabled()}, " +
-                "annotations=${checkRunAnnotationsEnabled()}, " +
+                "annotations=${checkRunAnnotationsEnabled()}, logScan=${checkRunLogScanEnabled()}, " +
                 "testStats=${checkRunTestStatsEnabled()}, timings=${checkRunTimingsEnabled()}, " +
                 "infraNeutral=${infraFailureNeutralEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
@@ -243,11 +275,11 @@ class BridgeServerSettings(
         const val KEY_DRY_RUN: String = "dryRun"
         const val KEY_METRICS_ENABLED: String = "metrics.enabled"
         const val KEY_LEGACY_ALIASES: String = "legacyAliases.enabled"
-        const val KEY_PR_COMMENT_ENABLED: String = "prComment.enabled"
         const val KEY_BRANCH_PR_LOOKUP: String = "branchPrLookup.enabled"
         const val KEY_RERUN_ONLY_FAILED: String = "rerunAll.onlyFailed"
         const val KEY_ARTIFACT_LINKS: String = "checkRun.artifactLinks"
         const val KEY_CHECK_RUN_ANNOTATIONS: String = "checkRun.annotations"
+        const val KEY_CHECK_RUN_LOG_SCAN: String = "checkRun.annotationLogScan"
         const val KEY_CHECK_RUN_TEST_STATS: String = "checkRun.testStats"
         const val KEY_CHECK_RUN_TIMINGS: String = "checkRun.timings"
         const val KEY_INFRA_NEUTRAL: String = "checkRun.infraNeutral"
@@ -255,6 +287,7 @@ class BridgeServerSettings(
         const val KEY_CANCEL_OBSOLETE: String = "cancelObsolete.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"
+        const val KEY_PR_TAG_DISPLAY: String = "prTag.display"
         const val DEFAULT_PR_TAG_PREFIX: String = "pr-"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"

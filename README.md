@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.9.4-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.9.10-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -34,6 +34,12 @@ that bite real pipelines:
 This plugin is the place to fix these things outside of the JetBrains
 release cycle.
 
+Already solving this with an external webhook relay plus a few TeamCity
+"service" builds that dedupe and cancel? Read
+[**Why this plugin**](doc/why-this-plugin.md) — the case for making those
+decisions inside the server instead, what you stop operating, and a
+reversible migration path.
+
 ## What you get
 
 ```mermaid
@@ -48,7 +54,7 @@ flowchart LR
 
     TRIG["<b>Triggers what should run</b><br/>ready_for_review, synchronize,<br/>label / edit / reopen, approval,<br/>PR comment, Re-run, Re-run all"]:::solved
     SKIP["<b>Suppresses what should not</b><br/>draft PRs, out-of-scope branches,<br/>paths and PR metadata,<br/>already-passed commits, closed PRs"]:::solved
-    PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, timings, test outcome,<br/>diff annotations, artifact links, sticky comment"]:::solved
+    PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, timings, test outcome,<br/>diff annotations, artifact links"]:::solved
     VIEW["<b>Makes it visible in TeamCity</b><br/>PR builds on their own branch,<br/>draft/ready pills, pr-N tags,<br/>Branches &amp; PRs tab"]:::solved
     OPS["<b>Runs as a service</b><br/>one App-level webhook + HMAC,<br/>self-minted tokens, admin page,<br/>/info /health /metrics, external API"]:::solved
 
@@ -118,11 +124,17 @@ Concretely:
   merging a PR cancels the ones still running for it. An agent stops producing a
   verdict nobody will read. Never a personal build, never one started by hand,
   and on a push never the last one in flight for that branch.
-- **An infrastructure failure is told apart from a broken build** - a lost
-  checkout, an unresolvable artifact dependency or a runner that could not start
-  is named in the Check Run title ("Infrastructure failure: Unable to collect
-  changes") and concludes `neutral`, so a CI hiccup no longer blocks the merge
-  like a failing test. A failed snapshot dependency is named too, and stays red.
+- **An infrastructure failure is named** - a lost checkout, an unresolvable
+  artifact dependency or a runner that could not start says so in the Check Run
+  title ("Infrastructure failure: Unable to collect changes") instead of looking
+  like a failing test. A failed snapshot dependency is named too. It still
+  concludes `failure` and still blocks the merge: telling "our CI broke" from
+  "your code is broken" is a subtle call, and unblocking a merge on a wrong guess
+  would let an unverified commit through. Turn on `checkRun.infraNeutral` to
+  conclude `neutral` instead, once you trust the classification on your builds.
+- **Diff annotations have a veto at every level** - the server, any project in
+  the chain, and each build configuration can switch them off, and one "no"
+  anywhere wins. They are the only thing the bridge writes on a reviewer's diff.
 
 ### Newest first (1.9.0)
 
@@ -137,9 +149,12 @@ Concretely:
   the build problems TeamCity reports are pinned to their file and line in the
   pull request (clang/gcc and MSVC shapes).
 - **Artifact links from the pull request** - the completed Check Run lists the
-  build's artifacts and the sticky comment gains an `[artifacts]` link, so a
-  reviewer or a tester reaches the installer without opening TeamCity.
-- **"Re-run all checks" works**, including re-running a *skipped* row, with an
+  build's artifacts, so a reviewer or a tester reaches the installer without
+  opening TeamCity.
+- **The re-run buttons work** - the per-check **Re-run**
+  (`check_run.rerequested`) and, where GitHub offers it, the suite-level
+  **Re-run all checks** (`check_suite.rerequested`) - including re-running a
+  *skipped* row, with an
   option to restrict it to the checks that failed.
 - **Publication is one switch, independent of what triggered the build** - a
   build configuration reports to GitHub, or it does not; a PR event, a VCS
@@ -199,11 +214,7 @@ Concretely:
 - **Trigger builds from PR comments** - posting a configurable
   phrase as a `pull_request_review_comment` (inline diff comment)
   enqueues builds, restricted to trusted commenters (repo
-  collaborators by default).
-- **Optional sticky PR summary comment** - a single maintained
-  comment on the PR that summarises build status (requires the
-  GitHub App to have pull-requests/issues **write** permission).
-- **Repo allowlist and dry-run mode** - scope the plugin to an
+  collaborators by default).- **Repo allowlist and dry-run mode** - scope the plugin to an
   explicit set of repositories, and a dry-run mode that logs what
   it *would* do without enqueuing or posting anything.
 - **Authenticated external HTTP API** - a bearer-token API under
@@ -246,7 +257,7 @@ Prefer to wire an existing App by hand? See
 flowchart LR
     subgraph GH["GitHub"]
         REPO["Repository<br/>pull_request, review,<br/>comment, check_run events"]
-        CHECKS["Checks API<br/>Check Runs + PR comment"]
+        CHECKS["Checks API<br/>Check Runs"]
     end
 
     subgraph TC["TeamCity server — the plugin"]
@@ -256,7 +267,7 @@ flowchart LR
         GATE["GateContextResolver<br/>+ gate decision<br/>trigger axis"]
         CLEAN["DraftBuildQueueCleaner<br/>DraftAwareBuildFilter<br/>drops out-of-scope auto builds"]
         BUILD(["Build runs"])
-        PUB["BuildStatusCheckRunPublisher<br/>PrSummaryCommenter<br/>publication axis"]
+        PUB["BuildStatusCheckRunPublisher<br/>publication axis"]
         TOKEN["TokenResolver → AppTokenMinter<br/>self-minted installation token"]
         API["GitHubClient"]
     end
@@ -315,6 +326,9 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ### Understand it
 
+- [Why this plugin](doc/why-this-plugin.md) - the case against an external
+  webhook relay and against the bundled integration, head-to-head tables,
+  objections answered, migration path.
 - [Architecture](doc/architecture.md) - components, data flow,
   threading, extension points.
 - [Security model](doc/security.md) - trust boundaries, signature
@@ -333,8 +347,8 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.9.4**, in development towards 1.10.0.
-339 unit tests pass.
+**Stable**. Current version is **1.9.10**, in development towards 1.10.0.
+408 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery

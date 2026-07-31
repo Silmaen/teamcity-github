@@ -23,3 +23,9 @@ fun safeUrl(block: () -> String?): String? {
         null
     }
 }
+
+// One artefact of a build, as a direct download link.
+//
+// Lived on `PrSummaryCommenter` until the sticky comment was removed; the Check
+// Run's **Artifacts** section is the remaining consumer.
+data class ArtifactLink(val name: String, val url: String)

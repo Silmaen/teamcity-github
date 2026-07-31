@@ -130,53 +130,6 @@ open class GitHubClient {
         }
     }
 
-    // ----- Issue comments (used by the optional PR summary comment) -----
-
-    // GET /repos/{slug}/issues/{number}/comments (first page, 100). PRs
-    // are issues for the comments API. Used to find our sticky comment.
-    open fun listIssueComments(
-        accessToken: String,
-        repo: RepoCoords,
-        number: Int,
-        apiBase: String = DEFAULT_API_BASE,
-    ): List<IssueComment> {
-        val resp = request("GET", "$apiBase/repos/${repo.slug}/issues/$number/comments?per_page=100", accessToken)
-            ?: return emptyList()
-        return if (resp.isSuccess) parseIssueComments(resp.body) else {
-            LOG.warn("GET issues/$number/comments returned ${resp.code} for ${repo.slug}: ${resp.body}")
-            emptyList()
-        }
-    }
-
-    open fun createIssueComment(
-        accessToken: String,
-        repo: RepoCoords,
-        number: Int,
-        body: String,
-        apiBase: String = DEFAULT_API_BASE,
-    ): Boolean {
-        val payload = MAPPER.createObjectNode().put("body", body)
-        val resp = request("POST", "$apiBase/repos/${repo.slug}/issues/$number/comments", accessToken, MAPPER.writeValueAsString(payload))
-            ?: return false
-        if (!resp.isSuccess) LOG.warn("POST issue comment returned ${resp.code} for ${repo.slug}#$number: ${resp.body}")
-        return resp.isSuccess
-    }
-
-    // DELETE rather than PATCH: java.net.HttpURLConnection rejects the
-    // PATCH method outright, so the sticky comment is refreshed by
-    // delete-then-create instead of an in-place edit.
-    open fun deleteIssueComment(
-        accessToken: String,
-        repo: RepoCoords,
-        commentId: Long,
-        apiBase: String = DEFAULT_API_BASE,
-    ): Boolean {
-        val resp = request("DELETE", "$apiBase/repos/${repo.slug}/issues/comments/$commentId", accessToken)
-            ?: return false
-        if (!resp.isSuccess) LOG.warn("DELETE issue comment $commentId returned ${resp.code} for ${repo.slug}: ${resp.body}")
-        return resp.isSuccess
-    }
-
     // ----- App-level endpoints (used by AppTokenMinter) -----
     //
     // Both endpoints authenticate with a JWT signed by the App's
@@ -416,21 +369,6 @@ open class GitHubClient {
             }
         }
 
-        // Public for testing — parses the issue-comments array.
-        fun parseIssueComments(json: String): List<IssueComment> {
-            return try {
-                val node = MAPPER.readTree(json)
-                if (!node.isArray) return emptyList()
-                node.mapNotNull { item ->
-                    val id = item.path("id").asLong(-1L).takeIf { it >= 0L } ?: return@mapNotNull null
-                    IssueComment(id = id, body = item.path("body").asText(""))
-                }
-            } catch (e: Exception) {
-                LOG.warn("Failed parsing issue comments response: ${e.message}")
-                emptyList()
-            }
-        }
-
         // Public for testing — parses the object returned by
         // POST /app/installations/{id}/access_tokens.
         fun parseCreatedToken(json: String): CreatedToken? {
@@ -614,11 +552,6 @@ data class InstallationInfo(
     val id: Long,
     val accountLogin: String,
     val accountType: String = "",
-)
-
-data class IssueComment(
-    val id: Long,
-    val body: String,
 )
 
 // Result of the App-manifest conversion (the credentials of the App

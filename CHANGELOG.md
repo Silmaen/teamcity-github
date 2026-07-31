@@ -36,21 +36,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   Subordinate to the `queueCleanup.enabled` master switch, and counted
   separately as `builds_stopped` — that one is agent time given back.
 
-- **An infrastructure failure is told apart from a broken build**
-  (`checkRun.infraNeutral`, default on). Everything that was not green used to
-  become `failure`, so a lost checkout, an unresolvable artifact dependency or a
-  runner that could not start turned a pull request red exactly like a failing
-  test — the reviewer could not tell "your code is broken" from "our CI broke",
-  which is the difference between fixing a commit and re-running a build. The
-  build's problems are now classified from their type (TeamCity's own
-  internal-error set), and an infrastructural failure:
+- **An infrastructure failure is named.** A lost checkout, an unresolvable
+  artifact dependency or a runner that could not start used to turn a pull
+  request red exactly like a failing test, and the reviewer could not tell "your
+  code is broken" from "our CI broke" — the difference between fixing a commit
+  and re-running a build. The build's problems are now classified from their type
+  (TeamCity's own internal-error set), and an infrastructural failure:
 
   - says so in the title — *"Infrastructure failure: Unable to collect changes"*;
   - opens its summary with a line stating the commit was **not** verified and
-    that the build should be re-run;
-  - concludes `neutral` instead of `failure`, which GitHub counts as satisfied
-    for a required check, so a CI hiccup no longer blocks the merge. Turn the
-    flag off to keep it red; the title names the cause either way.
+    that the build should be re-run.
+
+  It still concludes `failure`, and the merge stays blocked. Naming the suspected
+  cause costs nothing if the classification is wrong; *unblocking a merge* on a
+  wrong guess lets an unverified commit through, and telling the two apart is a
+  genuinely subtle call. So that half is opt-in: `checkRun.infraNeutral`
+  (**default off**) concludes `neutral` instead, which GitHub counts as satisfied
+  for a required check. Turn it on once you trust the classification on your own
+  builds; the title names the cause either way.
 
   Two deliberate exceptions: one problem the build itself produced (a failing
   test, a compile error, a non-zero exit code) makes the whole failure the
@@ -88,6 +91,55 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - The Check Run body follows a fixed order: **failure cause, tests, artifacts,
   link to the build in TeamCity**.
 
+### Changed
+
+- **Diff annotations can be switched off at three levels, and one "no" wins.**
+  They are the only thing the bridge writes *on a reviewer's diff* rather than in
+  a panel somebody chose to open, so each level gets a veto:
+
+  - the **server** — `checkRun.annotations`, as before;
+  - a **project** — `teamcity.github.bridge.annotations.enabled`, on its
+    *GitHub Bridge* tab;
+  - a **build configuration** — `annotateDiff`, on its *GitHub Bridge
+    integration* feature.
+
+  The verdict is the **AND** of all three, and the asymmetry is deliberate: a
+  `true` never overrules a `false`, so unticking it on a project holds for its
+  whole subtree and a sub-project cannot take it back — otherwise "no annotations
+  from this tree" would not be enforceable anywhere. The project value is
+  therefore read **own-per-project across the chain**, not resolved like every
+  other project parameter, and the project tab names the ancestor that vetoes so
+  a ticked checkbox never lies. Only the literal `false` decides; absent, blank,
+  `true` or a typo all abstain.
+
+  All three switches are on their respective **forms** — no hand-edited
+  parameters — and `checkRun.annotationLogScan` joined the admin page next to
+  them.
+
+### Removed
+
+- **The sticky PR summary comment** (`prComment.enabled`, `PrSummaryCommenter`,
+  and the three issue-comment calls in `GitHubClient`).
+
+  It was refreshed by **deleting the old comment and posting a new one** —
+  `HttpURLConnection` refuses `PATCH`, so an in-place edit was not available — and
+  GitHub notifies every watcher of a pull request on each new comment. A feature
+  meant to keep one always-current summary therefore emailed everybody once per
+  build. That is spam, whatever the content says, and fixing it properly meant
+  replacing the HTTP layer for a feature the Checks panel already covers: it
+  carries the same per-configuration rows, the same status, and the same artifact
+  download links.
+
+  Two things follow. The **Artifacts** section of the Check Run is unaffected
+  (`checkRun.artifactLinks` still governs it), and the App's **pull requests**
+  permission comes back down to **read** — the comment was the only thing that
+  ever needed write, so the managed-App manifest now asks for read, and an
+  installation that granted write can revoke it. The plugin's only write is the
+  Check Run lifecycle, which is the *Checks* permission.
+
+  Nothing else changes: the PR **comment trigger** is a different feature (it
+  reads comments from the webhook payload, never through the API) and stays.
+
 ### Fixed
 
 - **Personal builds publish nothing** — no `queued`, no `in_progress`, no
@@ -101,6 +153,116 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   transitioning the build: `finishDate` is null (every build reported "Ran <1s",
   and no `completed_at`) and the status descriptor still reads "Running" (a green
   Check Run summarised "Running"). Both are handled.
+
+- **Diff annotations now work for a Command Line build** — which is to say, for
+  nearly every CMake/ninja C++ build there is. The feature read only the
+  descriptions of the build problems TeamCity reports, on the assumption that a
+  diagnostic worth pinning had reached one. It had not: a **Command Line** runner
+  reports exactly one problem, *"Process exited with code 1 (Step: Build (Command
+  Line))"*, and the compiler's own output never becomes a build problem at all.
+  So the feature was on, correct, and silently inert for the builds that need it
+  most.
+
+  When the build problems carry no diagnostic, the failed build's **log** is now
+  scanned instead (`checkRun.annotationLogScan`, default on). Bounded on every
+  axis: failed builds only, never when the problems already produced an
+  annotation, and the log iterator stays lazy so the read stops at the 50th
+  annotation or after 200 000 lines — an error on line 900 does not cost a 2 GB
+  read.
+
+- **A "Clear cached tokens" button** on the admin page, next to *Verify App
+  configuration*. An installation token carries the permissions it had **when it
+  was minted** and is cached for 50 minutes, so granting the App a permission —
+  and accepting the request on the installation, which GitHub asks for separately —
+  changed nothing for up to half an hour: every call kept failing with `403` for a
+  permission the App visibly had. The button drops the tokens, and the PR-info
+  cache with them, since a token with new scopes may see a pull request the old one
+  could not.
+
+- **Writing the PR tag and showing it are two settings now** (`prTag.enabled`
+  and the new `prTag.display`, both default on). TeamCity's Tags column is
+  narrow: a second tag on a build collapses it into a count, and the
+  `draft`/`ready` pill — the state the plugin went to some trouble to make
+  legible — stops being readable. That made the PR tag a straight trade against
+  the pill, and the only way out was to give up the tag.
+
+  Unticking *"… and show it in build lists"* now **keeps the tag and hides its
+  chip**: TeamCity's own tag filter and search still find the build by PR number,
+  the *Branches & PRs* column still shows it, and the pill gets its column back.
+  Client-side, in the same injected fragment that colours the pills, and it only
+  ever hides `<prefix><digits>` anchored at both ends — a team's own
+  `pr-review-notes` is untouched.
+
+- **The PR column of the *Branches & PRs* tab reads the build's own parameter**
+  when neither the tag nor the ref knows the number. It keyed on the `pr-N` tag
+  first and the `pull/N` ref second, and in branch-source mode with no tag there
+  was nothing left — so the column sat empty for builds whose pull request the
+  plugin knew perfectly well: the number was in their published parameters all
+  along (`…pullRequest.number`, visible in the build's *Parameters* tab). Three
+  sources now, cheapest first: tag, ref, parameter. The practical effect is that
+  the column fills in for **existing history** too, not only for builds queued
+  after the tagging fix below.
+
+- **A PR build is tagged with its PR number when it is queued**, not only when a
+  later `pull_request` event happens to catch it at the pull request's current
+  head. `PrPromotionTagger` had the number in hand — it resolves the PR to decide
+  `draft`/`ready` — and wrote only the state tag; the PR tag came solely from the
+  listener's retro-association pass, which tags the builds at the current head.
+  So every older build lost its PR number, and in **branch-source** mode there is
+  no `pull/N` ref to recover it from: the *Branches & PRs* tab showed an empty PR
+  column and a search by number found nothing.
+
+- **`/info` reported TeamCity's version as its own.** The field was filled from
+  `SBuildServer.fullServerVersion`, so `/info` answered
+  `"pluginVersion":"2026.1.3 (build 222742)"` while `/health` answered `"1.9.4"` —
+  one key, two endpoints, two different meanings, and the API reference documented
+  the wrong one as intended. `/info` now reports the plugin's own version and adds
+  a separate **`teamcityVersion`** field, which is what an info endpoint should
+  have said in the first place.
+
+- **The title no longer claims an ignored test passed.** A build whose only test
+  was skipped read *"Build failed — 1 tests passed"* in GitHub's merge box: the
+  suffix reported the **total**, which counts the ignored and the muted tests
+  too. It now reports what actually passed, names the rest, and counts one test
+  in the singular — "no test passed, 1 ignored", "31 tests passed, 12 ignored".
+
+- **A failing test whose failure text says nothing no longer gets a fold-out.**
+  TeamCity's XML importers — CTest among them — report a bare `Failure` as both
+  the status text and the short stacktrace, and the publisher took the first
+  non-blank of the two: every failing test carried a `<details>failure</details>`
+  whose entire content was that one word. Three changes:
+
+  - the real output is read from `STestRun.getFullText()` when the cheap reads
+    say nothing (the expensive read is paid for only then);
+  - a text that carries no information — `Failure`, `error`, the test's own name
+    — is dropped rather than rendered;
+  - what is left is rendered by length: a **one-liner goes on the bullet**
+    (`` — `expected 3, got 4` ``, no click), anything longer is folded under a
+    summary carrying **its first line** instead of the word "failure", so a
+    reviewer can tell whether opening it is worth it.
+
+  And once the real output *did* reach GitHub, it turned out to be mostly the
+  test framework talking about itself: a gtest run leads with `Failed`, a
+  `------- Stdout: -------` banner, its `[==========]` bracket lines and the
+  environment set-up, and buries the assertion in the middle — so the fold-out
+  was labelled "Failed" and spent its whole character budget on boilerplate.
+  The output is now **excerpted**: the scaffolding lines are dropped, the excerpt
+  starts at the `file:line` anchor when there is one (`path:14:` and MSVC's
+  `path(14):`), and it is capped at 12 lines. A gtest failure arrives as the five
+  lines that matter, under a summary reading
+  `/work/tests/test_greeter.cpp:14: Failure`. Conservative by construction: an
+  unrecognised line is kept, and if the filters leave nothing the raw text is
+  used unchanged.
+
+  Two more things the same panel was saying badly:
+
+  - **the `(empty): ` prefix is gone from test names.** TeamCity substitutes
+    that literal for a report with no suite, and a CTest import carries it on
+    every single line. A suite that says something (a matrix leg, a target) is
+    still kept: it is what tells two identical test names apart.
+  - **"N failed tests detected" is no longer listed under *Failure details***
+    when the *Tests* section is there — same sentence, with less in it. It stays
+    when there is no test section to replace it.
 
 - **`draft` / `ready` pills are actually coloured**: `ready` green, `draft` a
   neutral grey, dark theme included. The colour now lands on the **chip**

@@ -198,13 +198,6 @@ except **push**, which is recommended for coexistence and future use
 > conversation comments, grant the **Issues** permission and subscribe
 > to **Issue comment** yourself.
 
-> **Permission note**: the **sticky PR summary comment** feature
-> (a single maintained comment on the PR summarising build status)
-> requires the GitHub App to have **pull requests / issues** set to
-> **Read & write**. Without write permission the plugin still runs,
-> but it cannot post or update the comment. See
-> [github-app-setup.md](github-app-setup.md) for granting
-> permissions.
 
 Click `Save changes`.
 

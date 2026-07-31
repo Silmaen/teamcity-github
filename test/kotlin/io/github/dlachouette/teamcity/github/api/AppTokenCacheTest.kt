@@ -84,4 +84,18 @@ class AppTokenCacheTest {
         assertEquals("ghs_one", cache.get(1L))
         assertEquals("ghs_two", cache.get(2L))
     }
+
+    // The recovery path after the App gains a permission: a cached token still
+    // carries the scopes it was minted with, so it has to be droppable on demand.
+    @Test
+    fun `clear drops every entry and reports how many`() {
+        val cache = AppTokenCache()
+        cache.put(1L, "ghs_one", Instant.now().plusSeconds(3600))
+        cache.put(2L, "ghs_two", Instant.now().plusSeconds(3600))
+
+        assertEquals(2, cache.clear())
+        assertNull(cache.get(1L))
+        assertNull(cache.get(2L))
+        assertEquals(0, cache.clear())
+    }
 }

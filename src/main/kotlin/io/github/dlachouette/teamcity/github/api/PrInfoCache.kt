@@ -103,6 +103,17 @@ class PrInfoCache(
 
     fun size(): Int = store.size
 
+    // Drop every entry, and say how many. Used by the admin page's "clear cached
+    // tokens" action: a token minted under new permissions may well see a
+    // different pull request (a private repo the App could not read before), so
+    // dropping the tokens without dropping what they fetched would keep serving
+    // the older, thinner answer for the rest of the TTL.
+    fun clear(): Int {
+        val size = store.size
+        store.clear()
+        return size
+    }
+
     companion object {
         private val LOG = Logger.getInstance(PrInfoCache::class.java.name)
         const val DEFAULT_TTL_MS: Long = 60_000L

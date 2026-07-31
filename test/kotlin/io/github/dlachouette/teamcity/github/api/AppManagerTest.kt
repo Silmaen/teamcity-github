@@ -55,7 +55,11 @@ class AppManagerTest {
         assertEquals("https://tc/hook", json.path("hook_attributes").path("url").asText())
         assertEquals("https://tc/cb", json.path("redirect_url").asText())
         assertEquals("write", json.path("default_permissions").path("checks").asText())
-        assertEquals("write", json.path("default_permissions").path("pull_requests").asText())
+        // Pull requests are **read**: the bridge reads them and writes Check
+        // Runs. It asked for write only for the sticky summary comment, which was
+        // removed — a permission requested to post nothing is a permission taken
+        // for no reason.
+        assertEquals("read", json.path("default_permissions").path("pull_requests").asText())
         val events = json.path("default_events").map { it.asText() }
         assertTrue(events.containsAll(AppManager.REQUIRED_EVENTS))
     }

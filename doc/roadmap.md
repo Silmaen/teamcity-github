@@ -10,44 +10,165 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Retry an infrastructure failure instead of reporting it
+## Link a build to its pull request, from TeamCity
 
-**Problem.** The bridge now *names* an infrastructure failure and stops
-it blocking the merge (`checkRun.infraNeutral`), but somebody still has
-to notice the neutral row and press re-run. The verdict on the commit
-stays unknown until they do.
+**Problem.** The bridge carries everything one way — TeamCity's verdict
+reaches the pull request — and nothing the other way. Standing on a build
+page in TeamCity, there is no way to open the pull request it is judging.
+The information is all there (the PR parameters every opted-in build carries,
+the `pull/N` ref, the optional `pr-N` tag) and none of it is a link.
 
-**Feasible.** The classification exists: `FailureClassifier` already
-answers "was this CI's fault" from the build's problem types, and the
-plugin already enqueues builds (`PullRequestEventListener`,
-`check_run.rerequested`).
+The trigger description gets close: a bridge-enqueued build reads
+*"teamcity-github-bridge: pull_request.synchronize on PR #6"* in the queue
+and on the build page. But it is plain text, and it is **only** on builds
+the bridge enqueued: a manual Run, a VCS trigger or a schedule says
+nothing, which is precisely the case where a human is looking for the PR.
 
-**Design.** On a finished build classified `INFRASTRUCTURE`, re-enqueue
-the same build configuration at the same revision, once, and let the
-retry own the Check Run row. Needs a bounded, visible retry: a
-per-(buildType, sha) counter with a hard cap of one, a marker so a retry
-is never itself retried, and a line in the Check Run saying a retry was
-started. Off by default — re-enqueueing builds on the operator's agents
-is not a decision a plugin should make quietly.
+**Known dead ends** — see the table at the bottom of this page. A tag is a
+filter and the React pages win the click; `PlaceId.BUILD_SUMMARY` and
+`BUILD_ACTIONS` render on the **classic** build page only.
 
-**Watch out for.** `DEPENDENCY` must not be retried (the dependency is
-what failed, not this build), and neither must a build a user started by
-hand — the same scope invariant `QueueCleanupPolicy` holds.
+**Three candidates, cheapest first.**
 
-**Effort.** Small to medium. The classifier and the enqueue path both
-exist; the care goes into the cap and into not fighting a retry storm.
+1. **A `pullRequest.url` build parameter.** The PR payload already carries
+   `html_url`; publishing it alongside the eight existing parameters costs
+   one line in `PrParameterProvider`. Not clickable, but visible in the
+   build's **Parameters** tab, copy-pasteable, and usable from DSL and from
+   a build script — and it is what the other two candidates would render.
+   Do this one regardless of the rest.
+2. **A build tab.** `ViewBuildTab` / `ViewLogTab` is the extension point,
+   and the project tab this plugin already ships (`BridgeBuildsTab`, the
+   *Branches & PRs* tab) is proof that plugin tabs render in the current UI
+   — a build tab is the same mechanism one level down. Trigger-agnostic,
+   official, and it has room for more than a link: it is the natural home
+   for [what the pull request actually changes](#what-the-pull-request-actually-changes-base-branch-merge-base-changed-files).
+   **Verify it renders on a Sakura build page before writing the content** —
+   that is the trap every previous attempt fell into.
+3. **The build comment** (`SBuild.setBuildComment`). One line, shown on the
+   build page *and* in build lists, works whatever triggered the build. But
+   it hijacks a field that belongs to users, who can edit it and may be
+   using it. Off by default if it happens at all.
 
-## Report flaky tests as flaky
+**Effort.** (1) trivial. (2) small, once the render is verified. (3) small.
 
-**Problem.** A test that fails once and passes on retry is reported as a
-failure, and a reviewer goes looking for a bug that is not there.
+## What the pull request actually changes: base branch, merge base, changed files
 
-**Feasible.** `STestRun.getInvocationCount()` and
-`getFailedInvocationCount()` are already loaded with the test statistics
-the Check Run reads — a run that failed some but not all invocations is
-flaky.
+**Problem.** A build knows it belongs to PR #6 and knows its head commit.
+It does not know **what the pull request changes**: which branch it targets,
+where it diverged from that branch, and which files differ. Every one of
+those is something a build step wants — a diff-scoped analysis (the sandbox
+already runs clang-tidy "on diff" and has to work the range out for itself),
+a changed-files test selection, a release-notes step, a "did this touch the
+API?" gate.
 
-**Effort.** Very small. A counter and a line in the existing test section.
+**Feasible.** All three come from calls the client already knows how to
+make, against a PR the plugin has already resolved and cached:
+
+- **base branch** — `base.ref`, already in the `pull_request` payload the
+  webhook delivers, and in `GET /pulls/{n}` for the branch-lookup path. Free.
+- **merge base** — `GET /repos/{o}/{r}/compare/{base}...{head}` returns
+  `merge_base_commit.sha`. One call, cacheable with the PR info.
+- **changed files** — the same compare response carries `files[]`, or
+  `GET /pulls/{n}/files` (paginated, 100 per page, capped at 3000 by
+  GitHub).
+
+**Design.** Publish the cheap ones as parameters —
+`…pullRequest.baseBranch` (a rename or an alias of the existing
+`targetBranch`), `…pullRequest.mergeBase` — and put the file list where a
+list belongs: not in a build parameter (a 3000-entry parameter is a
+liability), but written into the build as an **artifact** or exposed on the
+build tab from item (2) above. A `…pullRequest.changedFileCount` parameter
+covers the "did it change much?" question without carrying the list.
+
+**Watch out for.** The extra call must be lazy: a build configuration that
+never reads these must not pay for them. Gate it on a flag, and cache the
+compare result on `PrInfoCache` next to the PR it describes. A force-push
+invalidates the merge base, which the existing cache invalidation on
+`synchronize` already handles.
+
+**Effort.** Small for the base branch and merge base. Medium for the file
+list, and most of that is deciding where it lives.
+
+## Warn when a required check can never arrive
+
+**Problem.** A branch protection rule requiring a check named
+`TeamCity / Sandbox / test_ci / PR / Test (Linux)` blocks every pull request
+for ever if the bridge posts `TeamCity / Sandbox / test_ci / PR / Test /
+Linux / Test (Linux, x64, Release)`. Nothing reports the mismatch: the PR
+just sits there, "Required statuses must pass", waiting for a row that will
+never exist. Rename a build configuration and you have created this without
+touching anything called "GitHub".
+
+**Feasible.** The Check Run name is computed in one place
+(`checkRunName` = `TeamCity / <buildType fullName>`), so the plugin knows
+every name it will ever post. The other half is
+`GET /repos/{o}/{r}/branches/{b}/protection/required_status_checks` (or the
+rulesets API), which the App can read given repository administration read.
+
+**Design.** A self-test row — the admin page already runs a battery of them
+— listing required check names that no opted-in build configuration will
+produce, and (informational) opted-in configurations that are not required.
+Skipped, not failed, when the App lacks the permission to read protection.
+
+**Effort.** Small, and it fits exactly where the plugin already differs from
+a relay: it tells you when it is misconfigured.
+
+## Say where the build is in the queue
+
+**Problem.** The `queued` Check Run says "Queued" and nothing else. A
+reviewer watching a pull request cannot tell "the agents are busy, this is
+26th in line, four minutes out" from "this is stuck". TeamCity knows —
+its queue page says exactly that — and the pull request is where people
+are looking.
+
+**Feasible.** `SQueuedBuild#getBuildEstimates` carries the position and the
+estimated start; the queue page renders *"4m 12s to start: There are no idle
+compatible agents which can run this build"* and *"26th position in queue"*
+from it. The publisher already posts a `queued` Check Run, so this is a
+richer summary on a request that is already being made.
+
+**Design.** Summary line on the `queued` row: "26th in queue, ~4m to start
+— no idle compatible agent". Re-posted when the estimate changes materially
+would be noise; once, at enqueue, is enough.
+
+**Effort.** Small. Watch out for estimates being absent (a build with
+unresolved dependencies has none) and for the same "no compatible agent"
+wording problem `agentWaitHint` already fights.
+
+## Target one build configuration from a PR comment
+
+**Problem.** The comment trigger is all-or-nothing: the phrase re-runs
+every opted-in build configuration. On a matrix of eleven, a reviewer who
+wants the one Windows leg re-run pays for eleven.
+
+**Feasible.** The command path already resolves the phrase, the trusted
+commenter and the build configurations (`PullRequestEventListener`), and
+`COMMAND` builds already bypass the soft gates.
+
+**Design.** `/rebuild Windows` — the argument matches build configuration
+names (substring, case-insensitive) within the project, and matches nothing
+means the whole set, as today. Echo what was matched in the reply so a typo
+is visible rather than silent.
+
+**Effort.** Small.
+
+## Resolve a Check Run left `in_progress`
+
+**Problem.** If the server stops between a build's start and its finish, or
+the finish event is missed, the pull request keeps an `in_progress` row that
+never resolves — and a required check that never resolves blocks the merge
+until somebody re-runs it by hand. This is the one failure mode of the
+whole design that a human has to clean up.
+
+**Feasible.** On `serverStartup` the plugin can walk its own recent history
+(the builds carrying the feature, finished within the last N hours) and
+reconcile: any build that is finished in TeamCity but whose last published
+Check Run was `queued` or `in_progress` gets its conclusion posted. The
+publisher is idempotent — GitHub dedups on `(name, head_sha)` — so
+re-posting a conclusion that already landed is harmless.
+
+**Effort.** Medium. The care is in bounding the sweep and in not
+resurrecting rows for commits that no longer belong to an open PR.
 
 ## Report code coverage and its trend
 
@@ -63,7 +184,8 @@ configuration gives the delta.
 #142)" — and nothing at all when the build reports no such statistic.
 
 **Effort.** Small. Only worth doing if the team actually measures
-coverage.
+coverage — which today it rarely does. Kept for when that changes; not a
+candidate for the next release.
 
 ## Buttons on the Check Run
 
@@ -108,25 +230,6 @@ Docker-in-Docker.
 
 **Effort.** Small. One workflow file.
 
-## End-to-end fixture against a real TeamCity
-
-**Problem.** The unit tests cover pure logic. Everything that touches the
-SDK — Spring wiring, `BuildServerAdapter` callbacks, `removeFromQueue`,
-the webhook endpoint's anonymous registration — is only ever exercised by
-installing the plugin on a live server. Every lag bug found so far
-(`finishDate` null at `buildFinished`, a stale status descriptor) was
-found in production for exactly this reason.
-
-**Design.** `org.jetbrains.teamcity:tests-support` spins up an in-memory
-server in tests.
-
-**Constraint.** It pulls in a large part of TeamCity's server jar graph
-and takes ~30 s per test class to start, so it belongs in the `verify`
-phase, not in `./dev test`.
-
-**Effort.** Large — and the item with the best ratio of bugs-caught to
-cleverness-required, given the class of bug listed above.
-
 ## Loose ends
 
 - **Attribute the queue wait properly.** The Check Run splits the wait
@@ -143,6 +246,22 @@ cleverness-required, given the class of bug listed above.
   carry the bridge feature, and the build then finds no compatible agent.
   Worth a section in [troubleshooting.md](troubleshooting.md).
 
+## Not doing
+
+Decided against, with the reason — so the next reader does not re-propose
+them, and so a change of circumstances can be recognised as one.
+
+| Idea | Why not |
+|---|---|
+| **Retry an infrastructure failure automatically** | It rests on the infra-versus-code classification being trustworthy enough to spend agents on, and in practice that line is too subtle to draw. The plugin *names* the suspected cause and lets a human decide (`checkRun.infraNeutral`); spending the operator's agents on that same guess is a step too far. |
+| **Report flaky tests as flaky** | TeamCity already has a flaky-test detector. It works badly, and doing better without false positives is a research problem, not a plugin feature — and a false "this is flaky" is worse than no label at all: it tells a reviewer to ignore a real failure. |
+| **The sticky PR summary comment** | Removed in 1.10.0, not shelved. It was refreshed by delete-then-post, so every build notified every watcher of the pull request — spam, whatever the content said. Editing in place needs `PATCH`, which `HttpURLConnection` refuses, so the fix was "replace the HTTP layer" for a feature nobody asked for. The Checks panel already carries the same information, including the artifact links. Removing it also brought the App's **pull requests** permission back down to **read**. |
+| **End-to-end fixture against a real TeamCity** | `tests-support` pulls in a large part of TeamCity's server jar graph for ~30 s of startup per test class, to cover wiring that a single install on the sandbox covers faster. The lag bugs it would have caught were caught by installing it. Not worth the weight. |
+
+If the flaky-test question comes back, the interesting version is not
+"detect flakiness" but "surface what TeamCity already decided" — and that
+inherits TeamCity's false positives, which is the objection above.
+
 ## Blocked on JetBrains
 
 Re-check on each TeamCity release; nothing to do until then.
@@ -150,7 +269,7 @@ Re-check on each TeamCity release; nothing to do until then.
 | Question | What we want | Status as of TC 2026.1 |
 |---|---|---|
 | A public `BuildBranchInfoProvider` | Override what the **Branch** column displays. Largely moot since `prBuildRef=branch` makes the column show the real branch name; it would only help projects staying on the `pull/N` model. | Absent. `BranchDisplayNameProvider` too; `Branch.getDisplayName()` is read-only and `setDesiredBranchName()` rewrites the ref itself, not its display. |
-| A place to put an outbound link on a build | Link a build to its pull request from TeamCity. | Dead end, twice over: a tag **is** a filter and the React pages bind that by delegation on an ancestor (its capture listener wins), while `PlaceId.BUILD_SUMMARY` / `BUILD_ACTIONS` render on the **classic** build page only. Any new attempt has to be verified on a Sakura page first. |
+| A place to put an outbound link on a build | Link a build to its pull request from TeamCity. | Two routes are dead: a tag **is** a filter and the React pages bind that by delegation on an ancestor (its capture listener wins), and `PlaceId.BUILD_SUMMARY` / `BUILD_ACTIONS` render on the **classic** build page only. Not blocked overall — a **build tab** has not been tried, and the plugin's own project tab proves tabs render. See [Link a build to its pull request](#link-a-build-to-its-pull-request-from-teamcity). Verify the render on a Sakura page before writing content. |
 | `ConnectionCredentialsFactory` for GitHub App | Token acquisition that does not need our own JWT self-mint path. | Unsupported (`Unsupported Connection Provider type: GitHubApp`). Worked around by self-minting. If it lands, the self-mint primary path can go and the credentials-manager fallback suffices again. |
 
 ## Recording a new idea

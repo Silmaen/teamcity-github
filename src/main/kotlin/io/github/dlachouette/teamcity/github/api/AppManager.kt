@@ -91,12 +91,15 @@ class AppManager(
         private val LOG = Logger.getInstance(AppManager::class.java.name)
         private val MAPPER = ObjectMapper()
 
-        // Minimum permissions/events the plugin needs. `pull_requests:write`
-        // covers both reading PRs and the optional sticky PR comment.
+        // Minimum permissions/events the plugin needs. `pull_requests` is
+        // **read**: the bridge reads pull requests and writes Check Runs
+        // (`checks:write`), and nothing else. It gained write only for the sticky
+        // summary comment, which was removed — asking for write to post nothing
+        // would be a permission taken for no reason.
         val REQUIRED_PERMISSIONS: Map<String, String> = linkedMapOf(
             "metadata" to "read",
             "checks" to "write",
-            "pull_requests" to "write",
+            "pull_requests" to "read",
             "contents" to "read",
         )
         val REQUIRED_EVENTS: List<String> = listOf(

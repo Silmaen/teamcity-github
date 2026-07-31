@@ -63,7 +63,7 @@ teamcity-github/
     │       │              ObsoleteBuildPolicy
     │       ├── report/    BuildStatusCheckRunPublisher, DraftCheckRunReporter, BuildTimeline,
     │       │              TestReport, FailureClassifier, BuildProblemAnnotations,
-    │       │              PrSummaryCommenter, ReportHelpers
+    │       │              ReportHelpers
     │       └── web/       the inbound and UI layer (~21 files): PullRequestEventListener,
     │                      webhook, info, health, metrics, external API, admin console,
     │                      project settings, Branches & PRs tab, SignatureVerifier,

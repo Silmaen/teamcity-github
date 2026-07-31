@@ -49,6 +49,34 @@ class BuildProblemAnnotationsTest {
         assertEquals("undeclared identifier", a.message)
     }
 
+    // MSBuild appends the project it was building to every diagnostic: an
+    // absolute path on an agent, meaningless on a reviewer's diff and long
+    // enough to push the message itself out of view.
+    @Test
+    fun `the MSBuild project suffix is stripped from the message`() {
+        val a = BuildProblemAnnotations.parseLine(
+            """C:\agent\work\a1b2c3\src\greeter.cpp(14,12): error C2440: 'return': cannot convert from 'const wchar_t [5]' to 'std::string' [C:\agent\work\a1b2c3\build\greeter.vcxproj]""",
+            """C:\agent\work\a1b2c3""",
+        )!!
+        assertEquals("src/greeter.cpp", a.path)
+        assertEquals(
+            "'return': cannot convert from 'const wchar_t [5]' to 'std::string'",
+            a.message,
+        )
+    }
+
+    // …but a diagnostic that legitimately ends in brackets keeps them.
+    @Test
+    fun `a trailing warning flag is not mistaken for a project suffix`() {
+        assertEquals(
+            "unused variable 'tmp' [-Wunused-variable]",
+            BuildProblemAnnotations.parseLine(
+                "src/a.cpp:51:3: warning: unused variable 'tmp' [-Wunused-variable]",
+                checkout,
+            )?.message,
+        )
+    }
+
     // --- what must NOT produce an annotation
 
     @Test
@@ -123,5 +151,69 @@ class BuildProblemAnnotationsTest {
     @Test
     fun `a build with no problem produces nothing`() {
         assertEquals(emptyList<Any>(), BuildProblemAnnotations.parse(emptyList(), checkout))
+    }
+
+    // --- the build-log fallback
+    //
+    // What a Command Line runner leaves us with: the only build problem is
+    // "Process exited with code 1" and every diagnostic is in the log.
+
+    @Test
+    fun `scans a ninja log the way a Command Line build leaves it`() {
+        val log = """
+            [1/3] Building CXX object src/CMakeFiles/app.dir/main.cpp.o
+            [2/3] Building CXX object src/CMakeFiles/app.dir/ray.cpp.o
+            FAILED: src/CMakeFiles/app.dir/ray.cpp.o
+            /usr/bin/c++ -Isrc -O2 -o src/CMakeFiles/app.dir/ray.cpp.o -c /opt/agent/work/a1b2c3/src/ray.cpp
+            /opt/agent/work/a1b2c3/src/ray.cpp:42:7: error: no member named 'trace' in 'Scene'
+                42 |   scene.trace(r);
+                   |         ^
+            /opt/agent/work/a1b2c3/src/ray.cpp:51:3: warning: unused variable 'tmp' [-Wunused-variable]
+            ninja: build stopped: subcommand failed.
+            Process exited with code 1
+        """.trimIndent().lineSequence()
+
+        val out = BuildProblemAnnotations.scan(log, checkout)
+        assertEquals(listOf("src/ray.cpp", "src/ray.cpp"), out.map { it.path })
+        assertEquals(listOf(42, 51), out.map { it.startLine })
+        assertEquals(listOf(CheckRunAnnotationLevel.FAILURE, CheckRunAnnotationLevel.WARNING), out.map { it.level })
+        assertEquals("no member named 'trace' in 'Scene'", out[0].message)
+    }
+
+    // A log message can itself hold several lines.
+    @Test
+    fun `a multi-line log message is split`() {
+        val out = BuildProblemAnnotations.scan(
+            sequenceOf("src/a.cpp:1: error: one\nsrc/b.cpp:2: error: two"),
+            checkout,
+        )
+        assertEquals(listOf("src/a.cpp", "src/b.cpp"), out.map { it.path })
+    }
+
+    // The point of the budget: an error on line 900 of a 2 GB log must not cost
+    // the whole log. The sequence below throws if it is read past the budget.
+    @Test
+    fun `the scan stops at the line budget`() {
+        var read = 0
+        val endless = generateSequence {
+            read++
+            if (read > 1_000) error("read past the budget")
+            "just another line of build output"
+        }
+        assertEquals(emptyList<Any>(), BuildProblemAnnotations.scan(endless, checkout, maxLines = 500))
+        assertEquals(500, read)
+    }
+
+    // And it stops as soon as GitHub's cap is reached, however long the log is.
+    @Test
+    fun `the scan stops once it has all the annotations GitHub accepts`() {
+        var read = 0
+        val diagnostics = generateSequence {
+            read++
+            "src/a.cpp:$read: error: e$read"
+        }
+        val out = BuildProblemAnnotations.scan(diagnostics, checkout, maxLines = Int.MAX_VALUE)
+        assertEquals(BuildProblemAnnotations.MAX_ANNOTATIONS, out.size)
+        assertEquals(BuildProblemAnnotations.MAX_ANNOTATIONS, read)
     }
 }
