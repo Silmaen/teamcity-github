@@ -6,6 +6,7 @@ import jetbrains.buildServer.messages.Status
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
@@ -52,6 +53,95 @@ class BuildStatusCheckRunPublisherTest {
     fun `unknown status maps to neutral`() {
         val m = BuildStatusCheckRunPublisher.mapBuildOutcome(Status.UNKNOWN, isInterrupted = false)
         assertEquals(CheckRunConclusion.NEUTRAL, m.conclusion)
+    }
+
+    // ----- infrastructure failure vs broken build -----
+
+    private val infra = FailureClassification(FailureKind.INFRASTRUCTURE, "Unable to collect changes")
+    private val code = FailureClassification(FailureKind.CODE)
+    private val failed = BuildOutcomeMapping(CheckRunConclusion.FAILURE, "Build failed")
+
+    @Test
+    fun `a code failure is reported exactly as before`() {
+        val m = BuildStatusCheckRunPublisher.refineForFailureCause(failed, code, infraNeutral = true)
+        assertEquals(CheckRunConclusion.FAILURE, m.conclusion)
+        assertEquals("Build failed", m.title)
+    }
+
+    @Test
+    fun `an infrastructure failure concludes neutral and names its cause`() {
+        val m = BuildStatusCheckRunPublisher.refineForFailureCause(failed, infra, infraNeutral = true)
+        assertEquals(CheckRunConclusion.NEUTRAL, m.conclusion)
+        assertEquals("Infrastructure failure: Unable to collect changes", m.title)
+    }
+
+    // The flag is a merge policy, not a statement of fact: with it off the
+    // title still says what broke, the conclusion just stays red.
+    @Test
+    fun `with the flag off an infrastructure failure stays red but keeps the cause`() {
+        val m = BuildStatusCheckRunPublisher.refineForFailureCause(failed, infra, infraNeutral = false)
+        assertEquals(CheckRunConclusion.FAILURE, m.conclusion)
+        assertEquals("Infrastructure failure: Unable to collect changes", m.title)
+    }
+
+    @Test
+    fun `a failed snapshot dependency is named but stays red whatever the flag says`() {
+        val dep = FailureClassification(FailureKind.DEPENDENCY, "Snapshot dependency failure")
+        listOf(true, false).forEach { flag ->
+            val m = BuildStatusCheckRunPublisher.refineForFailureCause(failed, dep, infraNeutral = flag)
+            assertEquals(CheckRunConclusion.FAILURE, m.conclusion)
+            assertEquals("Build failed: Snapshot dependency failure", m.title)
+        }
+    }
+
+    // A build can report an infrastructural problem and still be green — that
+    // is what TeamCity's SNAPSHOT_DEPENDENCY_ERROR_BUILD_PROCEEDS is for — and
+    // a cancelled build's conclusion is not up for debate.
+    @Test
+    fun `only a failure is refined`() {
+        listOf(
+            CheckRunConclusion.SUCCESS,
+            CheckRunConclusion.CANCELLED,
+            CheckRunConclusion.NEUTRAL,
+        ).forEach { conclusion ->
+            val original = BuildOutcomeMapping(conclusion, "Build passed")
+            val m = BuildStatusCheckRunPublisher.refineForFailureCause(original, infra, infraNeutral = true)
+            assertEquals(original, m)
+        }
+    }
+
+    @Test
+    fun `the note tells a reviewer the commit was not judged`() {
+        val note = BuildStatusCheckRunPublisher.infrastructureNote(infra, CheckRunConclusion.NEUTRAL)
+        assertNotNull(note)
+        assertTrue(note!!.contains("not a problem with the code"))
+        assertTrue(note.contains("Unable to collect changes"))
+        assertTrue(note.contains("does not block the merge"))
+    }
+
+    @Test
+    fun `the note says so when the failure is kept red`() {
+        val note = BuildStatusCheckRunPublisher.infrastructureNote(infra, CheckRunConclusion.FAILURE)
+        assertNotNull(note)
+        assertFalse(note!!.contains("does not block the merge"))
+    }
+
+    @Test
+    fun `no note for a code failure`() {
+        assertNull(BuildStatusCheckRunPublisher.infrastructureNote(code, CheckRunConclusion.FAILURE))
+        assertNull(
+            BuildStatusCheckRunPublisher.infrastructureNote(
+                FailureClassification(FailureKind.DEPENDENCY, "Snapshot dependency failure"),
+                CheckRunConclusion.FAILURE,
+            ),
+        )
+    }
+
+    @Test
+    fun `titles stay within GitHub's limit`() {
+        val long = FailureClassification(FailureKind.INFRASTRUCTURE, "x".repeat(BuildStatusCheckRunPublisher.TITLE_MAX * 2))
+        val m = BuildStatusCheckRunPublisher.refineForFailureCause(failed, long, infraNeutral = true)
+        assertTrue(m.title.length <= BuildStatusCheckRunPublisher.TITLE_MAX)
     }
 
     @Test

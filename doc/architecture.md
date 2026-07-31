@@ -157,6 +157,9 @@ io.github.dlachouette.teamcity.github
 │   │                                artifact links, annotations; drives the sticky PR comment
 │   ├── DraftCheckRunReporter        skip and reused-success rows (SkipReason)
 │   ├── BuildProblemAnnotations      compiler diagnostics → output.annotations, max 50
+│   ├── FailureClassifier            problem types → code / infrastructure / dependency failure
+│   ├── BuildTimeline                where the build's wall-clock went (run, wait, causes)
+│   ├── TestReport                   test counts and failing tests, as GitHub should read them
 │   ├── PrSummaryCommenter           single sticky per-PR comment, one row per check
 │   └── ReportHelpers                shared formatting used by the reporters
 └── web/

@@ -76,6 +76,7 @@ class AdminConsolePage(
         model["set_annotations"] = serverSettings.checkRunAnnotationsEnabled()
         model["set_testStats"] = serverSettings.checkRunTestStatsEnabled()
         model["set_timings"] = serverSettings.checkRunTimingsEnabled()
+        model["set_infraNeutral"] = serverSettings.infraFailureNeutralEnabled()
         model["set_queueCleanup"] = serverSettings.queueCleanupEnabled()
         model["set_prTag"] = serverSettings.prTagEnabled()
         model["set_prTagPrefix"] = serverSettings.prTagPrefix()

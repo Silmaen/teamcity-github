@@ -8,6 +8,30 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **An infrastructure failure is told apart from a broken build**
+  (`checkRun.infraNeutral`, default on). Everything that was not green used to
+  become `failure`, so a lost checkout, an unresolvable artifact dependency or a
+  runner that could not start turned a pull request red exactly like a failing
+  test — the reviewer could not tell "your code is broken" from "our CI broke",
+  which is the difference between fixing a commit and re-running a build. The
+  build's problems are now classified from their type (TeamCity's own
+  internal-error set), and an infrastructural failure:
+
+  - says so in the title — *"Infrastructure failure: Unable to collect changes"*;
+  - opens its summary with a line stating the commit was **not** verified and
+    that the build should be re-run;
+  - concludes `neutral` instead of `failure`, which GitHub counts as satisfied
+    for a required check, so a CI hiccup no longer blocks the merge. Turn the
+    flag off to keep it red; the title names the cause either way.
+
+  Two deliberate exceptions: one problem the build itself produced (a failing
+  test, a compile error, a non-zero exit code) makes the whole failure the
+  **code's**, however many infrastructure problems came with it; and a failed
+  **snapshot dependency** is named — *"Build failed: Snapshot dependency
+  failure"* — but stays red, because that dependency may well have failed on this
+  pull request's own code. Builds that never started for a failed dependency get
+  the same treatment, so their row says why instead of just "Build failed".
+
 - **Test outcome in the Check Run** (`checkRun.testStats`, default on): the
   counts in the title GitHub shows in the merge box — *"Build failed — 3 of 1046
   tests failed (2 new)"* — and the failing tests in the body, new failures first,
@@ -65,9 +89,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   unchanged — the Spring XML depends on every fully-qualified name.
 - Dead code removed: four declarations with no caller; a sweep of 1169 found
   nothing else.
-- `doc/roadmap.md` holds only future work now, with the next four ideas written
-  down (infrastructure failure vs broken build, cancelling superseded builds,
-  flaky tests, coverage trend).
+- `doc/roadmap.md` holds only future work now, with the next ideas written down
+  (cancelling superseded builds, flaky tests, coverage trend, retrying an
+  infrastructure failure).
 - **Linking a TeamCity page to the pull request is dropped.** A tag *is* a
   filter and the React pages win the click; `PlaceId.BUILD_SUMMARY` /
   `BUILD_ACTIONS` render on the classic build page only. The reasoning is kept

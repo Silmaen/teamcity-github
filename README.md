@@ -113,6 +113,11 @@ Concretely:
   box, the failing tests in the body, new failures first, muted ones apart.
 - **Personal builds report nothing**, and stay out of the queue dedup, while
   still getting their PR parameters and tags.
+- **An infrastructure failure is told apart from a broken build** - a lost
+  checkout, an unresolvable artifact dependency or a runner that could not start
+  is named in the Check Run title ("Infrastructure failure: Unable to collect
+  changes") and concludes `neutral`, so a CI hiccup no longer blocks the merge
+  like a failing test. A failed snapshot dependency is named too, and stays red.
 
 ### Newest first (1.9.0)
 

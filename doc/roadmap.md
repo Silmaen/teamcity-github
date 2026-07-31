@@ -10,33 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Tell an infrastructure failure from a broken build
-
-**Problem.** Everything that is not green becomes `failure`, so a lost
-agent, a checkout that could not reach the VCS or an unreadable artifact
-dependency turns a pull request red exactly like a failing test. The
-reviewer cannot tell "your code is broken" from "our CI broke", which is
-the difference between fixing a commit and re-running a build.
-
-**Feasible, verified.** `BuildProblemData.getType()` carries the problem
-type, and `jetbrains.buildServer.messages.ErrorData` declares the
-constants (`SNAPSHOT_DEPENDENCY_ERROR_TYPE`,
-`CHECKING_FOR_CHANGES_ERROR_TYPE`, `UPDATE_SOURCES_TYPE`,
-`PREPARATION_FAILURE_TYPE`, `INACCESSIBLE_EXTERNAL_DEPENDENCY_ERROR_TYPE`,
-`BUILD_RUNNER_ERROR_TYPE`, …) plus a `TYPE_DESCRIPTIONS` map of
-human-readable labels, ready for a Check Run title.
-
-**Design.** Classify the build's failure reasons; when the failure is
-infrastructural, say so in the title ("Build failed: could not update
-sources") and conclude `neutral` instead of `failure`, so a CI hiccup
-does not block a merge. Behind a flag: whether an infra failure should
-still be red is a policy call, not a fact.
-
-Groundwork for an "automatically retry an infrastructure failure"
-feature, which becomes nearly free once the classification exists.
-
-**Effort.** Small. A pure classifier plus a branch in the outcome mapping.
-
 ## Cancel builds a new push made obsolete
 
 **Problem.** On `pull_request.synchronize` the builds already **running**
@@ -55,6 +28,33 @@ the queue.
 **Effort.** Small to medium. The listener already resolves the PR's ref
 and head; the care goes into the "what am I allowed to cancel" gate and
 into not fighting TeamCity's own obsolete-build handling.
+
+## Retry an infrastructure failure instead of reporting it
+
+**Problem.** The bridge now *names* an infrastructure failure and stops
+it blocking the merge (`checkRun.infraNeutral`), but somebody still has
+to notice the neutral row and press re-run. The verdict on the commit
+stays unknown until they do.
+
+**Feasible.** The classification exists: `FailureClassifier` already
+answers "was this CI's fault" from the build's problem types, and the
+plugin already enqueues builds (`PullRequestEventListener`,
+`check_run.rerequested`).
+
+**Design.** On a finished build classified `INFRASTRUCTURE`, re-enqueue
+the same build configuration at the same revision, once, and let the
+retry own the Check Run row. Needs a bounded, visible retry: a
+per-(buildType, sha) counter with a hard cap of one, a marker so a retry
+is never itself retried, and a line in the Check Run saying a retry was
+started. Off by default — re-enqueueing builds on the operator's agents
+is not a decision a plugin should make quietly.
+
+**Watch out for.** `DEPENDENCY` must not be retried (the dependency is
+what failed, not this build), and neither must a build a user started by
+hand — the same scope invariant `QueueCleanupPolicy` holds.
+
+**Effort.** Small to medium. The classifier and the enqueue path both
+exist; the care goes into the cap and into not fighting a retry storm.
 
 ## Report flaky tests as flaky
 

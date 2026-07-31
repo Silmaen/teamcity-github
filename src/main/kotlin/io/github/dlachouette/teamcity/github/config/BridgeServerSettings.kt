@@ -101,6 +101,16 @@ class BridgeServerSettings(
     // duration itself.
     fun checkRunTimingsEnabled(): Boolean = boolSetting(KEY_CHECK_RUN_TIMINGS, true)
 
+    // Conclude `neutral` instead of `failure` when the build broke on
+    // infrastructure (lost checkout, unresolvable artifact dependency, a
+    // runner that could not start) rather than on the code — GitHub counts a
+    // required check concluding `neutral` as satisfied, so a CI hiccup stops
+    // blocking the merge. On by default: nothing was learnt about the commit,
+    // so nothing should be held against it. Off keeps it red, for a team that
+    // wants a human to re-run the build before merging. Either way the Check
+    // Run **says** which of the two it was — that part is not a policy.
+    fun infraFailureNeutralEnabled(): Boolean = boolSetting(KEY_INFRA_NEUTRAL, true)
+
     // Master switch for everything that takes a build OUT of the queue:
     // draft suppression, the scope filters, the already-passed reuse and the
     // drain of a closed PR. Off = the bridge only ever adds builds and reports
@@ -184,6 +194,7 @@ class BridgeServerSettings(
                 "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
                 "queueCleanup=${queueCleanupEnabled()}, annotations=${checkRunAnnotationsEnabled()}, " +
                 "testStats=${checkRunTestStatsEnabled()}, timings=${checkRunTimingsEnabled()}, " +
+                "infraNeutral=${infraFailureNeutralEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
         )
     }
@@ -226,6 +237,7 @@ class BridgeServerSettings(
         const val KEY_CHECK_RUN_ANNOTATIONS: String = "checkRun.annotations"
         const val KEY_CHECK_RUN_TEST_STATS: String = "checkRun.testStats"
         const val KEY_CHECK_RUN_TIMINGS: String = "checkRun.timings"
+        const val KEY_INFRA_NEUTRAL: String = "checkRun.infraNeutral"
         const val KEY_QUEUE_CLEANUP: String = "queueCleanup.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"

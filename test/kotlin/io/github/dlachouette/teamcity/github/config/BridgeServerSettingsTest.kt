@@ -36,10 +36,13 @@ class BridgeServerSettingsTest {
         assertTrue(s.branchPrLookupEnabled())
     }
 
-    // The one switch the user asked for to be able to drop the build-page PR
-    // link without redeploying the plugin.
+    // Whether a CI hiccup should still block a merge is a policy, so it is a
+    // checkbox — on by default, because a build that never judged the commit
+    // has nothing to hold against it.
     @Test
-    fun `the build-page PR link can be switched off`(@TempDir tmp: Path) {
+    fun `an infrastructure failure is neutral by default and can be kept red`(@TempDir tmp: Path) {
+        assertTrue(settings(tmp).infraFailureNeutralEnabled())
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_INFRA_NEUTRAL to "false").infraFailureNeutralEnabled())
     }
 
     @Test

@@ -256,7 +256,12 @@ class BuildStatusCheckRunPublisher(
         // the head SHA and report it instead of leaving the row stuck.
         val revisions = build.revisions.ifEmpty { build.buildPromotion.revisions }
         val ctx = resolveContext(build.buildType, revisions) ?: return
-        val mapping = mapBuildOutcome(build.buildStatus, build.isInterrupted)
+        val failure = classifyFailure(build)
+        val mapping = refineForFailureCause(
+            mapBuildOutcome(build.buildStatus, build.isInterrupted),
+            failure,
+            serverSettings.infraFailureNeutralEnabled(),
+        )
         val tests = testOutcomeOf(build)
         val request = CheckRunRequest(
             name = checkRunName(ctx.buildType),
@@ -269,8 +274,13 @@ class BuildStatusCheckRunPublisher(
             // body. The timing therefore goes HERE to sit as close to the top as
             // the API allows — nothing can precede the title.
             outputSummary = truncateSummary(
-                joinSections(timingBlock(build), statusTextOf(build)).orEmpty()
-                    .ifBlank { mapping.title },
+                joinSections(
+                    // First: whether the commit was even judged. A reviewer
+                    // reading "failed" needs to know it was our CI, not them.
+                    infrastructureNote(failure, mapping.conclusion),
+                    timingBlock(build),
+                    statusTextOf(build),
+                ).orEmpty().ifBlank { mapping.title },
             ),
             detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
             // Then, most-asked question first: why did it fail, what did the
@@ -357,8 +367,16 @@ class BuildStatusCheckRunPublisher(
             // dependency => "Build failed", red, blocks the merge).
             // `isInterrupted` is SRunningBuild-only; on a finished SBuild
             // a non-null canceledInfo is the equivalent signal.
-            val mapping = mapBuildOutcome(associated.buildStatus, associated.canceledInfo != null)
-            val summary = associated.statusDescriptor.text.orEmpty().takeIf { it.isNotBlank() }
+            val failure = classifyFailure(associated)
+            val mapping = refineForFailureCause(
+                mapBuildOutcome(associated.buildStatus, associated.canceledInfo != null),
+                failure,
+                serverSettings.infraFailureNeutralEnabled(),
+            )
+            val summary = joinSections(
+                infrastructureNote(failure, mapping.conclusion),
+                associated.statusDescriptor.text.orEmpty().takeIf { it.isNotBlank() },
+            )
                 ?: comment.takeIf { it.isNotBlank() }
                 ?: "Build did not run to completion (a snapshot dependency likely failed)."
             val request = CheckRunRequest(
@@ -625,6 +643,26 @@ class BuildStatusCheckRunPublisher(
         null
     }
 
+    // Is this build red because of the code, or because CI broke? Read from
+    // the *types* of the build problems TeamCity already reported — the same
+    // list `failureDetails` describes in the body. A build that reported no
+    // problem, or whose problems cannot be read, classifies as CODE, i.e. the
+    // conclusion it had before this existed.
+    private fun classifyFailure(build: SBuild): FailureClassification {
+        val types = try {
+            build.failureReasons.map { it.type }
+        } catch (e: Exception) {
+            LOG.debug("Could not read failure reasons of build ${build.buildId} for classification: ${e.message}")
+            return FailureClassification(FailureKind.CODE)
+        }
+        val classification = FailureClassifier.classify(types)
+        if (classification.kind != FailureKind.CODE) {
+            LOG.debug("Build ${build.buildId} failure classified as ${classification.kind} " +
+                "(${classification.cause}) from problem types $types")
+        }
+        return classification
+    }
+
     // Line-level annotations for the failing diagnostics, so the PR's diff
     // shows them where they happened. Empty for a build that reported no
     // problem, and for problems whose file is not in the checkout.
@@ -831,6 +869,58 @@ class BuildStatusCheckRunPublisher(
                 status.isFailed -> BuildOutcomeMapping(CheckRunConclusion.FAILURE, "Build failed")
                 else -> BuildOutcomeMapping(CheckRunConclusion.NEUTRAL, "Build status: ${status.text}")
             }
+        }
+
+        // Name the cause in the title, and — for an infrastructural failure —
+        // decide whether it still blocks the merge.
+        //
+        // Only a FAILURE is refined: a build can report a problem and still be
+        // green (that is what TeamCity's SNAPSHOT_DEPENDENCY_ERROR_BUILD_PROCEEDS
+        // is for), and a cancelled build's conclusion is not up for debate.
+        //
+        // The title always states the cause, whatever `infraNeutral` says: what
+        // broke is a fact, whether it should block a merge is a policy. GitHub
+        // treats a required check concluding `neutral` as satisfied, so
+        // `infraNeutral` really does unblock the merge — which is the point,
+        // and why it is a checkbox.
+        fun refineForFailureCause(
+            mapping: BuildOutcomeMapping,
+            failure: FailureClassification,
+            infraNeutral: Boolean,
+        ): BuildOutcomeMapping {
+            if (mapping.conclusion != CheckRunConclusion.FAILURE) return mapping
+            val cause = failure.cause
+            return when (failure.kind) {
+                FailureKind.CODE -> mapping
+                FailureKind.INFRASTRUCTURE -> BuildOutcomeMapping(
+                    conclusion = if (infraNeutral) CheckRunConclusion.NEUTRAL else CheckRunConclusion.FAILURE,
+                    title = titled("Infrastructure failure", cause),
+                )
+                // Still red: the dependency may have failed on this PR's code.
+                FailureKind.DEPENDENCY -> BuildOutcomeMapping(
+                    conclusion = CheckRunConclusion.FAILURE,
+                    title = titled("Build failed", cause),
+                )
+            }
+        }
+
+        private fun titled(base: String, cause: String?): String =
+            (if (cause.isNullOrBlank()) base else "$base: $cause").take(TITLE_MAX)
+
+        // The sentence a reviewer needs above everything else when the build
+        // never really judged the commit. Null for a code failure — there the
+        // title, the tests and the failure details already say it all — and
+        // null for anything that is not a failure.
+        fun infrastructureNote(failure: FailureClassification, conclusion: CheckRunConclusion): String? {
+            if (!failure.infrastructural) return null
+            if (conclusion != CheckRunConclusion.NEUTRAL && conclusion != CheckRunConclusion.FAILURE) return null
+            val cause = failure.cause?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+            val verdict =
+                if (conclusion == CheckRunConclusion.NEUTRAL) "Reported as neutral, so it does not block the merge."
+                else "Still reported as a failure, as this server is configured to."
+            return "> **CI infrastructure failure, not a problem with the code.** The build could not " +
+                "run to completion for a reason outside the repository$cause, so this commit has not " +
+                "been verified — re-run the build. $verdict"
         }
     }
 }

@@ -357,11 +357,47 @@ What appears on the PR:
 | Cancelled in queue (user removes it) | Check Run "Cancelled before start", conclusion `cancelled`. Only fires for user-initiated removals (the draft-suppression cleaner is silent so its `Skipped` row stays). |
 | Success | Check Run "Build passed", `output.summary` = the build's `statusDescriptor.text` (e.g. "3 warnings; 0 errors") |
 | Failure | Check Run "Build failed", same summary source |
+| Failure, but CI's fault | Check Run "Infrastructure failure: `<cause>`", conclusion `neutral` — see below (v1.10.0+, `checkRun.infraNeutral`) |
+| Failure of a snapshot dependency | Check Run "Build failed: Snapshot dependency failure", conclusion `failure` — named, but still red |
 | Cancelled (finished) | Check Run "Build cancelled" (any underlying status, when `isInterrupted` is true) |
 
 Every Check Run carries a `details_url` so the "Details" link from
 the GitHub Checks tab jumps directly to the relevant TC page
 instead of the server root.
+
+### "Your code is broken" vs "our CI broke" (v1.10.0+)
+
+A build that failed because the checkout could not be applied, the
+artifact dependencies could not be resolved or the runner could not
+start says nothing about the commit — yet it used to be reported like a
+failing test. The build's problems are classified by type
+(`BuildProblemData.getType()` against TeamCity's own internal-error
+set), and an infrastructural failure is reported as such:
+
+```
+Infrastructure failure: Unable to collect changes
+
+> **CI infrastructure failure, not a problem with the code.** The build
+> could not run to completion for a reason outside the repository
+> (Unable to collect changes), so this commit has not been verified —
+> re-run the build. Reported as neutral, so it does not block the merge.
+```
+
+`neutral` is what makes the difference on the PR: GitHub counts a
+required check concluding `neutral` as satisfied, so the merge is no
+longer held up by a CI hiccup. Untick *"An infrastructure failure does
+not block the merge"* (`checkRun.infraNeutral`) to keep it red — the
+title still names the cause; only the conclusion changes.
+
+Two cases deliberately stay the code's problem:
+
+- **any** problem the build itself produced (a failing test, a compile
+  error, a non-zero exit code) makes the whole failure the code's, even
+  when an infrastructure problem came with it;
+- a failed **snapshot dependency** is named but stays `failure` — that
+  dependency may well have failed on this very PR's code. A build that
+  never started because of one now says so in its title instead of
+  reporting a bare "Build failed".
 
 > **Disable the bundled `commitStatusPublisher` on opted-in build
 > configurations.** As long as both are enabled, GitHub shows **two**
