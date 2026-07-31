@@ -59,7 +59,8 @@ teamcity-github/
     │       ├── feature/   GitHubBridgeBuildFeature, BridgeFeatureConfig + BridgeGate,
     │       │              GateContextResolver, BridgeTrigger, BridgeRefs,
     │       │              BranchSpecMatcher, BundledPublisherDetector
-    │       ├── queue/     DraftBuildQueueCleaner + QueueCleanupPolicy, DraftAwareBuildFilter
+    │       ├── queue/     DraftBuildQueueCleaner + QueueCleanupPolicy, DraftAwareBuildFilter,
+    │       │              ObsoleteBuildPolicy
     │       ├── report/    BuildStatusCheckRunPublisher, DraftCheckRunReporter, BuildTimeline,
     │       │              TestReport, FailureClassifier, BuildProblemAnnotations,
     │       │              PrSummaryCommenter, ReportHelpers

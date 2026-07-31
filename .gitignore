@@ -30,3 +30,4 @@ dependency-reduced-pom.xml
 # Logs
 *.log
 logs/
+/AGENT-HANDOFF.md

@@ -141,4 +141,14 @@ class PullRequestEventListenerTest {
         listOf(PrAction.LABELED, PrAction.UNLABELED, PrAction.EDITED)
             .forEach { assertFalse(it.reportsSkips, "action=$it") }
     }
+
+    // Only a moved head can make a running build pointless. Every other action
+    // re-evaluates a head that has not changed, so the builds running on it are
+    // still building the right commit — stopping them would be plain loss.
+    @Test
+    fun `only a new push supersedes running builds`() {
+        assertTrue(PrAction.SYNCHRONIZE.supersedesRunningBuilds)
+        PrAction.entries.filter { it != PrAction.SYNCHRONIZE }
+            .forEach { assertFalse(it.supersedesRunningBuilds, "action=$it") }
+    }
 }

@@ -41,8 +41,12 @@ class BridgeMetrics {
         const val CHECK_RUNS_POSTED = "check_runs_posted"
         const val CHECK_RUNS_FAILED = "check_runs_failed"
 
-        // Enqueue / cancellation activity.
+        // Enqueue / cancellation activity. `builds_cancelled` counts *queued*
+        // builds removed; `builds_stopped` counts *running* builds stopped
+        // because their result had nowhere left to go (a new push, a closed PR)
+        // — kept apart because that one is the agent time the bridge gave back.
         const val BUILDS_ENQUEUED = "builds_enqueued"
         const val BUILDS_CANCELLED = "builds_cancelled"
+        const val BUILDS_STOPPED = "builds_stopped"
     }
 }

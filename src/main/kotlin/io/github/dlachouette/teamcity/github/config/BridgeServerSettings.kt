@@ -111,6 +111,18 @@ class BridgeServerSettings(
     // Run **says** which of the two it was — that part is not a policy.
     fun infraFailureNeutralEnabled(): Boolean = boolSetting(KEY_INFRA_NEUTRAL, true)
 
+    // Stop a build already **running** once its result has nowhere to go: a new
+    // commit was pushed to the pull request (the verdict would be about a commit
+    // nobody will look at again, and it holds an agent while the build for the
+    // new head waits for one), or the pull request was closed or merged. On by
+    // default — that agent time is the whole point. Off leaves every started
+    // build to finish, which is what the bridge did before 1.10.0.
+    //
+    // Only about running builds: removing *queued* ones is the queue cleaner's
+    // business. Subordinate to `queueCleanup.enabled`, which promises the bridge
+    // never takes a build away — and stopping one is taking it away.
+    fun cancelObsoleteEnabled(): Boolean = boolSetting(KEY_CANCEL_OBSOLETE, true)
+
     // Master switch for everything that takes a build OUT of the queue:
     // draft suppression, the scope filters, the already-passed reuse and the
     // drain of a closed PR. Off = the bridge only ever adds builds and reports
@@ -192,7 +204,8 @@ class BridgeServerSettings(
                 "branchPrLookup=${branchPrLookupEnabled()}, " +
                 "rerunAllOnlyFailed=${rerunAllOnlyFailed()}, artifactLinks=${artifactLinksEnabled()}, " +
                 "prTag=${if (prTagEnabled()) prTagPrefix() + "<n>" else "off"}, " +
-                "queueCleanup=${queueCleanupEnabled()}, annotations=${checkRunAnnotationsEnabled()}, " +
+                "queueCleanup=${queueCleanupEnabled()}, cancelObsolete=${cancelObsoleteEnabled()}, " +
+                "annotations=${checkRunAnnotationsEnabled()}, " +
                 "testStats=${checkRunTestStatsEnabled()}, timings=${checkRunTimingsEnabled()}, " +
                 "infraNeutral=${infraFailureNeutralEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
@@ -239,6 +252,7 @@ class BridgeServerSettings(
         const val KEY_CHECK_RUN_TIMINGS: String = "checkRun.timings"
         const val KEY_INFRA_NEUTRAL: String = "checkRun.infraNeutral"
         const val KEY_QUEUE_CLEANUP: String = "queueCleanup.enabled"
+        const val KEY_CANCEL_OBSOLETE: String = "cancelObsolete.enabled"
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"
         const val DEFAULT_PR_TAG_PREFIX: String = "pr-"

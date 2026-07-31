@@ -8,6 +8,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A running build whose result has nowhere to go is stopped**
+  (`cancelObsolete.enabled`, default on), in the two cases TeamCity handles by
+  itself in neither:
+
+  - **a new commit is pushed** to the pull request — the builds already running
+    on the previous head kept an agent busy to produce a verdict about a commit
+    nobody would look at again, and left an `in_progress` Check Run on it, while
+    the build for the new head queued behind them. TeamCity drops obsolete
+    *queued* builds by itself; started ones it keeps;
+  - **the pull request is closed or merged** — the bridge already removed the
+    builds still *queued* for it, but a running one outlived the PR by however
+    long it took to finish. (The old code assumed stopping a build needed an
+    acting user; the SDK declares `stop(@Nullable User, @Nullable String)` and
+    the listener already runs as the system user.)
+
+  `buildInterrupted` publishes the cancellation, so the commit gets an honest
+  "Build cancelled" row rather than an `in_progress` one that never resolves.
+
+  Never stopped, either way: a **personal** build and one somebody **started by
+  hand** — the bridge only ever takes away a build it could have started
+  itself. On a push, two more are spared: one whose **revision TeamCity has not
+  resolved** yet, and the **last build in flight** for that branch, so an
+  out-of-order delivery cannot leave the pull request with nothing running.
+  Neither applies to a closed PR, where an empty ref is the goal.
+
+  Subordinate to the `queueCleanup.enabled` master switch, and counted
+  separately as `builds_stopped` — that one is agent time given back.
+
 - **An infrastructure failure is told apart from a broken build**
   (`checkRun.infraNeutral`, default on). Everything that was not green used to
   become `failure`, so a lost checkout, an unresolvable artifact dependency or a

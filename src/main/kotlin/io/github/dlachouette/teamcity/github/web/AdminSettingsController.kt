@@ -157,6 +157,7 @@ class AdminSettingsController(
             putBool(BridgeServerSettings.KEY_CHECK_RUN_TIMINGS, request.getParameter("timings") != null)
             putBool(BridgeServerSettings.KEY_INFRA_NEUTRAL, request.getParameter("infraNeutral") != null)
             putBool(BridgeServerSettings.KEY_QUEUE_CLEANUP, request.getParameter("queueCleanup") != null)
+            putBool(BridgeServerSettings.KEY_CANCEL_OBSOLETE, request.getParameter("cancelObsolete") != null)
             putBool(BridgeServerSettings.KEY_PR_TAG_ENABLED, request.getParameter("prTag") != null)
             put(BridgeServerSettings.KEY_PR_TAG_PREFIX, request.getParameter("prTagPrefix"))
 

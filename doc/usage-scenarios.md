@@ -166,6 +166,43 @@ comment:
 |---|---|---|---|
 | Build_LinuxX64_Clang, 10:31 | `pull/189` | teamcity-github-bridge | Retriggered by teamcity-github-bridge after `pull_request.opened` on PR #189 |
 
+### On `synchronize`, the previous head's builds are stopped (v1.10.0+)
+
+A push does more than start builds: it makes the ones already **running**
+on the previous head pointless. They would spend an agent producing a
+verdict about a commit nobody will look at again — while the build for
+the new head queues behind them — and leave an `in_progress` Check Run
+that never resolves. So, **after** the new builds are enqueued, the
+bridge stops them:
+
+```
+10:31  enqueued  Build_LinuxX64_Clang  Feature/toto  (head 9f3c1ab)
+10:31  stopped   Build_LinuxX64_Clang #412  Feature/toto
+                 was building 4e2b7d0, PR #189 head is now 9f3c1ab
+```
+
+The old commit's Check Run becomes "Build cancelled" (published by
+`buildInterrupted`); it cannot collide with the new commit's row, which
+is keyed on a different SHA. TeamCity already drops obsolete **queued**
+builds itself, so only started ones are touched.
+
+Four builds are never stopped — the bridge only takes away a build it
+could have started itself, and never leaves a PR with nothing running:
+
+| Never stopped | Why |
+|---|---|
+| A **personal** build | It verifies a patch that is not in the repository, so the push did not replace it. |
+| One somebody **started by hand** | They may well be watching it. |
+| One whose **revision is not resolved** yet | TeamCity resolves revisions in the background; we do not get to call it obsolete. |
+| The **last build in flight** for that branch | Keeps an out-of-order webhook delivery from cancelling the only build there is, and means a suppressed PR (draft, filtered branch) keeps what it had. |
+
+Untick *"Stop running builds whose result has nowhere to go"*
+(`cancelObsolete.enabled`) to let every started build finish, which is
+what the bridge did before 1.10.0. The *Queue cleanup* master switch
+covers it too: off there means the bridge never takes a build away. The
+same switch governs the closed-PR case — see
+[Scenario 18](#scenario-18-pr-is-closed-or-merged).
+
 ## Scenario 4: PR is reverted to draft
 
 **Actor**: developer converts back to draft.
@@ -176,12 +213,13 @@ action. If a new commit comes in while in draft state and the BT has
 "Skipped: draft PR"). In-flight builds are not cancelled - they
 finish on the revision they were started for.
 
-This is a deliberate design choice: the plugin never **stops a
-running build**. Stopping a running build has surprising side effects
-in TC (it counts as a red build on GitHub commit status). The plugin
-will only **remove a not-yet-started build from the queue** (e.g. the
-draft suppression in Scenario 1, or a closed PR in Scenario 18) or
-**enqueue** a new one.
+Being reverted to draft does not make a running build pointless: it is
+still building the commit the PR still points at, and its verdict is
+still worth having. Only two things make a started build pointless, and
+they are the only two cases where the bridge stops one (v1.10.0+,
+`cancelObsolete.enabled`): the head **moved** (Scenario 3) and the PR was
+**closed or merged** (Scenario 18). A build somebody started by hand, and
+a personal build, are never stopped in either case.
 
 ## Scenario 5: the GitHub App is missing a permission
 
@@ -712,22 +750,37 @@ lazily, and only when at least one target actually uses a filter.
 
 **Actor**: a developer merges the PR, or closes it without merging.
 
-**Expected outcome**: every build still **queued** for that PR's
-head is removed from the queue, so closing a PR mid-build stops
-burning agent minutes. Running builds are left to finish (stopping
-them would need an acting user and extra permissions).
+**Expected outcome**: every build that was going to report into that
+PR is taken away, so closing a PR mid-build stops burning agent
+minutes. Builds still **queued** are removed; builds already
+**running** are stopped (v1.10.0+ — before that they were left to
+finish, on the mistaken assumption that stopping one needed an acting
+user).
 
 ```mermaid
 flowchart LR
     A[PR #189 merged/closed] --> B[pull_request action=closed]
-    B --> C[PullRequestEventListener.cancelQueuedForClosedPr]
+    B --> C[PullRequestEventListener.cancelBuildsForClosedPr]
     C --> D[for each candidate BT:<br/>remove queued builds on pull/189]
+    C --> F[for each candidate BT:<br/>stop running builds on pull/189]
     D --> E[builds_cancelled counter incremented]
+    F --> G[builds_stopped counter incremented]
 ```
 
-The removal comment reads `teamcity-github-bridge: PR #189 merged`
-(or `closed`). The plugin still never cancels *running* builds - the
-no-cancel-running stance from Scenario 4 stands.
+Both comments read `teamcity-github-bridge: PR #189 merged` (or
+`closed`), so the TeamCity build page says who stopped it and why, and
+`buildInterrupted` publishes a "Build cancelled" Check Run on the head
+commit.
+
+Two builds are never touched, queued or running: a **personal** one
+(it verifies a patch that is not in the repository, so the PR closing
+does not speak for it) and one somebody **started by hand**. Unlike the
+push case, there is no "keep the last build in flight" rule here —
+leaving the ref with nothing running is exactly the desired end state.
+
+To keep running builds alive, untick *"Stop running builds whose result
+has nowhere to go"* (`cancelObsolete.enabled`); the queued removal then
+still happens. Untick *Queue cleanup* instead and neither does.
 
 ## Scenario 19: querying status and triggering a build via the external API
 
@@ -1066,7 +1119,8 @@ they never write a skip row.
 | Re-run clicked in GitHub Checks UI | `handleRerun` (`ignoreFinished=true`) | Fresh build runs even past a finished one |
 | PR touches only out-of-scope paths | `applyPathFilter` drops the BT, posts Skipped | GitHub PR shows "Skipped: paths out of scope" |
 | PR title/body/labels out of scope (`requirePhrase`/`skipPhrase`/`labelFilter`) | `BridgeGate` returns `SUPPRESS_METADATA`, posts Skipped (auto only) | GitHub PR shows "Skipped: PR metadata out of scope"; manual Run bypasses |
-| PR closed / merged | `cancelQueuedForClosedPr` removes queued builds | Queue drained; running builds finish |
+| PR closed / merged | `cancelBuildsForClosedPr` removes queued builds and stops running ones | Queue drained, running builds cancelled; nothing keeps reporting into a dead PR |
+| New commit pushed to a PR | The builds running on the previous head are stopped once their replacement is in flight | One build per branch, on the commit that matters |
 | PR from a fork | Event dropped (logged, `fork_events_ignored`) | Nothing runs — the bridge serves one repository, never its forks |
 | Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: the scope filters are bypassed and nothing removes it afterwards | The build actually runs (no "Skipped" row comes back to undo it) |
 | "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |

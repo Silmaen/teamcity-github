@@ -121,7 +121,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 | Plugin | Vendor | Version | Min API | State |
 |---|---|---|---|---|
-| TeamCity GitHub Bridge | Damien Lachouette | 1.9.3 | 222521 | enabled |
+| TeamCity GitHub Bridge | Damien Lachouette | 1.9.4 | 222521 | enabled |
 
 If the plugin is greyed out or the version is missing, refer to
 [troubleshooting.md](troubleshooting.md#symptom-plugin-does-not-load).

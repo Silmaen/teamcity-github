@@ -10,25 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Cancel builds a new push made obsolete
-
-**Problem.** On `pull_request.synchronize` the builds already **running**
-on the previous head keep an agent busy to produce a verdict about a
-commit nobody will look at again, and leave an `in_progress` Check Run on
-it. TeamCity drops obsolete *queued* builds by itself; started ones it
-keeps.
-
-**Design.** On `synchronize`, find the running builds of that PR's ref
-whose revision is not the new head and cancel them with a comment;
-`buildInterrupted` already publishes the cancellation. Only builds the
-bridge could have started: never a personal build, never one somebody
-started by hand — the same scope invariant `QueueCleanupPolicy` holds for
-the queue.
-
-**Effort.** Small to medium. The listener already resolves the PR's ref
-and head; the care goes into the "what am I allowed to cancel" gate and
-into not fighting TeamCity's own obsolete-build handling.
-
 ## Retry an infrastructure failure instead of reporting it
 
 **Problem.** The bridge now *names* an infrastructure failure and stops

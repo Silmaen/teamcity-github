@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.9.3-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.9.4-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -113,6 +113,11 @@ Concretely:
   box, the failing tests in the body, new failures first, muted ones apart.
 - **Personal builds report nothing**, and stay out of the queue dedup, while
   still getting their PR parameters and tags.
+- **A running build whose result has nowhere to go is stopped** - a new push
+  cancels the builds still running on the PR's previous head, and closing or
+  merging a PR cancels the ones still running for it. An agent stops producing a
+  verdict nobody will read. Never a personal build, never one started by hand,
+  and on a push never the last one in flight for that branch.
 - **An infrastructure failure is told apart from a broken build** - a lost
   checkout, an unresolvable artifact dependency or a runner that could not start
   is named in the Check Run title ("Infrastructure failure: Unable to collect
@@ -328,7 +333,7 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.9.3**, in development towards 1.10.0.
+**Stable**. Current version is **1.9.4**, in development towards 1.10.0.
 339 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)

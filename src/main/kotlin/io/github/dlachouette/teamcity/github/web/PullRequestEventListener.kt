@@ -17,6 +17,8 @@ import io.github.dlachouette.teamcity.github.feature.GateDecision
 import io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature
 import io.github.dlachouette.teamcity.github.feature.PrBuildRef
 import io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher
+import io.github.dlachouette.teamcity.github.queue.ObsoleteBuildPolicy
+import io.github.dlachouette.teamcity.github.queue.RunningBuildFacts
 import io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter
 import io.github.dlachouette.teamcity.github.report.SkipReason
 import io.github.dlachouette.teamcity.github.report.checkRunName
@@ -26,6 +28,7 @@ import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.SBuildType
 import jetbrains.buildServer.serverSide.SQueuedBuild
+import jetbrains.buildServer.serverSide.SRunningBuild
 import jetbrains.buildServer.serverSide.SecurityContextEx
 
 // Reacts to `pull_request` actions that should refresh builds on
@@ -273,11 +276,11 @@ class PullRequestEventListener(
         // PR link yet (G12b) — give them one now.
         retroAssociate(payload)
 
-        // A closed/merged PR has nothing to retrigger: cancel any builds
-        // still queued for its head, then stop. Running builds are left to
-        // finish (stopping them needs an acting user / extra permissions).
+        // A closed/merged PR has nothing to retrigger: take away the builds
+        // that were going to report into it — queued and running alike — then
+        // stop.
         if (payload.action == PrAction.CLOSED) {
-            cancelQueuedForClosedPr(payload)
+            cancelBuildsForClosedPr(payload)
             return
         }
 
@@ -330,9 +333,20 @@ class PullRequestEventListener(
                     "but gate/path-filter excluded all of them from enqueue " +
                     "(branch-skipped=${branchSkips.size}, draft-skipped=${draftSkips.size})"
             )
-            return
+        } else {
+            enqueueForTargets(finalTargets, payload)
         }
 
+        // A new push makes the builds still running on the previous head
+        // pointless. Done last, so the replacement this event just enqueued is
+        // already in flight when the rule asks whether there is one.
+        cancelSupersededBuilds(payload, candidates)
+    }
+
+    private fun enqueueForTargets(
+        finalTargets: List<Pair<BuildTypeEx, BridgeFeatureConfig>>,
+        payload: PrEventPayload,
+    ) {
         LOG.info(
             "Retriggering ${finalTargets.size} build type(s) for ${payload.repo.slug}#${payload.prNumber} " +
                 "on pull_request.${payload.action.value}"
@@ -439,17 +453,31 @@ class PullRequestEventListener(
         }
     }
 
-    // Remove every build still queued for the closed/merged PR's head
-    // across all candidate BTs, so closing a PR mid-build stops burning
-    // agent minutes. Honours dry-run.
-    private fun cancelQueuedForClosedPr(payload: PrEventPayload) {
-        if (!serverSettings.queueCleanupEnabled()) {
+    // Take away every build that was going to report into the closed/merged
+    // PR, across all candidate BTs, so closing a PR mid-build stops burning
+    // agent minutes.
+    //
+    // Queued builds are removed; **running** ones are stopped, which the bridge
+    // did not do before 1.10.0 — the old code assumed stopping needed an acting
+    // user, but the SDK declares `SRunningBuild.stop(@Nullable User, @Nullable
+    // String)` and the listener already runs as the system user. A running build
+    // outlives the PR by however long it takes to finish, producing a verdict
+    // with nowhere left to go. `buildInterrupted` publishes the cancellation, so
+    // the head commit ends on an honest "Build cancelled".
+    //
+    // Honours dry-run. The stop decision is `ObsoleteBuildPolicy`, shared with
+    // the superseded-by-a-push path and holding the same scope invariant.
+    private fun cancelBuildsForClosedPr(payload: PrEventPayload) {
+        val cleanupEnabled = serverSettings.queueCleanupEnabled()
+        if (!cleanupEnabled) {
             LOG.info("Queue cleanup is disabled server-wide; leaving builds queued for ${payload.repo.slug}#${payload.prNumber}")
             return
         }
+        val stopRunning = serverSettings.cancelObsoleteEnabled()
         val verb = if (payload.merged) "merged" else "closed"
         val candidates = findCandidateBuildTypes(payload.repo)
         var removed = 0
+        var stopped = 0
         candidates.forEach { (bt, config) ->
             val branchName = prBuildRefFor(config, payload.prNumber, payload.headRef)
             bt.getQueuedBuilds(null)
@@ -469,9 +497,147 @@ class PullRequestEventListener(
                         LOG.warn("Failed removing queued ${bt.externalId} for PR #${payload.prNumber}: ${e.message}")
                     }
                 }
+            runningBuildsOf(bt).forEach eachRunning@{ build ->
+                if (!ObsoleteBuildPolicy.stopsForClosedPr(
+                        build = factsOf(build),
+                        prRef = branchName,
+                        cleanupEnabled = cleanupEnabled,
+                        featureEnabled = stopRunning,
+                    )
+                ) return@eachRunning
+                if (stopBuild(build, bt, branchName, "PR #${payload.prNumber} $verb")) stopped++
+            }
         }
-        LOG.info("PR #${payload.prNumber} $verb: removed $removed queued build(s) for ${payload.repo.slug}")
+        LOG.info(
+            "PR #${payload.prNumber} $verb: removed $removed queued and stopped $stopped running " +
+                "build(s) for ${payload.repo.slug}"
+        )
     }
+
+    // Stop the builds a new push made pointless: they are running on the
+    // previous head, so their verdict is about a commit nobody will look at
+    // again, and they hold an agent while the build for the new head waits for
+    // one. TeamCity drops obsolete *queued* builds by itself; started ones it
+    // keeps, so those are what this handles.
+    //
+    // `buildInterrupted` publishes the cancellation, which means the old head
+    // keeps an honest "Build cancelled" row instead of an `in_progress` one
+    // that never resolves. The rows do not collide: a Check Run is keyed on
+    // (name, commit) and this one is the OLD commit's.
+    //
+    // The decision itself is `ObsoleteBuildPolicy` — pure, and holding the same
+    // scope invariant as the queue cleaner: never a personal build, never one
+    // somebody started by hand, and never the last build in flight for the ref.
+    private fun cancelSupersededBuilds(
+        payload: PrEventPayload,
+        candidates: List<Pair<BuildTypeEx, BridgeFeatureConfig>>,
+    ) {
+        if (!payload.action.supersedesRunningBuilds) return
+        val cleanupEnabled = serverSettings.queueCleanupEnabled()
+        val featureEnabled = serverSettings.cancelObsoleteEnabled()
+        if (!cleanupEnabled || !featureEnabled) {
+            LOG.debug(
+                "Not stopping superseded builds for ${payload.repo.slug}#${payload.prNumber} " +
+                    "(queueCleanup=$cleanupEnabled, cancelObsolete=$featureEnabled)"
+            )
+            return
+        }
+        var stopped = 0
+        candidates.forEach { (bt, config) ->
+            val ref = prBuildRefFor(config, payload.prNumber, payload.headRef)
+            val running = runningBuildsOf(bt)
+            if (running.isEmpty()) return@forEach
+            val replacementInFlight = hasReplacementInFlight(bt, ref, payload.headSha, running)
+            running.forEach eachRunning@{ build ->
+                if (!ObsoleteBuildPolicy.stopsSuperseded(
+                        build = factsOf(build),
+                        prRef = ref,
+                        newHeadSha = payload.headSha,
+                        replacementInFlight = replacementInFlight,
+                        cleanupEnabled = cleanupEnabled,
+                        featureEnabled = featureEnabled,
+                    )
+                ) return@eachRunning
+                val reason = "superseded on PR #${payload.prNumber} " +
+                    "(was building ${build.revisions.firstOrNull()?.revision?.take(7)}, " +
+                    "head is now ${payload.headSha.take(7)})"
+                if (stopBuild(build, bt, ref, reason)) stopped++
+            }
+        }
+        if (stopped > 0) {
+            LOG.info("PR #${payload.prNumber} updated: stopped $stopped superseded build(s) for ${payload.repo.slug}")
+        }
+    }
+
+    // Stop one running build, or say why not. Returns true when it was actually
+    // stopped, so the callers can count. `reason` is used both as the
+    // cancellation comment TeamCity shows on the build and in the log.
+    private fun stopBuild(
+        build: SRunningBuild,
+        bt: BuildTypeEx,
+        ref: String,
+        reason: String,
+    ): Boolean {
+        if (serverSettings.dryRun()) {
+            LOG.info("[dry-run] would stop ${bt.externalId} build #${build.buildNumber} on $ref: $reason")
+            return false
+        }
+        return try {
+            // A null user is what the SDK expects from a system-side
+            // cancellation (`stop` takes a @Nullable User); we run as the
+            // system user here, as the whole listener does.
+            build.stop(null, "teamcity-github-bridge: $reason")
+            metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.BUILDS_STOPPED)
+            LOG.info("Stopped ${bt.externalId} build #${build.buildNumber} on $ref: $reason")
+            true
+        } catch (e: Exception) {
+            LOG.warn("Failed stopping ${bt.externalId} build #${build.buildNumber} on $ref: ${e.message}")
+            false
+        }
+    }
+
+    private fun runningBuildsOf(bt: BuildTypeEx): List<SRunningBuild> = try {
+        bt.runningBuilds
+    } catch (e: Exception) {
+        LOG.warn("Could not list the running builds of ${bt.externalId}: ${e.message}")
+        emptyList()
+    }
+
+    // Is something already going to judge the new head for this build
+    // configuration? A build queued on the ref counts even though its revision
+    // is usually not resolved yet — TeamCity resolves revisions in the
+    // background, and a build queued on a ref builds that ref's tip — and so
+    // does a running build that already covers the new head.
+    private fun hasReplacementInFlight(
+        bt: BuildTypeEx,
+        ref: String,
+        headSha: String,
+        running: List<SRunningBuild>,
+    ): Boolean = try {
+        bt.getQueuedBuilds(null).any { !it.buildPromotion.isPersonal && it.buildPromotion.branch?.name == ref } ||
+            running.any { coversCommit(it, ref, headSha) }
+    } catch (e: Exception) {
+        LOG.warn("Could not tell whether ${bt.externalId} has a replacement build in flight: ${e.message}")
+        false
+    }
+
+    // Reading a running build for the superseded rule. Anything unreadable
+    // errs towards "do not touch it": an unknown trigger is treated as a
+    // person's.
+    private fun factsOf(build: SRunningBuild): RunningBuildFacts = RunningBuildFacts(
+        personal = build.buildPromotion.isPersonal,
+        triggeredByUser = try {
+            build.triggeredBy.isTriggeredByUser
+        } catch (e: Exception) {
+            true
+        },
+        branchName = build.branch?.name,
+        revisions = try {
+            build.revisions.map { it.revision }
+        } catch (e: Exception) {
+            emptyList()
+        },
+    )
 
     private fun postSkippedCheckRuns(
         bucket: List<Pair<BuildTypeEx, BridgeFeatureConfig>>,
@@ -698,11 +864,20 @@ class PullRequestEventListener(
 // "Skipped" row there would overwrite the real result an earlier build already
 // published for that commit. Turning a green row into "Skipped" because
 // someone removed a label is not a reasonable thing to do.
-enum class PrAction(val value: String, val reportsSkips: Boolean = true) {
+//
+// `supersedesRunningBuilds` says whether the action means "the head moved", the
+// only thing that can make a running build pointless. True for `synchronize`
+// alone: every other action re-evaluates a head that has not changed, so the
+// builds running on it are still building the right commit.
+enum class PrAction(
+    val value: String,
+    val reportsSkips: Boolean = true,
+    val supersedesRunningBuilds: Boolean = false,
+) {
     OPENED("opened"),
     REOPENED("reopened"),
     READY_FOR_REVIEW("ready_for_review"),
-    SYNCHRONIZE("synchronize"),
+    SYNCHRONIZE("synchronize", supersedesRunningBuilds = true),
     // Re-evaluations of the same commit: enqueue what became eligible, and
     // say nothing about what did not.
     LABELED("labeled", reportsSkips = false),

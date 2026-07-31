@@ -151,7 +151,8 @@ io.github.dlachouette.teamcity.github
 ├── queue/
 │   ├── DraftBuildQueueCleaner       removes out-of-scope automatic builds, reuses a passed commit;
 │   │                                QueueCleanupPolicy is the pure removal rule
-│   └── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
+│   ├── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
+│   └── ObsoleteBuildPolicy          pure rule: may the bridge stop this running build?
 ├── report/
 │   ├── BuildStatusCheckRunPublisher Check Run lifecycle (queued/started/interrupted/finished/removed),
 │   │                                artifact links, annotations; drives the sticky PR comment
@@ -254,9 +255,9 @@ then dispatches by `X-GitHub-Event` to `PullRequestEventListener`:
 
 | Event | Action(s) | Handler | Effect |
 |---|---|---|---|
-| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. |
+| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. On `synchronize`, then stop the builds still running on the previous head (`ObsoleteBuildPolicy`). |
 | `pull_request` | `labeled`, `unlabeled`, `edited` | `handle` | Re-evaluate the same commit and enqueue what became eligible. Never posts a `Skipped` row: the commit has not changed, so it would overwrite a result already published for it (`PrAction.reportsSkips`). |
-| `pull_request` | `closed` (incl. merged) | `handle` -> `cancelQueuedForClosedPr` | Remove builds still queued for the PR head. |
+| `pull_request` | `closed` (incl. merged) | `handle` -> `cancelBuildsForClosedPr` | Remove the builds still queued for the PR head, and stop the ones still running (`ObsoleteBuildPolicy`). |
 | `pull_request_review` | `submitted` / `state=approved` | `handleReviewApproved` | Enqueue run-on-approval BuildTypes. |
 | `pull_request_review_comment` | `created` | `handleCommentCommand` | Default comment-trigger event (inline PR diff comment): enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
 | `issue_comment` | `created` | `handleCommentCommand` | Same, for PR *conversation* comments. **Opt-in**: only delivered when the App has the **Issues** permission, which the plugin does not request by default. |

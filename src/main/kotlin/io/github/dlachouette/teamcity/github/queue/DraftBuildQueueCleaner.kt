@@ -179,9 +179,11 @@ class DraftBuildQueueCleaner(
 //     val config = BridgeFeatureReader.read(buildType) ?: return
 //
 // so a build configuration that has not opted in is untouchable, whatever the
-// branch, the trigger or the settings. There are exactly three such sites:
-// this cleaner, `DraftAwareBuildFilter` (which holds rather than removes) and
-// `PullRequestEventListener.cancelQueuedForClosedPr`.
+// branch, the trigger or the settings. There are exactly four such sites: this
+// cleaner, `DraftAwareBuildFilter` (which holds rather than removes), and in
+// `PullRequestEventListener` both `cancelBuildsForClosedPr` and
+// `cancelSupersededBuilds` (which stop running builds — see
+// `ObsoleteBuildPolicy`).
 //
 // Publication (`publishChecks`) is deliberately NOT part of this: silencing a
 // build configuration on GitHub does not change which of its automatic builds

@@ -324,6 +324,8 @@ counter is rendered as `bridge_<name>_total`:
 bridge_builds_cancelled_total 3
 # TYPE bridge_builds_enqueued_total counter
 bridge_builds_enqueued_total 42
+# TYPE bridge_builds_stopped_total counter
+bridge_builds_stopped_total 5
 # TYPE bridge_check_runs_failed_total counter
 bridge_check_runs_failed_total 0
 # TYPE bridge_check_runs_posted_total counter
@@ -347,7 +349,8 @@ bridge_webhooks_too_large_total 0
 | `check_runs_posted` | A GitHub Check Run is published successfully. |
 | `check_runs_failed` | Publishing a Check Run fails. |
 | `builds_enqueued` | A build is added to the queue. |
-| `builds_cancelled` | A queued/running build is cancelled. |
+| `builds_cancelled` | A **queued** build is removed (a closed/merged PR, the gate). |
+| `builds_stopped` | A **running** build is stopped because its result had nowhere left to go — a new push, or a closed/merged PR (v1.10.0+, `cancelObsolete.enabled`). Kept apart from `builds_cancelled` because this one is agent time the bridge gave back. |
 
 A counter only appears once it has been incremented at least once.
 

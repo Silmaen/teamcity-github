@@ -46,6 +46,12 @@ class BridgeServerSettingsTest {
     }
 
     @Test
+    fun `stopping superseded builds is on by default and can be switched off`(@TempDir tmp: Path) {
+        assertTrue(settings(tmp).cancelObsoleteEnabled())
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_CANCEL_OBSOLETE to "false").cancelObsoleteEnabled())
+    }
+
+    @Test
     fun `boolean flags honour stored values`(@TempDir tmp: Path) {
         val s = settings(tmp, BridgeServerSettings.KEY_DRY_RUN to "true", BridgeServerSettings.KEY_REPLAY_ENABLED to "false")
         assertTrue(s.dryRun())
