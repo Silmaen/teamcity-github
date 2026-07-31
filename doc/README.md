@@ -22,7 +22,8 @@ GitHub App → configure a project → see a Check Run.
 | Diagnose a problem | [troubleshooting.md](troubleshooting.md) |
 | Understand the internals | [architecture.md](architecture.md) |
 | Build or contribute to the plugin | [development.md](development.md) |
-| See what's shipped and planned | [roadmap.md](roadmap.md) |
+| See what is planned next | [roadmap.md](roadmap.md) |
+| Report a vulnerability | [../SECURITY.md](../SECURITY.md) |
 
 ## The 30-second model
 

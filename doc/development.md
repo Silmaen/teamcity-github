@@ -49,31 +49,36 @@ teamcity-github/
     │   │       └── project/bridgeBuilds.jsp           the "Branches & PRs" tab
     │   └── kotlin/io/github/dlachouette/teamcity/github/
     │       ├── TeamCityGitHubBridgePlugin.kt
-    │       ├── api/         GitHubClient, TokenResolver, AppTokenMinter, AppJwt, AppManager,
-    │       │                AppTokenCache, RsaKeyParser, PrInfo, RepoCoords, Check Run DTOs
-    │       ├── cache/       PrInfoCache
-    │       ├── config/      WebhookConfig, PluginSettingsStorage, BridgeServerSettings,
-    │       │                PluginLogConfigurator, LogPathResolver
-    │       ├── enrich/      PrBuildEnricher, PrPromotionTagger
-    │       ├── feature/     GitHubBridgeBuildFeature, BridgeFeatureConfig + BridgeGate,
-    │       │                GateContextResolver, BridgeTrigger, BridgeRefs,
-    │       │                BranchSpecMatcher, BundledPublisherDetector
-    │       ├── filter/      DraftAwareBuildFilter
-    │       ├── parameters/  PrParameterProvider
-    │       ├── queue/       DraftBuildQueueCleaner + QueueCleanupPolicy, PublisherConflictReporter
-    │       ├── report/      BuildStatusCheckRunPublisher, DraftCheckRunReporter,
-    │       │                BuildProblemAnnotations, PrSummaryCommenter, ReportHelpers
-    │       ├── retrigger/   PullRequestEventListener
-    │       ├── selftest/    PluginSelfTester
-    │       └── web/         controllers, pages and tabs (~20 files): webhook, info, health,
-    │                        metrics, external API, admin console, project settings,
-    │                        Branches & PRs tab, plus SignatureVerifier, WebhookPayloadParser,
-    │                        DeliveryReplayGuard, RecentEventsLog, BridgeMetrics, RequestUrlBuilder
-    └── test/kotlin/io/github/dlachouette/teamcity/github/
-        ├── api/  cache/  config/  enrich/  feature/  parameters/
-        ├── queue/  report/  retrigger/  web/
-        └── testsupport/  LoggerBootstrap.kt
+    │       ├── api/       GitHubClient, TokenResolver, AppTokenMinter, AppJwt, AppManager,
+    │       │              AppTokenCache, RsaKeyParser, PrInfo, RepoCoords, PrInfoCache,
+    │       │              Check Run DTOs
+    │       ├── config/    WebhookConfig, PluginSettingsStorage, BridgeServerSettings,
+    │       │              PluginLogConfigurator, LogPathResolver, and the two configuration
+    │       │              diagnostics: PluginSelfTester, PublisherConflictReporter
+    │       ├── enrich/    PrBuildEnricher, PrPromotionTagger, PrParameterProvider
+    │       ├── feature/   GitHubBridgeBuildFeature, BridgeFeatureConfig + BridgeGate,
+    │       │              GateContextResolver, BridgeTrigger, BridgeRefs,
+    │       │              BranchSpecMatcher, BundledPublisherDetector
+    │       ├── queue/     DraftBuildQueueCleaner + QueueCleanupPolicy, DraftAwareBuildFilter
+    │       ├── report/    BuildStatusCheckRunPublisher, DraftCheckRunReporter, BuildTimeline,
+    │       │              TestReport, BuildProblemAnnotations, PrSummaryCommenter, ReportHelpers
+    │       └── web/       the inbound and UI layer (~21 files): PullRequestEventListener,
+    │                      webhook, info, health, metrics, external API, admin console,
+    │                      project settings, Branches & PRs tab, SignatureVerifier,
+    │                      WebhookPayloadParser, DeliveryReplayGuard, RecentEventsLog,
+    │                      BridgeMetrics, RequestUrlBuilder
+    └── (tests live in test/ at the top level, mirroring these packages — see below)
 ```
+
+Tests are **not** under `src/`: they are not part of what ships, so they sit
+in a top-level `test/kotlin/io/github/dlachouette/teamcity/github/`
+(`<testSourceDirectory>` in the POM) mirroring the packages above, plus
+`testsupport/LoggerBootstrap.kt`.
+
+Seven packages, deliberately: a package earns its folder by holding a
+boundary, not a file. `cache`, `filter`, `parameters`, `selftest` and
+`retrigger` each held exactly one class and were folded into the package
+that already owned their subject.
 
 For the per-class breakdown and the Spring DI wiring, see
 [architecture.md](architecture.md) - it is the current source of truth
@@ -134,7 +139,7 @@ Expected entries: `teamcity-plugin.xml` at the root and
 ./dev test
 ```
 
-Surefire 3.x picks up JUnit 5 automatically. 180+ unit tests
+Surefire 3.x picks up JUnit 5 automatically. The unit tests
 covering the pure logic; a representative sample:
 
 | Class | What it tests |

@@ -828,7 +828,7 @@ requiring the wrong one, and reviewers see two rows per build.
 the bundled feature is rejected — choosing what reports to GitHub is a
 configuration decision that belongs to the operator, refusing to publish
 would be worse than a duplicate row, and the mechanics have no public API
-anyway (roadmap Item 4 now records this decision). What the bridge owes the
+anyway (the CHANGELOG for 1.9.0 records this decision). What the bridge owes the
 operator is a warning they cannot miss; acting on it is their call.
 
 Two things follow:

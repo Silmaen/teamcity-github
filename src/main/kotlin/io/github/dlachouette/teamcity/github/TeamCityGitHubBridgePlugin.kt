@@ -2,7 +2,7 @@ package io.github.dlachouette.teamcity.github
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.GitHubClient
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.ServerExtension
@@ -23,7 +23,6 @@ class TeamCityGitHubBridgePlugin(
     }
 
     companion object {
-        const val PLUGIN_NAME: String = "teamcity-github-bridge"
         val LOG: Logger = Logger.getInstance(TeamCityGitHubBridgePlugin::class.java.name)
     }
 }

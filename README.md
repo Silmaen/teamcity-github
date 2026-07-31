@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.9.2-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.9.3-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -48,7 +48,7 @@ flowchart LR
 
     TRIG["<b>Triggers what should run</b><br/>ready_for_review, synchronize,<br/>label / edit / reopen, approval,<br/>PR comment, Re-run, Re-run all"]:::solved
     SKIP["<b>Suppresses what should not</b><br/>draft PRs, out-of-scope branches,<br/>paths and PR metadata,<br/>already-passed commits, closed PRs"]:::solved
-    PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, diff annotations,<br/>artifact links, sticky PR comment"]:::solved
+    PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, timings, test outcome,<br/>diff annotations, artifact links, sticky comment"]:::solved
     VIEW["<b>Makes it visible in TeamCity</b><br/>PR builds on their own branch,<br/>draft/ready pills, pr-N tags,<br/>Branches &amp; PRs tab"]:::solved
     OPS["<b>Runs as a service</b><br/>one App-level webhook + HMAC,<br/>self-minted tokens, admin page,<br/>/info /health /metrics, external API"]:::solved
 
@@ -78,7 +78,11 @@ Concretely:
   Run carries a `details_url` that jumps directly to the build page
   in TC. Propagates the build's `statusDescriptor.text` into
   GitHub's PR UI instead of the hard-coded
-  `"TeamCity build finished"` from the bundled publisher.
+  `"TeamCity build finished"` from the bundled publisher, and reports
+  where the build's time went and what its tests did.
+- **Personal builds publish nothing** - they verify a patch that is not
+  in the repository, so no Check Run may describe the commit. They still
+  get the PR parameters and tags.
 - **Listens for `pull_request.ready_for_review`** and enqueues every
   matching build configuration. No more "merged with stale green
   checks".
@@ -100,6 +104,15 @@ Concretely:
   key (signed JWT + `POST /app/installations/{id}/access_tokens`),
   so the plugin works on a vanilla TeamCity 2026.1 sandbox without
   any prior interaction with TC's connection cache.
+
+### In the staging build (1.10.0, not released yet)
+
+- **The Check Run says where the build's time went** - total, working time, and
+  the wait split between its dependencies and a free agent.
+- **And what the tests did** - the counts in the title GitHub shows in the merge
+  box, the failing tests in the body, new failures first, muted ones apart.
+- **Personal builds report nothing**, and stay out of the queue dedup, while
+  still getting their PR parameters and tags.
 
 ### Newest first (1.9.0)
 
@@ -310,14 +323,16 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.9.2**, in development towards 1.10.0.
+**Stable**. Current version is **1.9.3**, in development towards 1.10.0.
 339 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery
 validates webhook delivery, HMAC verification, token issuance
 (via the plugin's own self-mint path) and the GitHub REST
-round-trip - 35/35 PASS on a correctly-configured installation.
+round-trip - the whole battery passes on a correctly-configured
+installation. (Its size depends on how many projects are opted in,
+since token resolution and API auth are checked per project.)
 
 The public API surface (the `teamcity.github.bridge.*` namespace,
 the `/app/teamcity-github-bridge/*` endpoints, the
@@ -326,7 +341,8 @@ may add fields and endpoints; they will not rename or remove what
 already exists.
 
 See [CHANGELOG.md](CHANGELOG.md) for the per-version change log.
-See [doc/roadmap.md](doc/roadmap.md) for what's shipped and what's planned next.
+See [doc/roadmap.md](doc/roadmap.md) for what is planned next, and the
+[CHANGELOG](CHANGELOG.md) for what already shipped.
 
 ## License
 

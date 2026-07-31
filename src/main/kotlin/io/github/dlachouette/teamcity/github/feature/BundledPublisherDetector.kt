@@ -13,7 +13,7 @@ import jetbrains.buildServer.serverSide.SBuildType
 // The plugin **warns and stops there**: which system reports to GitHub is a
 // configuration decision that belongs to the operator, and silently disabling
 // another plugin's output would be worse than a duplicate row. See
-// doc/roadmap.md item 4.
+// the 1.9.0 CHANGELOG entry.
 object BundledPublisherDetector {
 
     // The bundled feature's type id is `commit-status-publisher`, but it lives

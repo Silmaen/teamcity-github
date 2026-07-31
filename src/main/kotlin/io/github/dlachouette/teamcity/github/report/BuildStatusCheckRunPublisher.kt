@@ -8,7 +8,7 @@ import io.github.dlachouette.teamcity.github.api.CheckRunStatus
 import io.github.dlachouette.teamcity.github.api.GitHubClient
 import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureConfig
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeGate

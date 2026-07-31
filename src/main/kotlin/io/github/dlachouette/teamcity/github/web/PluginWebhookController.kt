@@ -3,7 +3,6 @@ package io.github.dlachouette.teamcity.github.web
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
-import io.github.dlachouette.teamcity.github.retrigger.PullRequestEventListener
 import jetbrains.buildServer.controllers.AuthorizationInterceptor
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.web.openapi.WebControllerManager

@@ -14,7 +14,7 @@ import javax.servlet.http.HttpServletRequest
 //
 // Why not a server-side BuildBranchInfoProvider? TeamCity 2026.1 does
 // not expose one (verified via SDK introspection - see
-// doc/roadmap.md Gap 2 spike). Pure client-side enrichment is the
+// doc/roadmap.md, "Blocked on JetBrains"). Pure client-side enrichment is the
 // pragmatic alternative; the JS does not call the GitHub API at all,
 // it only re-styles tags TC already renders.
 //

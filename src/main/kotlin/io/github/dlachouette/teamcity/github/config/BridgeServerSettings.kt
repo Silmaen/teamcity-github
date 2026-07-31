@@ -2,7 +2,7 @@ package io.github.dlachouette.teamcity.github.config
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.GitHubClient
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import jetbrains.buildServer.serverSide.TeamCityProperties
 
 // Single typed accessor for every server-global tuning value and feature

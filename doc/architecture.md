@@ -116,6 +116,7 @@ io.github.dlachouette.teamcity.github
 ├── api/
 │   ├── GitHubClient                 open class, HTTP + Jackson: getPr, prsForCommit, listPrFiles,
 │   │                                postCheckRun, issue comments, installations, tokens
+│   ├── PrInfoCache                  TTL-based, ConcurrentHashMap over the calls above
 │   ├── PrInfo, RepoCoords           PR snapshot (draft, head sha/ref, head repo, title, body,
 │   │                                labels) and the owner/repo parser
 │   ├── TokenResolver                self-mint primary, credentials-manager fallback → ResolvedAccess
@@ -125,18 +126,19 @@ io.github.dlachouette.teamcity.github
 │   ├── RsaKeyParser                 PEM PKCS#1/PKCS#8 private-key parsing, pure + own tests
 │   └── CheckRunRequest / Status / Conclusion / Annotation / AnnotationLevel, InstallationInfo,
 │                                    CreatedToken, IssueComment, AppInfo, ManifestConversion, HttpResponse
-├── cache/
-│   └── PrInfoCache                  TTL-based, ConcurrentHashMap
 ├── config/
 │   ├── WebhookConfig                webhook secret: plugin file → internal.properties fallback
 │   ├── PluginSettingsStorage        reads/writes the plugin-owned settings file
 │   ├── BridgeServerSettings         typed accessor for every server-global setting and flag
 │   ├── PluginLogConfigurator        attaches the RollingFileAppender at startup
-│   └── LogPathResolver              state of the dedicated log file
+│   ├── LogPathResolver              state of the dedicated log file
+│   ├── PluginSelfTester             the checks behind the admin button (TestResult, Status)
+│   └── PublisherConflictReporter    one startup WARN listing double-publisher BuildTypes
 ├── enrich/
 │   ├── PrBuildEnricher              buildStarted: PR parameters, draft/ready + pr-N tags
 │   │                                (EnrichmentPlan is the pure, tested core)
-│   └── PrPromotionTagger            buildTypeAddedToQueue: tags the promotion (TagPlan)
+│   ├── PrPromotionTagger            buildTypeAddedToQueue: tags the promotion (TagPlan)
+│   └── PrParameterProvider          publishes teamcity.github.bridge.isdraft
 ├── feature/
 │   ├── GitHubBridgeBuildFeature     the per-BuildType opt-in build feature
 │   ├── BridgeFeatureConfig          BridgeFeatureConfig + BridgeFeatureReader + BridgeProjectParams,
@@ -146,14 +148,10 @@ io.github.dlachouette.teamcity.github
 │   ├── BridgeRefs                   pull/N ref building and parsing
 │   ├── BranchSpecMatcher            +:/-: branch-list matching
 │   └── BundledPublisherDetector     spots a bundled commitStatusPublisher on the same BuildType
-├── filter/
-│   └── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
-├── parameters/
-│   └── PrParameterProvider          publishes teamcity.github.bridge.isdraft
 ├── queue/
 │   ├── DraftBuildQueueCleaner       removes out-of-scope automatic builds, reuses a passed commit;
 │   │                                QueueCleanupPolicy is the pure removal rule
-│   └── PublisherConflictReporter    one startup WARN listing double-publisher BuildTypes
+│   └── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
 ├── report/
 │   ├── BuildStatusCheckRunPublisher Check Run lifecycle (queued/started/interrupted/finished/removed),
 │   │                                artifact links, annotations; drives the sticky PR comment
@@ -161,12 +159,9 @@ io.github.dlachouette.teamcity.github
 │   ├── BuildProblemAnnotations      compiler diagnostics → output.annotations, max 50
 │   ├── PrSummaryCommenter           single sticky per-PR comment, one row per check
 │   └── ReportHelpers                shared formatting used by the reporters
-├── retrigger/
-│   └── PullRequestEventListener     PR/review/comment/re-run events → addToQueue; fork guard,
-│                                    path filtering, retro-association, closed-PR cancellation
-├── selftest/
-│   └── PluginSelfTester             the 8 checks behind the admin button (TestResult, Status)
 └── web/
+    ├── PullRequestEventListener     PR/review/comment/re-run events → addToQueue; fork guard,
+    │                                path filtering, retro-association, closed-PR cancellation
     ├── PluginWebhookController      POST /webhook: HMAC, replay guard, RecentEventsLog, fan-out
     ├── WebhookPayloadParser         Jackson over pull_request, pull_request_review,
     │                                pull_request_review_comment, issue_comment, check_run, check_suite

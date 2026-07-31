@@ -32,7 +32,5 @@ class WebhookConfig(
     companion object {
         const val SECRET_PROPERTY: String = "teamcity.github.bridge.webhook.secret"
         const val SIGNATURE_HEADER: String = "X-Hub-Signature-256"
-        const val SIGNATURE_ALGORITHM: String = "HmacSHA256"
-        const val SIGNATURE_PREFIX: String = "sha256="
     }
 }

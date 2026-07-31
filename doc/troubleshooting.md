@@ -425,7 +425,7 @@ class MyTest {
 }
 ```
 
-See `src/test/kotlin/.../testsupport/LoggerBootstrap.kt`.
+See `test/kotlin/.../testsupport/LoggerBootstrap.kt`.
 
 ## Symptom: a PR BuildType never shows up and gets no Check Run
 
@@ -718,11 +718,13 @@ grep -E "not on the allowlist|\[dry-run\]" <TC_DATA_DIR>/logs/teamcity-github-br
 The plugin uses one logger category per package. Filter by:
 
 ```
-io.github.dlachouette.teamcity.github.web         -> webhook + info endpoints
-io.github.dlachouette.teamcity.github.filter      -> draft-aware filter
-io.github.dlachouette.teamcity.github.retrigger   -> retrigger listener
-io.github.dlachouette.teamcity.github.api         -> GitHub client + token resolver
-io.github.dlachouette.teamcity.github.cache       -> PR info cache
+io.github.dlachouette.teamcity.github.web      -> webhook, endpoints, PR event listener
+io.github.dlachouette.teamcity.github.api      -> GitHub client, tokens, PR info cache
+io.github.dlachouette.teamcity.github.report   -> Check Runs, timings, tests, PR comment
+io.github.dlachouette.teamcity.github.queue    -> queue cleanup and the draft-aware filter
+io.github.dlachouette.teamcity.github.feature  -> the build feature and the gate
+io.github.dlachouette.teamcity.github.enrich   -> PR parameters and tags on builds
+io.github.dlachouette.teamcity.github.config   -> settings, logging, self-tests
 ```
 
 Useful log lines:

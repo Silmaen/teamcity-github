@@ -3,7 +3,7 @@ package io.github.dlachouette.teamcity.github.enrich
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
 import io.github.dlachouette.teamcity.github.api.TokenResolver
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeRefs

@@ -1,0 +1,33 @@
+# Shared formatting rules, honoured by IntelliJ/CLion and most editors without
+# any plugin. They describe what the code already does — nothing here is a
+# migration.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{kt,kts}]
+# The codebase wraps around 100 columns rather than IntelliJ's default 120.
+max_line_length = 100
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+ij_kotlin_name_count_to_use_star_import = 2147483647
+ij_kotlin_name_count_to_use_star_import_with_subpackages = 2147483647
+
+[*.{xml,jsp}]
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+# Markdown uses two trailing spaces for a hard line break.
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

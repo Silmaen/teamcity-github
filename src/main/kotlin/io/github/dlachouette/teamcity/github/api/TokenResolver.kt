@@ -59,7 +59,7 @@ data class ResolvedAccess(
 // `GitHubApp` on 2026.1. We still need the raw descriptor to read the App ID
 // and private key for self-minting, so the deprecated manager stays, read-only,
 // until the credentials API covers GitHub App connections. Tracked in
-// doc/roadmap.md ("Open SDK questions worth revisiting").
+// doc/roadmap.md ("Blocked on JetBrains").
 @Suppress("DEPRECATION")
 class TokenResolver(
     private val oauthConnectionsManager: jetbrains.buildServer.serverSide.oauth.OAuthConnectionsManager,

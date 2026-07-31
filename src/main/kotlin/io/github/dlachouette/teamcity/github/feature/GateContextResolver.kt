@@ -3,7 +3,7 @@ package io.github.dlachouette.teamcity.github.feature
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.PrInfo
 import io.github.dlachouette.teamcity.github.api.TokenResolver
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import jetbrains.buildServer.serverSide.BuildPromotion
 import jetbrains.buildServer.serverSide.SProject
 

@@ -3,12 +3,6 @@ package io.github.dlachouette.teamcity.github.web
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.RepoCoords
-import io.github.dlachouette.teamcity.github.retrigger.CommentCommandPayload
-import io.github.dlachouette.teamcity.github.retrigger.PrAction
-import io.github.dlachouette.teamcity.github.retrigger.PrEventPayload
-import io.github.dlachouette.teamcity.github.retrigger.RerunAllPayload
-import io.github.dlachouette.teamcity.github.retrigger.RerunRequestPayload
-import io.github.dlachouette.teamcity.github.retrigger.ReviewApprovedPayload
 
 object WebhookPayloadParser {
     private val LOG = Logger.getInstance(WebhookPayloadParser::class.java.name)

@@ -1,8 +1,8 @@
 package io.github.dlachouette.teamcity.github.web
 
 import com.intellij.openapi.diagnostic.Logger
-import io.github.dlachouette.teamcity.github.selftest.PluginSelfTester
-import io.github.dlachouette.teamcity.github.selftest.TestResult
+import io.github.dlachouette.teamcity.github.config.PluginSelfTester
+import io.github.dlachouette.teamcity.github.config.TestResult
 import jetbrains.buildServer.controllers.BaseController
 import jetbrains.buildServer.serverSide.auth.Permission
 import jetbrains.buildServer.web.openapi.WebControllerManager

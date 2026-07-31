@@ -20,6 +20,11 @@ import java.util.concurrent.ConcurrentHashMap
 // Idempotent via a per-(sha, BT) dedup set, so multiple webhook
 // retries or the cleaner+listener firing for the same SHA emit at
 // most one Check Run per BT.
+//
+// The set is never invalidated, deliberately: for one commit in one build
+// configuration the Skipped row says the same thing whoever asks, so a second
+// post would only repeat it. (A per-SHA invalidation helper existed here with
+// no caller at all — removed rather than kept "just in case".)
 class DraftCheckRunReporter(
     private val tokenResolver: TokenResolver,
     private val gitHubClient: GitHubClient,
@@ -106,10 +111,6 @@ class DraftCheckRunReporter(
         if (ok) LOG.info("Republished success of #${reused.buildNumber} for ${config.repo.slug}@$headSha (${buildType.externalId})")
         else LOG.warn("Reused-success Check Run POST failed for ${config.repo.slug}@$headSha (${buildType.externalId})")
         return ok
-    }
-
-    fun invalidateDedupForSha(sha: String) {
-        published.removeIf { it.first == sha }
     }
 
     companion object {

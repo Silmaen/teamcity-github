@@ -18,20 +18,20 @@
     <bean class="io.github.dlachouette.teamcity.github.api.AppTokenMinter"/>
     <bean class="io.github.dlachouette.teamcity.github.api.TokenResolver"/>
     <bean class="io.github.dlachouette.teamcity.github.api.AppManager"/>
-    <bean class="io.github.dlachouette.teamcity.github.cache.PrInfoCache"/>
+    <bean class="io.github.dlachouette.teamcity.github.api.PrInfoCache"/>
 
     <bean class="io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature"/>
     <bean class="io.github.dlachouette.teamcity.github.feature.GateContextResolver"/>
-    <bean class="io.github.dlachouette.teamcity.github.retrigger.PullRequestEventListener"/>
-    <bean class="io.github.dlachouette.teamcity.github.filter.DraftAwareBuildFilter"/>
-    <bean class="io.github.dlachouette.teamcity.github.parameters.PrParameterProvider"/>
+    <bean class="io.github.dlachouette.teamcity.github.web.PullRequestEventListener"/>
+    <bean class="io.github.dlachouette.teamcity.github.queue.DraftAwareBuildFilter"/>
+    <bean class="io.github.dlachouette.teamcity.github.enrich.PrParameterProvider"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrBuildEnricher"/>
     <bean class="io.github.dlachouette.teamcity.github.enrich.PrPromotionTagger"/>
     <bean class="io.github.dlachouette.teamcity.github.report.DraftCheckRunReporter"/>
     <bean class="io.github.dlachouette.teamcity.github.report.PrSummaryCommenter"/>
     <bean class="io.github.dlachouette.teamcity.github.report.BuildStatusCheckRunPublisher"/>
     <bean class="io.github.dlachouette.teamcity.github.queue.DraftBuildQueueCleaner"/>
-    <bean class="io.github.dlachouette.teamcity.github.queue.PublisherConflictReporter"/>
+    <bean class="io.github.dlachouette.teamcity.github.config.PublisherConflictReporter"/>
 
     <bean class="io.github.dlachouette.teamcity.github.web.RecentEventsLog"/>
     <bean class="io.github.dlachouette.teamcity.github.web.DeliveryReplayGuard"/>
@@ -51,6 +51,6 @@
     <bean class="io.github.dlachouette.teamcity.github.web.AppManifestController"/>
     <bean class="io.github.dlachouette.teamcity.github.web.BranchEnrichmentPageExtension"/>
 
-    <bean class="io.github.dlachouette.teamcity.github.selftest.PluginSelfTester"/>
+    <bean class="io.github.dlachouette.teamcity.github.config.PluginSelfTester"/>
 
 </beans>

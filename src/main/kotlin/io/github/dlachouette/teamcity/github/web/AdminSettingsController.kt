@@ -3,7 +3,7 @@ package io.github.dlachouette.teamcity.github.web
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.api.AppManager
 import io.github.dlachouette.teamcity.github.api.GitHubClient
-import io.github.dlachouette.teamcity.github.cache.PrInfoCache
+import io.github.dlachouette.teamcity.github.api.PrInfoCache
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.config.PluginSettingsStorage
 import jetbrains.buildServer.controllers.BaseController

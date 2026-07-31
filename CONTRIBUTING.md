@@ -9,7 +9,7 @@ The whole toolchain runs in Docker; nothing is installed on the
 host other than `docker` and `git`.
 
 ```bash
-./dev test       # JUnit 5 suite (152 tests at v1.6.0)
+./dev test       # the JUnit 5 unit-test suite
 ./dev compile    # mvn compile, no tests
 ./dev package    # mvn clean package -> target/teamcity-github-bridge-x.y.z.zip
 ./dev shell      # interactive bash in the maven container
@@ -99,7 +99,7 @@ The release flow is currently manual.
 6. Tag: `git tag vX.Y.Z && git push --tags`.
 7. Create a GitHub Release from the tag, attach the zip.
 
-[doc/roadmap.md#item-7---release-pipeline](doc/roadmap.md#item-7---release-pipeline)
+[doc/roadmap.md#release-pipeline](doc/roadmap.md#release-pipeline)
 tracks the work to automate this with GitHub Actions.
 
 ## Reporting issues

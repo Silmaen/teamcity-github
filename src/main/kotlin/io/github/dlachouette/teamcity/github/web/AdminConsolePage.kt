@@ -5,7 +5,7 @@ import io.github.dlachouette.teamcity.github.api.AppVerification
 import io.github.dlachouette.teamcity.github.config.BridgeServerSettings
 import io.github.dlachouette.teamcity.github.config.LogPathResolver
 import io.github.dlachouette.teamcity.github.config.WebhookConfig
-import io.github.dlachouette.teamcity.github.selftest.TestResult
+import io.github.dlachouette.teamcity.github.config.TestResult
 import java.util.UUID
 import jetbrains.buildServer.controllers.admin.AdminPage
 import jetbrains.buildServer.serverSide.SBuildServer

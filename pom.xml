@@ -7,7 +7,7 @@
 
     <groupId>io.github.dlachouette</groupId>
     <artifactId>teamcity-github-bridge</artifactId>
-    <version>1.9.2</version>
+    <version>1.9.3</version>
     <packaging>jar</packaging>
 
     <name>TeamCity GitHub Bridge</name>
@@ -108,7 +108,10 @@
 
     <build>
         <sourceDirectory>src/main/kotlin</sourceDirectory>
-        <testSourceDirectory>src/test/kotlin</testSourceDirectory>
+        <!-- Tests live at the top level, not under src/: they are not part of
+             what ships, and keeping them out of the tree that becomes the
+             plugin makes that obvious at a glance. -->
+        <testSourceDirectory>test/kotlin</testSourceDirectory>
 
         <resources>
             <!-- The plugin descriptor takes its version from the POM, so the

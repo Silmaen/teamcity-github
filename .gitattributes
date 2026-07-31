@@ -1,0 +1,17 @@
+# Normalise line endings in the repository, whatever the contributor's OS.
+* text=auto eol=lf
+
+# `dev` is the shell entry point for every build: a CRLF here would break it.
+dev text eol=lf
+
+# Binary, so git neither diffs nor mangles them.
+*.png binary
+*.jpg binary
+*.zip binary
+*.jar binary
+*.pem binary
+
+# GitHub's language stats should reflect the plugin, not its documentation or
+# the JSP glue around it.
+doc/** linguist-documentation
+*.jsp linguist-vendored=false

@@ -31,8 +31,6 @@ class LogPathResolver(
         PluginLogConfigurator.State.FAILED -> if (expectedFile().exists()) "file present (config unknown)" else "not configured"
     }
 
-    fun snippetResourcePath(): String = SNIPPET_RESOURCE
-
     companion object {
         const val FILE_NAME: String = "teamcity-github-bridge.log"
         const val SNIPPET_RESOURCE: String = "/teamcity-github-bridge-log4j-snippet.xml"
