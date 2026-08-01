@@ -59,10 +59,9 @@ class BridgeServerSettings(
 
     // Resolve the PR of a build launched on a plain branch ref (not a
     // `pull/N` ref) from its head commit, so branch builds get the PR
-    // parameters, the draft/ready tag and the summary comment. On by
-    // default: one extra `GET /commits/{sha}/pulls` per built commit,
-    // cached (negative answers included). Turn off to keep branch builds
-    // strictly PR-unaware.
+    // parameters and the draft/ready tag. On by default: one extra
+    // `GET /commits/{sha}/pulls` per built commit, cached (negative answers
+    // included). Turn off to keep branch builds strictly PR-unaware.
     fun branchPrLookupEnabled(): Boolean = boolSetting(KEY_BRANCH_PR_LOOKUP, true)
 
     // "Re-run all checks" from GitHub (`check_suite.rerequested`): when on,
@@ -72,9 +71,9 @@ class BridgeServerSettings(
     fun rerunAllOnlyFailed(): Boolean = boolSetting(KEY_RERUN_ONLY_FAILED, false)
 
     // List the build's artefacts (with a link to them) in the completed
-    // Check Run and in the sticky PR comment. On by default: it is what makes
-    // a PR a usable hand-off to a reviewer or a tester, and it costs one local
-    // artifact listing per finished build.
+    // Check Run. On by default: it is what makes a PR a usable hand-off to a
+    // reviewer or a tester, and it costs one local artifact listing per
+    // finished build.
     fun artifactLinksEnabled(): Boolean = boolSetting(KEY_ARTIFACT_LINKS, true)
 
     // Pin compiler diagnostics to their file and line in the PR's diff, as

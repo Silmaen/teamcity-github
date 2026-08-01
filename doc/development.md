@@ -46,7 +46,8 @@ teamcity-github/
     │   │       ├── display/bridgeBranchEnrichment.jsp draft/ready pill CSS + JS
     │   │       ├── feature/bridgeFeatureEdit.jsp      build-feature form
     │   │       ├── project/bridgeProjectSettings.jsp  project-level params form
-    │   │       └── project/bridgeBuilds.jsp           the "Branches & PRs" tab
+    │   │       ├── project/bridgeBuilds.jsp           the "Branches & PRs" project tab
+    │   │       └── buildTab/bridgePrTab.jsp           the "Pull request" build tab
     │   └── kotlin/io/github/dlachouette/teamcity/github/
     │       ├── TeamCityGitHubBridgePlugin.kt
     │       ├── api/       GitHubClient, TokenResolver, AppTokenMinter, AppJwt, AppManager,
@@ -64,9 +65,10 @@ teamcity-github/
     │       ├── report/    BuildStatusCheckRunPublisher, DraftCheckRunReporter, BuildTimeline,
     │       │              TestReport, FailureClassifier, BuildProblemAnnotations,
     │       │              ReportHelpers
-    │       └── web/       the inbound and UI layer (~21 files): PullRequestEventListener,
+    │       └── web/       the inbound and UI layer (~23 files): PullRequestEventListener,
     │                      webhook, info, health, metrics, external API, admin console,
-    │                      project settings, Branches & PRs tab, SignatureVerifier,
+    │                      project settings, Branches & PRs project tab, Pull request
+    │                      build tab (BridgePrTab + PrTabModel), SignatureVerifier,
     │                      WebhookPayloadParser, DeliveryReplayGuard, RecentEventsLog,
     │                      BridgeMetrics, RequestUrlBuilder
     └── (tests live in test/ at the top level, mirroring these packages — see below)
@@ -108,6 +110,7 @@ Everything goes through `./dev`:
 ./dev test              # mvn test
 ./dev package           # mvn clean package (produces the zip)
 ./dev mvn <args>        # any mvn invocation
+./dev diagrams          # render every Mermaid block in the docs
 ./dev shell             # interactive bash in the container
 ./dev pull              # refresh the maven image
 ./dev reset-cache       # nuke .cache/m2 (force re-download)
@@ -116,6 +119,25 @@ Everything goes through `./dev`:
 The Maven local repository lives in `.cache/m2/` (project-scoped,
 git-ignored). The `HOME` directory of the container user is
 `.cache/home/`. Neither pollutes your host.
+
+### Checking the diagrams
+
+The documentation carries 44 Mermaid diagrams and GitHub renders a broken
+one as an error box, so `./dev diagrams` extracts every ` ```mermaid `
+block and renders it in the `minlag/mermaid-cli` image. A failure names
+the file and the block number; the SVGs are thrown away — rendering *is*
+the check.
+
+Two traps live in that image, both handled in `./dev` and both worth
+knowing before you debug it:
+
+- `mmdc` is **not on the PATH**, so it is invoked by full path
+  (`/home/mermaidcli/node_modules/.bin/mmdc`);
+- puppeteer looks for `chrome-headless-shell`, which the image does not
+  ship, while it *does* ship a full Chromium at `/usr/bin/chromium`.
+  Without a puppeteer config pointing at it, **every** diagram fails
+  identically with `ENOENT` — which reads like "all the diagrams are
+  broken" and means nothing of the sort.
 
 ## Build internals
 
@@ -157,8 +179,11 @@ covering the pure logic; a representative sample:
 | `PrPromotionTaggerTest` | Pure helper that computes the draft/ready tag plan on the promotion. |
 | `DraftCheckRunReporterTest` | Pure helper that decides whether to emit a Check Run + the shape of the request. |
 | `BuildStatusCheckRunPublisherTest` | TC `Status` -> GitHub Check Run conclusion mapping, summary truncation, `isOptedIn`. |
-| `PrParameterProviderTest` | Pure helper that maps branch + PR draft state to the `teamcity.github.bridge.isdraft` value. |
+| `PrParameterProviderTest` | Pure helper that maps branch + PR state to the published `teamcity.github.bridge.*` parameters, the non-PR defaults, and the legacy aliases. |
 | `PluginSettingsStorageTest` | Atomic read/write round-trips for the plugin's properties file. |
+| `ObsoleteBuildPolicyTest` | Which running builds a push or a closed PR may stop — and the ones always spared (personal, hand-started, unresolved revision, last in flight). |
+| `TestReportTest` | The test verdict in the Check Run: counts in the title, new failures first, muted apart, and how a failure text is excerpted or dropped. |
+| `PrTabModelTest` | The build page's *Pull request* tab model, built from the build's own parameters. |
 
 ### The `LoggerBootstrap` indirection
 

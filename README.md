@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.9.12-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.10.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -55,7 +55,7 @@ flowchart LR
     TRIG["<b>Triggers what should run</b><br/>ready_for_review, synchronize,<br/>label / edit / reopen, approval,<br/>PR comment, Re-run, Re-run all"]:::solved
     SKIP["<b>Suppresses what should not</b><br/>draft PRs, out-of-scope branches,<br/>paths and PR metadata,<br/>already-passed commits, closed PRs"]:::solved
     PUB["<b>Reports back to GitHub</b><br/>Check Run per lifecycle step,<br/>real status text, timings, test outcome,<br/>diff annotations, artifact links"]:::solved
-    VIEW["<b>Makes it visible in TeamCity</b><br/>PR builds on their own branch,<br/>draft/ready pills, pr-N tags,<br/>Branches &amp; PRs tab"]:::solved
+    VIEW["<b>Makes it visible in TeamCity</b><br/>PR builds on their own branch,<br/>draft/ready pills, pr-N tags,<br/>Branches &amp; PRs and Pull request tabs"]:::solved
     OPS["<b>Runs as a service</b><br/>one App-level webhook + HMAC,<br/>self-minted tokens, admin page,<br/>/info /health /metrics, external API"]:::solved
 
     BRIDGE -. "leaves it unchanged" .-> SDK
@@ -111,12 +111,19 @@ Concretely:
   so the plugin works on a vanilla TeamCity 2026.1 sandbox without
   any prior interaction with TC's connection cache.
 
-### In the staging build (1.10.0, not released yet)
+### Newest first (1.10.0)
 
 - **The Check Run says where the build's time went** - total, working time, and
   the wait split between its dependencies and a free agent.
 - **And what the tests did** - the counts in the title GitHub shows in the merge
   box, the failing tests in the body, new failures first, muted ones apart.
+- **A "Pull request" tab on the build page** - what this build is judging
+  (number, title, author, draft/ready, labels, both branches, head commit, size
+  of the change), a link to it on GitHub, and the files it changes.
+- **Eight more published parameters** - the PR's `url`, `baseSha`, `mergeBase`,
+  `changedFiles`, `additions`, `deletions`, `commits` and `labels`, so a
+  diff-scoped build step can compute the pull request's own change
+  (`mergeBase..headSha`) instead of guessing the range.
 - **Personal builds report nothing**, and stay out of the queue dedup, while
   still getting their PR parameters and tags.
 - **A running build whose result has nowhere to go is stopped** - a new push
@@ -136,7 +143,7 @@ Concretely:
   the chain, and each build configuration can switch them off, and one "no"
   anywhere wins. They are the only thing the bridge writes on a reviewer's diff.
 
-### Newest first (1.9.0)
+### Previous release (1.9.0)
 
 - **Build pull requests on their own branch** - a per-project switch makes PR
   builds run on the PR's head branch (`Feature/toto`) instead of the synthetic
@@ -302,6 +309,9 @@ The [doc/ index](doc/README.md) maps every page to a task.
   in 5 minutes via the managed-App flow.
 - [Installation](doc/installation.md) - build the zip, drop it in
   the data dir, verify the load.
+- [Upgrading](doc/upgrading.md) - what each release changes for the
+  operator: GitHub permissions to revoke, defaults that change what
+  reviewers see, and how to roll back.
 - [GitHub App setup](doc/github-app-setup.md) - create the App,
   grant the right permissions, install on repos, wire up the
   TeamCity connection.
@@ -347,8 +357,8 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.9.12**, in development towards 1.10.0.
-433 unit tests pass.
+**Stable**. Current version is **1.10.0**.
+434 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery

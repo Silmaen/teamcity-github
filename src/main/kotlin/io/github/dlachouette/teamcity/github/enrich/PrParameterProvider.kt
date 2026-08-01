@@ -105,16 +105,27 @@ class PrParameterProvider(
         // emitted only when the operator opts in (legacyAliases.enabled).
         // Lets teams migrate off the bundled feature without rewriting DSL
         // that still reads `teamcity.pullRequest.*`.
+        //
+        // The two branch names are emitted **twice**, because the bundled
+        // feature spells them with dots — `teamcity.pullRequest.source.branch`
+        // — and this plugin's own namespace spells them camelCase. Only the
+        // dotted spelling makes existing DSL work unchanged, which is the whole
+        // point of the flag; the camelCase pair shipped first (1.7.0) and is
+        // kept so a team that already reads it does not break on an upgrade.
         const val ALIAS_PR_NUMBER: String = "teamcity.pullRequest.number"
         const val ALIAS_PR_TITLE: String = "teamcity.pullRequest.title"
         const val ALIAS_PR_SOURCE_BRANCH: String = "teamcity.pullRequest.sourceBranch"
         const val ALIAS_PR_TARGET_BRANCH: String = "teamcity.pullRequest.targetBranch"
+        const val ALIAS_PR_SOURCE_BRANCH_DOTTED: String = "teamcity.pullRequest.source.branch"
+        const val ALIAS_PR_TARGET_BRANCH_DOTTED: String = "teamcity.pullRequest.target.branch"
 
         val LEGACY_ALIAS_KEYS: List<String> = listOf(
             ALIAS_PR_NUMBER,
             ALIAS_PR_TITLE,
             ALIAS_PR_SOURCE_BRANCH,
             ALIAS_PR_TARGET_BRANCH,
+            ALIAS_PR_SOURCE_BRANCH_DOTTED,
+            ALIAS_PR_TARGET_BRANCH_DOTTED,
         )
 
         val ALL_KEYS: List<String> = listOf(
@@ -228,6 +239,8 @@ class PrParameterProvider(
                 params[ALIAS_PR_TITLE] = pr?.title ?: ""
                 params[ALIAS_PR_SOURCE_BRANCH] = pr?.headRef ?: ""
                 params[ALIAS_PR_TARGET_BRANCH] = pr?.baseRef ?: ""
+                params[ALIAS_PR_SOURCE_BRANCH_DOTTED] = pr?.headRef ?: ""
+                params[ALIAS_PR_TARGET_BRANCH_DOTTED] = pr?.baseRef ?: ""
             }
             return params
         }

@@ -70,6 +70,8 @@ class AdminConsolePage(
         model["set_metricsEnabled"] = serverSettings.metricsEnabled()
         model["set_legacyAliases"] = serverSettings.legacyAliasesEnabled()
         model["set_branchPrLookup"] = serverSettings.branchPrLookupEnabled()
+        model["set_mergeBase"] = serverSettings.mergeBaseEnabled()
+        model["set_prTabChangedFiles"] = serverSettings.prTabChangedFilesEnabled()
         model["set_rerunAllOnlyFailed"] = serverSettings.rerunAllOnlyFailed()
         model["set_artifactLinks"] = serverSettings.artifactLinksEnabled()
         model["set_annotations"] = serverSettings.checkRunAnnotationsEnabled()

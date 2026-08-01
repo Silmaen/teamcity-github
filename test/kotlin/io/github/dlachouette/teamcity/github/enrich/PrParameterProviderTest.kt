@@ -102,6 +102,16 @@ class PrParameterProviderTest {
         assertEquals("feature/raycast", with[PrParameterProvider.ALIAS_PR_SOURCE_BRANCH])
         assertEquals("main", with[PrParameterProvider.ALIAS_PR_TARGET_BRANCH])
 
+        // The bundled feature spells the two branch names with dots, and that
+        // spelling is the one existing DSL reads — emitting only the camelCase
+        // pair would make the flag miss its own purpose.
+        assertEquals("feature/raycast", with[PrParameterProvider.ALIAS_PR_SOURCE_BRANCH_DOTTED])
+        assertEquals("main", with[PrParameterProvider.ALIAS_PR_TARGET_BRANCH_DOTTED])
+        assertEquals(
+            PrParameterProvider.LEGACY_ALIAS_KEYS.toSet(),
+            PrParameterProvider.LEGACY_ALIAS_KEYS.filter { with.containsKey(it) }.toSet(),
+        )
+
         // Non-PR builds never get aliases even when enabled.
         val nonPr = PrParameterProvider.computeParams("main", legacyAliases = true) { _ -> readyPr }
         assertEquals(null, nonPr[PrParameterProvider.ALIAS_PR_NUMBER])

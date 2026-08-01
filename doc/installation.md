@@ -121,7 +121,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 | Plugin | Vendor | Version | Min API | State |
 |---|---|---|---|---|
-| TeamCity GitHub Bridge | Damien Lachouette | 1.9.12 | 222521 | enabled |
+| TeamCity GitHub Bridge | Damien Lachouette | 1.10.0 | 222521 | enabled |
 
 If the plugin is greyed out or the version is missing, refer to
 [troubleshooting.md](troubleshooting.md#symptom-plugin-does-not-load).
@@ -139,6 +139,9 @@ separately if desired.
 
 ## Next steps
 
+- **Upgrading an existing install**: the deploy above is the whole
+  mechanic, but a release can change what the operator has to do on the
+  GitHub side — see [upgrading.md](upgrading.md).
 - **Fastest path (recommended)**: open `Administration -> GitHub
   Bridge` and click **Create GitHub App** — the managed-App flow wires
   up the App, connection, and webhook (URL + secret) for you. See

@@ -12,7 +12,7 @@
 > and with its own server to keep alive.
 >
 > This plugin is that code: one zip in your data directory, no extra service, no
-> extra host, no extra credential store, and 433 unit tests behind it.
+> extra host, no extra credential store, and 434 unit tests behind it.
 
 **Audience.** You already have TeamCity talking to GitHub *somehow* and you are
 wondering whether to keep it. There are three realistic options, and this page
@@ -87,7 +87,7 @@ code is.
 | **Where the build's time went** | Total, working time, and the wait split between *dependencies* and *free agent* — read off the SDK objects the event already carries. | Reconstructable over REST, at the cost of several calls per build and your own model of TeamCity's timing semantics. |
 | **What the tests did** | Counts in the Check Run title GitHub shows in the merge box; failing tests in the body, new failures first, muted ones apart. | Same: more REST calls, your own re-implementation of "new failure" and "muted". |
 | **Compiler errors pinned to the diff** | clang/gcc and MSVC diagnostics become GitHub annotations on file + line — read from the build problems, or from the build log when the runner produced none (a Command Line step reports only "exit code 1"). | The relay would have to pull each failed build's whole log over REST, and it does not know the agent's checkout directory — without which a diagnostic's absolute path cannot be made repo-relative, and GitHub rejects the annotation. |
-| **PR metadata inside the build** | 8 parameters (`…pullRequest.number`, `.title`, `.author`, `.sourceBranch`, `.targetBranch`, `.headSha`, `.isDraft`, `.isPullRequest`) always emitted, usable in DSL conditions — including for builds *not* triggered by a webhook (VCS trigger, schedule, manual Run). | External glue can only inject parameters on the builds it triggers itself. A manually-started build gets nothing. |
+| **PR metadata inside the build** | 16 parameters always emitted, usable in DSL conditions — what the PR *is* (`…pullRequest.number`, `.title`, `.author`, `.url`, `.sourceBranch`, `.targetBranch`, `.headSha`, `.labels`, `.isDraft`, `.isPullRequest`) and what it *changes* (`.mergeBase`, `.baseSha`, `.changedFiles`, `.additions`, `.deletions`, `.commits`) — including for builds *not* triggered by a webhook (VCS trigger, schedule, manual Run). `mergeBase` is the one a diff-scoped step needs: `mergeBase..headSha` is the pull request's own change, while diffing against the target branch also shows everything that landed on it since. | External glue can only inject parameters on the builds it triggers itself. A manually-started build gets nothing — which is exactly the case where somebody is looking. |
 | **Visible in TeamCity's own UI** | `draft`/`ready` pills in build lists, a **Branches & PRs** project tab searchable by branch *or* PR number, an admin page with recent events and self-tests. | Not reachable from outside the process. You get a separate dashboard, if you build one. |
 | **It tells you when it's misconfigured** | In-product self-tests: webhook secret, HMAC round-trip, real self-delivery to `/webhook`, GitHub reachability, token issuance and API auth *per opted-in project*, plus a warning if a build configuration has two competing status publishers. | Every one of these is a thing you'd have to write, host and remember to run. |
 
@@ -173,6 +173,16 @@ put anything here.*
 *And a page of the plugin's own: every build listed under **both** keys, the
 branch and the pull request, searchable by either. `Experiment/NoPR` has no PR
 cell — the column reports what it knows rather than guessing.*
+
+![The Pull request tab on a build page: what the build is judging, and what the bridge did with it](assets/screenshots/pull-request-tab.png)
+
+*The return trip, which is the direction integrations usually skip: standing on
+a build in TeamCity, **what is this judging?** The pull request, its branches,
+the commit this build actually verified, and the **merge base** with the
+`mergeBase..headSha` range a diff-scoped step needs — plus what the bridge did
+with it: the exact Check Run name a branch protection rule must require, and
+which ref the build ran on. A relay can post into GitHub; it has nowhere to put
+this.*
 
 ---
 
@@ -299,7 +309,7 @@ below. What disappears is the transport, the token, the host and the service
 builds.
 
 **"Bus factor: one Kotlin plugin, one author."**
-Apache-2.0, 433 unit tests, ~7 000 lines of documentation across 15 pages, a
+Apache-2.0, 434 unit tests, ~7 500 lines of documentation across 16 pages, a
 `CONTRIBUTING.md` with the build/test/release loop, a Docker-only build (`./dev
 package`, nothing installed on the host). The relay has a bus factor too — plus
 a host, a deploy pipeline and a token nobody else knows about.

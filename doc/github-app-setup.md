@@ -70,11 +70,16 @@ Under the hood the plugin builds an App manifest pre-filled with:
   |---|---|
   | `metadata` | `read` |
   | `checks` | `write` |
-  | `pull_requests` | `write` |
+  | `pull_requests` | `read` |
   | `contents` | `read` |
 
+  > `pull_requests` is **read** as of v1.10.0. The plugin's only write is
+  > the Check Run lifecycle, which is the `checks` permission; write on
+  > pull requests was needed by the sticky summary comment, and that was
+  > removed. An installation that granted write can revoke it.
+
 - `default_events`: `pull_request`, `pull_request_review`,
-  `pull_request_review_comment`, `check_run`.
+  `pull_request_review_comment`, `check_run`, `check_suite`.
 
   > Conversation-comment triggers (the `issue_comment` event) are
   > **opt-in**: GitHub only delivers `issue_comment` when the App holds

@@ -12,6 +12,7 @@ host other than `docker` and `git`.
 ./dev test       # the JUnit 5 unit-test suite
 ./dev compile    # mvn compile, no tests
 ./dev package    # mvn clean package -> target/teamcity-github-bridge-x.y.z.zip
+./dev diagrams   # render every Mermaid block in the docs, to catch a broken one
 ./dev shell      # interactive bash in the maven container
 ./dev help       # full list
 ```
@@ -87,17 +88,34 @@ javap -cp 'org/jetbrains/teamcity/server-openapi/2026.1/server-openapi-2026.1.ja
 
 The release flow is currently manual.
 
-1. Verify `./dev test` is green.
-2. Bump three places to the new version:
-   - `pom.xml` `<version>`
-   - `src/main/resources/teamcity-plugin.xml` `<version>`
-   - `README.md` (badge + status section)
-3. Add an entry at the top of `CHANGELOG.md`.
-4. `./dev package` and smoke-test the zip on a non-prod TC
-   instance.
-5. Commit: `git commit -m "release vX.Y.Z"`.
-6. Tag: `git tag vX.Y.Z && git push --tags`.
-7. Create a GitHub Release from the tag, attach the zip.
+1. Verify `./dev test` is green, and that its test count matches the
+   one quoted in `README.md` and `doc/why-this-plugin.md`. Run
+   `./dev diagrams` too — a broken Mermaid block renders as an error
+   box on GitHub, and nothing else catches it.
+2. Bump the version. `pom.xml` `<version>` is the **single source**:
+   `src/main/resources/teamcity-plugin.xml` reads `${project.version}`,
+   so the version TeamCity displays cannot drift from the POM. Then
+   update the places that quote it in prose:
+   - `README.md` — the version badge and the **Status** section;
+   - `doc/installation.md` — the sample Plugins-List row.
+3. Close the `CHANGELOG.md` entry: replace `unreleased` with the date,
+   and check that every feature merged since the last tag has a line
+   (`git log --oneline <lastTag>..HEAD`). A commit that shipped a
+   setting, a parameter or a page also owes a row in
+   `doc/configuration.md`, and its roadmap section must be deleted.
+4. Add the release's section to `doc/upgrading.md` — anything the
+   *operator* must do or notice: a GitHub permission that can be
+   revoked, an event to subscribe to, a default that changes what
+   reviewers see, a setting that can break a branch protection rule.
+   "Nothing to do" is a valid section and worth writing.
+5. `./dev package` and smoke-test the zip on a non-prod TC
+   instance. Walk the *Verifying the upgrade landed* table in
+   `doc/upgrading.md` — it is the smoke test, written down.
+6. Commit: `git commit -m "release X.Y.Z"`.
+7. Tag: `git tag X.Y.Z && git push --tags`. The existing tags carry
+   **no** `v` prefix (`1.9.0`); match them.
+8. Create a GitHub Release from the tag, attach the zip, and use the
+   CHANGELOG section as the release notes.
 
 [doc/roadmap.md#release-pipeline](doc/roadmap.md#release-pipeline)
 tracks the work to automate this with GitHub Actions.

@@ -184,6 +184,7 @@ io.github.dlachouette.teamcity.github
     ├── BridgeProjectSettingsTab     EditProjectTab for the project-level params
     ├── BridgeProjectSettingsController  POST behind that tab, requires EDIT_PROJECT
     ├── BridgeBuildsTab              ProjectTab "Branches & PRs" (BridgeBuildRow, search + sort)
+    ├── BridgePrTab                  ViewBuildTab "Pull request" (PrTabModel, hidden on non-PR builds)
     └── BranchEnrichmentPageExtension    draft/ready pill CSS + JS on every page
 ```
 
@@ -394,6 +395,7 @@ Where we plug into TC:
 | `BuildFeature` (opt-in per BuildType) | `GitHubBridgeBuildFeature` |
 | `EditProjectTab` + `AdminPage` (custom UI) | `BridgeProjectSettingsTab`, `AdminConsolePage`, `BranchEnrichmentPageExtension` |
 | `ProjectTab` (project-level view) | `BridgeBuildsTab` — the "Branches & PRs" list |
+| `ViewBuildTab` (build-level view) | `BridgePrTab` — the "Pull request" tab. `BUILD_RESULTS_TAB` is the one place on a build page the current UI renders; `PlaceId.BUILD_SUMMARY` / `BUILD_ACTIONS` are classic-page only |
 | `SBuildType.resolvedSettings.buildFeatures` (read-only) | `BridgeFeatureReader`, `BundledPublisherDetector` |
 | `AuthorizationInterceptor.addPathNotRequiringAuth` (anonymous endpoints) | `HealthController`, `MetricsController`, `ApiController`, `WebhookInfoController`, `PluginWebhookController` |
 

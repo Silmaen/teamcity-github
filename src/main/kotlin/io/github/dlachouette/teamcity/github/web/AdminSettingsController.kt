@@ -163,6 +163,8 @@ class AdminSettingsController(
             putBool(BridgeServerSettings.KEY_METRICS_ENABLED, request.getParameter("metricsEnabled") != null)
             putBool(BridgeServerSettings.KEY_LEGACY_ALIASES, request.getParameter("legacyAliases") != null)
             putBool(BridgeServerSettings.KEY_BRANCH_PR_LOOKUP, request.getParameter("branchPrLookup") != null)
+            putBool(BridgeServerSettings.KEY_MERGE_BASE, request.getParameter("mergeBase") != null)
+            putBool(BridgeServerSettings.KEY_PR_TAB_FILES, request.getParameter("prTabChangedFiles") != null)
             putBool(BridgeServerSettings.KEY_RERUN_ONLY_FAILED, request.getParameter("rerunAllOnlyFailed") != null)
             putBool(BridgeServerSettings.KEY_ARTIFACT_LINKS, request.getParameter("artifactLinks") != null)
             putBool(BridgeServerSettings.KEY_CHECK_RUN_ANNOTATIONS, request.getParameter("annotations") != null)

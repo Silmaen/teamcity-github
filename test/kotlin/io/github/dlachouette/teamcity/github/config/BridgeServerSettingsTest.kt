@@ -74,6 +74,20 @@ class BridgeServerSettingsTest {
         assertFalse(settings(tmp, BridgeServerSettings.KEY_CANCEL_OBSOLETE to "false").cancelObsoleteEnabled())
     }
 
+    // The two GitHub calls a server close to its rate limit may want to refuse:
+    // the merge-base lookup (one `compare` per cache fill) and the changed-file
+    // list behind the build page's Pull request tab, which reuses the same
+    // response. Both on by default; switching the second off is what guarantees
+    // that opening a build page never talks to GitHub.
+    @Test
+    fun `the merge base and the tab's file list are on by default and can be switched off`(@TempDir tmp: Path) {
+        assertTrue(settings(tmp).mergeBaseEnabled())
+        assertTrue(settings(tmp).prTabChangedFilesEnabled())
+
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_MERGE_BASE to "false").mergeBaseEnabled())
+        assertFalse(settings(tmp, BridgeServerSettings.KEY_PR_TAB_FILES to "false").prTabChangedFilesEnabled())
+    }
+
     @Test
     fun `boolean flags honour stored values`(@TempDir tmp: Path) {
         val s = settings(tmp, BridgeServerSettings.KEY_DRY_RUN to "true", BridgeServerSettings.KEY_REPLAY_ENABLED to "false")

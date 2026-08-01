@@ -10,85 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Link a build to its pull request, from TeamCity
-
-**Problem.** The bridge carries everything one way — TeamCity's verdict
-reaches the pull request — and nothing the other way. Standing on a build
-page in TeamCity, there is no way to open the pull request it is judging.
-The information is all there (the PR parameters every opted-in build carries,
-the `pull/N` ref, the optional `pr-N` tag) and none of it is a link.
-
-The trigger description gets close: a bridge-enqueued build reads
-*"teamcity-github-bridge: pull_request.synchronize on PR #6"* in the queue
-and on the build page. But it is plain text, and it is **only** on builds
-the bridge enqueued: a manual Run, a VCS trigger or a schedule says
-nothing, which is precisely the case where a human is looking for the PR.
-
-**Known dead ends** — see the table at the bottom of this page. A tag is a
-filter and the React pages win the click; `PlaceId.BUILD_SUMMARY` and
-`BUILD_ACTIONS` render on the **classic** build page only.
-
-**Three candidates, cheapest first.**
-
-1. **A `pullRequest.url` build parameter.** The PR payload already carries
-   `html_url`; publishing it alongside the eight existing parameters costs
-   one line in `PrParameterProvider`. Not clickable, but visible in the
-   build's **Parameters** tab, copy-pasteable, and usable from DSL and from
-   a build script — and it is what the other two candidates would render.
-   Do this one regardless of the rest.
-2. **A build tab.** `ViewBuildTab` / `ViewLogTab` is the extension point,
-   and the project tab this plugin already ships (`BridgeBuildsTab`, the
-   *Branches & PRs* tab) is proof that plugin tabs render in the current UI
-   — a build tab is the same mechanism one level down. Trigger-agnostic,
-   official, and it has room for more than a link: it is the natural home
-   for [what the pull request actually changes](#what-the-pull-request-actually-changes-base-branch-merge-base-changed-files).
-   **Verify it renders on a Sakura build page before writing the content** —
-   that is the trap every previous attempt fell into.
-3. **The build comment** (`SBuild.setBuildComment`). One line, shown on the
-   build page *and* in build lists, works whatever triggered the build. But
-   it hijacks a field that belongs to users, who can edit it and may be
-   using it. Off by default if it happens at all.
-
-**Effort.** (1) trivial. (2) small, once the render is verified. (3) small.
-
-## What the pull request actually changes: base branch, merge base, changed files
-
-**Problem.** A build knows it belongs to PR #6 and knows its head commit.
-It does not know **what the pull request changes**: which branch it targets,
-where it diverged from that branch, and which files differ. Every one of
-those is something a build step wants — a diff-scoped analysis (the sandbox
-already runs clang-tidy "on diff" and has to work the range out for itself),
-a changed-files test selection, a release-notes step, a "did this touch the
-API?" gate.
-
-**Feasible.** All three come from calls the client already knows how to
-make, against a PR the plugin has already resolved and cached:
-
-- **base branch** — `base.ref`, already in the `pull_request` payload the
-  webhook delivers, and in `GET /pulls/{n}` for the branch-lookup path. Free.
-- **merge base** — `GET /repos/{o}/{r}/compare/{base}...{head}` returns
-  `merge_base_commit.sha`. One call, cacheable with the PR info.
-- **changed files** — the same compare response carries `files[]`, or
-  `GET /pulls/{n}/files` (paginated, 100 per page, capped at 3000 by
-  GitHub).
-
-**Design.** Publish the cheap ones as parameters —
-`…pullRequest.baseBranch` (a rename or an alias of the existing
-`targetBranch`), `…pullRequest.mergeBase` — and put the file list where a
-list belongs: not in a build parameter (a 3000-entry parameter is a
-liability), but written into the build as an **artifact** or exposed on the
-build tab from item (2) above. A `…pullRequest.changedFileCount` parameter
-covers the "did it change much?" question without carrying the list.
-
-**Watch out for.** The extra call must be lazy: a build configuration that
-never reads these must not pay for them. Gate it on a flag, and cache the
-compare result on `PrInfoCache` next to the PR it describes. A force-push
-invalidates the merge base, which the existing cache invalidation on
-`synchronize` already handles.
-
-**Effort.** Small for the base branch and merge base. Medium for the file
-list, and most of that is deciding where it lives.
-
 ## Warn when a required check can never arrive
 
 **Problem.** A branch protection rule requiring a check named
@@ -97,7 +18,10 @@ for ever if the bridge posts `TeamCity / Sandbox / test_ci / PR / Test /
 Linux / Test (Linux, x64, Release)`. Nothing reports the mismatch: the PR
 just sits there, "Required statuses must pass", waiting for a row that will
 never exist. Rename a build configuration and you have created this without
-touching anything called "GitHub".
+touching anything called "GitHub" — and since 1.10.0 a project can also
+rename every one of its checks at once by setting
+`teamcity.github.bridge.checkName.stripPrefix`, which makes the warning worth
+more than it was.
 
 **Feasible.** The Check Run name is computed in one place
 (`checkRunName` = `TeamCity / <buildType fullName>`), so the plugin knows
@@ -269,7 +193,7 @@ Re-check on each TeamCity release; nothing to do until then.
 | Question | What we want | Status as of TC 2026.1 |
 |---|---|---|
 | A public `BuildBranchInfoProvider` | Override what the **Branch** column displays. Largely moot since `prBuildRef=branch` makes the column show the real branch name; it would only help projects staying on the `pull/N` model. | Absent. `BranchDisplayNameProvider` too; `Branch.getDisplayName()` is read-only and `setDesiredBranchName()` rewrites the ref itself, not its display. |
-| A place to put an outbound link on a build | Link a build to its pull request from TeamCity. | Two routes are dead: a tag **is** a filter and the React pages bind that by delegation on an ancestor (its capture listener wins), and `PlaceId.BUILD_SUMMARY` / `BUILD_ACTIONS` render on the **classic** build page only. Not blocked overall — a **build tab** has not been tried, and the plugin's own project tab proves tabs render. See [Link a build to its pull request](#link-a-build-to-its-pull-request-from-teamcity). Verify the render on a Sakura page before writing content. |
+| An **inline** place for an outbound link on a build | A link to the pull request on the build page itself, not one tab away. | Settled well enough to close: the *Pull request* **build tab** shipped in 1.10.0 (`BUILD_RESULTS_TAB` renders on the current UI). The inline routes remain dead — a tag **is** a filter and the React pages bind that by delegation on an ancestor (its capture listener wins), `PlaceId.BUILD_SUMMARY` / `BUILD_ACTIONS` render on the **classic** build page only, and a client-side overlay goes stale on a single-page app. Re-check only if the SDK gains a Sakura-aware place. |
 | `ConnectionCredentialsFactory` for GitHub App | Token acquisition that does not need our own JWT self-mint path. | Unsupported (`Unsupported Connection Provider type: GitHubApp`). Worked around by self-minting. If it lands, the self-mint primary path can go and the credentials-manager fallback suffices again. |
 
 ## Recording a new idea

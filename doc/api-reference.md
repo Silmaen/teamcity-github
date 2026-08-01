@@ -193,7 +193,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
   "secretConfigured": true,
   "logFile": "/data/teamcity_server/datadir/logs/teamcity-github-bridge.log",
   "logConfigured": true,
-  "pluginVersion": "1.9.10",
+  "pluginVersion": "1.10.0",
   "teamcityVersion": "TeamCity 2026.1 (build 222521)"
 }
 ```
@@ -203,12 +203,12 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
 | `payloadUrl` | string | The absolute URL GitHub should POST events to. Computed from the request's host, scheme, port, and context path (with `X-Forwarded-Proto` and `X-Forwarded-Host` respected when present). |
 | `contentType` | string | Always `application/json`. The plugin does not parse `application/x-www-form-urlencoded`. |
 | `sslVerification` | boolean | `true` when the request reached the plugin over HTTPS (after honouring `X-Forwarded-Proto`). Reflected so the operator copies the right value into GitHub. |
-| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Acted on: `pull_request`, `pull_request_review`, `pull_request_review_comment`, `check_run`, `ping`. Forward-listed: `push`, `check_suite`. `issue_comment` is also acted on but is opt-in (needs the Issues permission) so it is not in this list. |
+| `recommendedEvents` | array of string | The events the operator should subscribe to in the App. Acted on: `pull_request`, `pull_request_review`, `pull_request_review_comment`, `check_run`, `check_suite` (the *Re-run all checks* button, v1.9.0+), `ping`. Forward-listed: `push`. `issue_comment` is also acted on but is opt-in (needs the Issues permission) so it is not in this list. |
 | `secretConfigured` | boolean | `true` when `teamcity.github.bridge.webhook.secret` is set to a non-blank value. **Never echoes the secret itself.** |
 | `logFile` | string | Absolute path where the plugin's dedicated log file lives (or *would* live) - always `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`. |
 | `logConfigured` | boolean | `true` when the dedicated log file currently exists, i.e. an operator has merged the log4j snippet (`teamcity-github-bridge-log4j-snippet.xml`) into `teamcity-server-log4j.xml`. |
-| `pluginVersion` | string | The **plugin's** version, from its descriptor, or `"unknown"`. Before 1.9.10 this field carried TeamCity's version instead — the same key answered differently here and on `/health`. |
-| `teamcityVersion` | string | The TeamCity server version string. Useful as a sanity check (the plugin is alive, inside *that* server). **New in 1.9.10.** |
+| `pluginVersion` | string | The **plugin's** version, from its descriptor, or `"unknown"`. Before v1.10.0 this field carried TeamCity's version instead — the same key answered differently here and on `/health`. |
+| `teamcityVersion` | string | The TeamCity server version string. Useful as a sanity check (the plugin is alive, inside *that* server). **New in v1.10.0.** |
 
 ### Response codes
 
@@ -277,7 +277,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/health
 ```json
 {
   "status": "ok",
-  "pluginVersion": "1.9.10",
+  "pluginVersion": "1.10.0",
   "secretConfigured": true,
   "logConfigured": true,
   "dryRun": false,
@@ -348,6 +348,7 @@ bridge_webhooks_too_large_total 0
 | `webhooks_rejected` | A delivery is rejected (missing `X-GitHub-Event`, or invalid/missing signature). |
 | `webhooks_replayed` | A duplicate delivery is ignored by replay protection. |
 | `webhooks_too_large` | A delivery exceeds the 25 MB payload bound (`413`). |
+| `fork_events_ignored` | An event is dropped because the pull request's head lives in a fork — the bridge is attached to one repository, never to its forks. |
 | `check_runs_posted` | A GitHub Check Run is published successfully. |
 | `check_runs_failed` | Publishing a Check Run fails. |
 | `builds_enqueued` | A build is added to the queue. |
@@ -402,7 +403,7 @@ curl -H "Authorization: Bearer $BRIDGE_API_TOKEN" \
 
 ```json
 {
-  "pluginVersion": "1.9.10",
+  "pluginVersion": "1.10.0",
   "secretConfigured": true,
   "dryRun": false,
   "replayProtection": true,

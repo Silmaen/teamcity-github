@@ -33,9 +33,13 @@ import javax.servlet.http.HttpServletRequest
 // pointing at the first build viewed, and a link to the wrong pull request is
 // worse than no link.
 //
-// **Cost per render: zero calls.** Everything shown comes from the parameters
-// the build already carries (`PrTabModel`), so opening a build page never talks
-// to GitHub.
+// **Cost per render: zero calls, bar one.** Everything the tab states about the
+// pull request comes from the parameters the build already carries
+// (`PrTabModel`). The changed-file list is the exception — it cannot come from a
+// parameter (see `addChangedFiles`) and is read from the PR-info cache, so a warm
+// cache costs nothing and a cold one costs the single `compare` call that also
+// resolves the merge base. `prTab.changedFiles=false` restores the guarantee that
+// opening a build page never talks to GitHub.
 class BridgePrTab(
     pagePlaces: PagePlaces,
     server: SBuildServer,

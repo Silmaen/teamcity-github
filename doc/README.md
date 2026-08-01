@@ -11,7 +11,8 @@ GitHub App → configure a project → see a Check Run.
 
 | I want to… | Page |
 |---|---|
-| Install or upgrade the plugin | [installation.md](installation.md) |
+| Install the plugin | [installation.md](installation.md) |
+| Upgrade an existing install (what changes for the operator) | [upgrading.md](upgrading.md) |
 | Get the GitHub App set up (auto or manual) | [github-app-setup.md](github-app-setup.md) |
 | Configure the webhook (manual path only) | [webhook-setup.md](webhook-setup.md) |
 | Know every setting and where it lives | [configuration.md](configuration.md) |

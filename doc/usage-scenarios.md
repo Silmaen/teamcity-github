@@ -993,17 +993,19 @@ time, branch or PR.
 | `Feature/raycast` **ready** | #189 | Build_Windows | queued | Queued | |
 | `master` | | Nightly_All | 86 | Build passed | artifacts |
 
-**How the PR column is filled**: from the build's **PR tag** (`pr-189` by
-default), which the plugin writes when the build runs and back-fills on
-`pull_request.opened` for builds that ran *before* the PR existed. A
-`pull/N` ref supplies the number on its own. No GitHub API call is made to
-render the page.
+**How the PR column is filled**: three sources, cheapest first (v1.10.0+) —
+the build's **PR tag** (`pr-189` by default), which the plugin writes when
+the build is queued and back-fills on `pull_request.opened` for builds that
+ran *before* the PR existed; else a **`pull/N` ref**, which carries the
+number on its own; else the build's own published
+**`…pullRequest.number`** parameter. No GitHub API call is made to render
+the page.
 
 The tag is optional (`prTag.enabled`) and its prefix is configurable
 (`prTag.prefix`) — see
-[configuration.md](configuration.md#feature-flags). With tagging off, the
-PR column only shows what the ref says: a `pull/N` build keeps its number, a
-build on a work branch loses it.
+[configuration.md](configuration.md#feature-flags). Because the parameter is
+the third source, the column stays populated with tagging off, and in
+`prBuildRef=branch` mode where there is no `pull/N` ref to read.
 
 ## Scenario 25: publication and triggering are two separate switches
 
@@ -1119,6 +1121,46 @@ often already reported for it — posting `Skipped: PR metadata out of scope`
 would **overwrite that result**, turning a green row into a skip because
 someone removed a label. So the re-evaluation actions only ever *add* builds;
 they never write a skip row.
+
+## Scenario 29: from a build in TeamCity to the pull request it is judging
+
+**Actor**: anyone standing on a build page and opening its **Pull request**
+tab (v1.10.0+).
+
+**Expected outcome**: the tab says what this build is judging and links out to
+it. On a build with no pull request the tab is **hidden**, not empty — a
+"no pull request" panel on every build of `main` would be noise on every build
+page in the server.
+
+![The Pull request tab on a build page](assets/screenshots/pull-request-tab.png)
+
+| Row | Content |
+|---|---|
+| Title | `Add raycast shadows #189`, linked, with the **ready** / **draft** pill; then links to the **Pull request**, its **Checks**, **Files changed**, **Commits**, and **This change only** (the `mergeBase...headSha` compare) |
+| Author | the PR's author |
+| Merging | `Feature/raycast` → `main` |
+| Head commit | the commit this build judged, and the one its Check Run is attached to — linked to GitHub |
+| Diverged at | the **merge base**, with the `mergeBase..headSha` range to hand a diff-scoped script. Not resolved (`mergeBase.enabled` off, or the lookup failed) says so, and says **not** to substitute the base branch's head |
+| Size | files changed, `+additions` / `−deletions`, commits — as the PR stood when this build ran |
+| Labels | the same list the metadata gate filters on |
+| Changed files | the PR's file list, first 100 (`prTab.changedFiles`) |
+| What the bridge did | the Check Run name this build reports as, what started it, the ref it was built on, and a link into the project's **Branches & PRs** tab filtered on `#189` |
+
+A build queued **before** the upgrade to 1.10.0 has no
+`…pullRequest.url` parameter, so the tab renders without links rather than
+guessing a hostname — a link to the wrong GitHub server is worse than none —
+and says so. Any build queued after the upgrade carries it.
+
+**What it costs.** Everything but the file list is read from parameters the
+build already carries, so opening the tab makes **no** GitHub call. The file
+list comes from the PR-info cache, filled by the same `compare` call that
+resolves the merge base: free on a warm cache, one call on a cold one, and
+only because a human opened the tab. Setting `prTab.changedFiles=false`
+restores the guarantee that a build page never talks to GitHub.
+
+**One caveat the page states itself**: the file list is the pull request **as
+it stands now**, not as this build saw it. For "what did this build judge",
+the head commit in the *Commits* section is the answer.
 
 ## Summary table
 

@@ -32,6 +32,11 @@ Build commands:
   clean            Run 'mvn clean'.
   mvn <args>       Pass-through to Maven (e.g. ./dev mvn dependency:tree).
 
+Documentation:
+  diagrams         Render every Mermaid block in *.md to catch a syntax
+                   error before it reaches a reader. Nothing is written to
+                   the repository; a failure names the file and the block.
+
 Dev shell:
   shell            Open an interactive bash shell inside the container.
 
@@ -45,12 +50,61 @@ EOF
 cmd="${1:-help}"
 shift || true
 
+# Render every Mermaid block in the documentation, inside the mermaid-cli
+# image. Two things about that image are worth knowing, because both cost an
+# afternoon to rediscover:
+#
+#   - its entrypoint is not on PATH, hence the full path to `mmdc`;
+#   - puppeteer looks for `chrome-headless-shell`, which the image does not
+#     ship, while it *does* ship a full Chromium at /usr/bin/chromium. Without
+#     the config file below every diagram fails identically with ENOENT, which
+#     reads like "all my diagrams are broken" and is nothing of the kind.
+#
+# The repository is mounted read-only and the SVGs go to the container's /tmp:
+# rendering is the check, the output is not wanted.
+diagrams() {
+    docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint /bin/sh \
+        minlag/mermaid-cli -c '
+        set -e
+        printf "%s" "{\"executablePath\":\"/usr/bin/chromium\",\"args\":[\"--no-sandbox\",\"--disable-dev-shm-usage\"]}" > /tmp/pptr.json
+        node -e "
+          const fs=require(\"fs\"),path=require(\"path\");
+          const files=[\"README.md\",\"CONTRIBUTING.md\",\"CHANGELOG.md\",\"SECURITY.md\"]
+            .concat(fs.readdirSync(\"doc\").filter(f=>f.endsWith(\".md\")).map(f=>path.join(\"doc\",f)))
+            .filter(f=>fs.existsSync(f));
+          let n=0;
+          for (const f of files) {
+            const blocks=fs.readFileSync(f,\"utf8\").split(/\`\`\`mermaid\n/).slice(1)
+              .map(s=>s.split(/\`\`\`/)[0]);
+            blocks.forEach((b,i)=>{
+              fs.writeFileSync(\"/tmp/d\"+(n++)+\".mmd\",b);
+              fs.appendFileSync(\"/tmp/index\",f+\" block \"+(i+1)+\"\n\");
+            });
+          }
+          console.log(\"diagrams found: \"+n);
+        "
+        fail=0
+        i=0
+        while [ -f "/tmp/d$i.mmd" ]; do
+            if ! /home/mermaidcli/node_modules/.bin/mmdc -p /tmp/pptr.json \
+                 -i "/tmp/d$i.mmd" -o "/tmp/d$i.svg" >/dev/null 2>/tmp/err; then
+                echo "FAILED: $(sed -n "$((i+1))p" /tmp/index)"
+                grep -iE "error|expect|parse" /tmp/err | head -3
+                fail=1
+            fi
+            i=$((i+1))
+        done
+        if [ "$fail" = 0 ]; then echo "every diagram renders."; else exit 1; fi
+    '
+}
+
 case "$cmd" in
     package)     "${DC[@]}" run --rm mvn mvn clean package "$@" ;;
     compile)     "${DC[@]}" run --rm mvn mvn compile "$@" ;;
     test)        "${DC[@]}" run --rm mvn mvn test "$@" ;;
     clean)       "${DC[@]}" run --rm mvn mvn clean "$@" ;;
     mvn)         "${DC[@]}" run --rm mvn mvn "$@" ;;
+    diagrams)    diagrams ;;
     shell)       "${DC[@]}" run --rm --entrypoint bash mvn ;;
     pull)        "${DC[@]}" pull ;;
     reset-cache) rm -rf .cache/m2 && mkdir -p .cache/m2 ;;
