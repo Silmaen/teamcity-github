@@ -12,7 +12,7 @@
 > and with its own server to keep alive.
 >
 > This plugin is that code: one zip in your data directory, no extra service, no
-> extra host, no extra credential store, and 408 unit tests behind it.
+> extra host, no extra credential store, and 433 unit tests behind it.
 
 **Audience.** You already have TeamCity talking to GitHub *somehow* and you are
 wondering whether to keep it. There are three realistic options, and this page
@@ -299,7 +299,7 @@ below. What disappears is the transport, the token, the host and the service
 builds.
 
 **"Bus factor: one Kotlin plugin, one author."**
-Apache-2.0, 408 unit tests, ~7 000 lines of documentation across 15 pages, a
+Apache-2.0, 433 unit tests, ~7 000 lines of documentation across 15 pages, a
 `CONTRIBUTING.md` with the build/test/release loop, a Docker-only build (`./dev
 package`, nothing installed on the host). The relay has a bus factor too — plus
 a host, a deploy pipeline and a token nobody else knows about.

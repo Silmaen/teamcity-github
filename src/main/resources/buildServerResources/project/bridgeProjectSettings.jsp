@@ -109,6 +109,32 @@
             </td>
         </tr>
         <tr>
+            <th><label for="checkNameStripPrefix">Shorten check names:</label></th>
+            <td>
+                <input type="text" id="checkNameStripPrefix" name="checkNameStripPrefix"
+                       value="<c:out value='${checkNameStripPrefix}'/>"
+                       placeholder="TeamCity / MyProject / Subproject / PR /"/>
+                <div class="bridge-help">
+                    Optional. A prefix cut off the front of every Check Run name this
+                    project posts. The name is
+                    <code>TeamCity / &lt;full build configuration name&gt;</code>, which on a
+                    deep tree is mostly ancestry a reviewer does not need &mdash; while GitHub's
+                    merge box truncates the <em>end</em>, the part that identifies the build.
+                    Declaring <code>TeamCity / Sandbox / test_ci / PR /</code> turns
+                    <code>&hellip; / PR / Build / Linux / Build (Linux, x64, Release)</code> into
+                    <code>Build / Linux / Build (Linux, x64, Release)</code>.
+                    A trailing slash is optional, and a prefix that does not match is ignored.
+                    <div style="margin-top:.5em;padding:.4em .6em;background:#fff4e5;border-left:3px solid #e8a33d;color:#663c00;">
+                        <strong>This renames the checks.</strong> GitHub identifies a Check Run
+                        by its <em>name</em> and commit, so changing this starts new rows and
+                        leaves the existing ones untouched &mdash; and any <strong>branch
+                        protection rule</strong> that requires the old name will wait for a
+                        check that never arrives again. Update the rules in the same change.
+                    </div>
+                </div>
+            </td>
+        </tr>
+        <tr>
             <th><label for="annotationsEnabled">Annotate the diff:</label></th>
             <td>
                 <input type="checkbox" id="annotationsEnabled" name="annotationsEnabled" <c:if test="${annotationsEnabled}">checked</c:if>/>

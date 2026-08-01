@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.9.10-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.9.12-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -347,8 +347,8 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.9.10**, in development towards 1.10.0.
-408 unit tests pass.
+**Stable**. Current version is **1.9.12**, in development towards 1.10.0.
+433 unit tests pass.
 The plugin has been installed end-to-end against both vanilla
 github.com and a live GitHub Enterprise (`github.example.com`)
 TeamCity 2026.1 server. The in-product self-test battery

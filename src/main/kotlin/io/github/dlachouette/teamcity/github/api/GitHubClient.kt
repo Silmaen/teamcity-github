@@ -40,6 +40,35 @@ open class GitHubClient {
         }
     }
 
+    // Where two refs diverged: `merge_base_commit.sha` from
+    // `GET /compare/{base}...{head}`.
+    //
+    // This is the commit a "what did this pull request change" diff has to be
+    // taken against. The base branch's current head is **not** it: everything
+    // that landed on the base since the branch started would show up as part of
+    // the change. A diff-scoped analysis given the wrong base analyses other
+    // people's commits.
+    //
+    // One call, and the response is large (it carries the commit list and the
+    // file list), so the caller is expected to cache the answer — `PrInfoCache`
+    // does, alongside the pull request it belongs to.
+    open fun compare(
+        accessToken: String,
+        repo: RepoCoords,
+        base: String,
+        head: String,
+        apiBase: String = DEFAULT_API_BASE,
+    ): CompareInfo? {
+        if (base.isBlank() || head.isBlank()) return null
+        val resp = request("GET", "$apiBase/repos/${repo.slug}/compare/$base...$head", accessToken)
+            ?: return null
+        if (!resp.isSuccess) {
+            LOG.warn("GET compare $base...$head returned ${resp.code} for ${repo.slug}")
+            return null
+        }
+        return parseCompare(resp.body)
+    }
+
     open fun postCheckRun(
         accessToken: String,
         repo: RepoCoords,
@@ -431,8 +460,52 @@ open class GitHubClient {
                     it.path("name").asText("").takeIf { n -> n.isNotBlank() }
                 },
                 headRepo = head.path("repo").path("full_name").asText(""),
+                htmlUrl = node.path("html_url").asText(""),
+                baseSha = base.path("sha").asText(""),
+                // Absent from the objects in `GET /commits/{sha}/pulls` and from
+                // some event payloads; 0 then, which the parameters render as an
+                // empty string rather than a misleading "0".
+                changedFiles = node.path("changed_files").asInt(0),
+                additions = node.path("additions").asInt(0),
+                deletions = node.path("deletions").asInt(0),
+                commits = node.path("commits").asInt(0),
             )
         }
+
+        // Public for testing — what a compare response tells us.
+        //
+        // `total_commits` is authoritative. The file **count** is not: GitHub caps
+        // the `files` array at 300 entries and does not say whether it truncated,
+        // so a size at the cap is treated as unknown rather than reported as 300.
+        // A number that silently understates a big change is worse than no number.
+        fun parseCompare(json: String): CompareInfo? {
+          return try {
+            val node = MAPPER.readTree(json)
+            val mergeBase = node.path("merge_base_commit").path("sha").asText("")
+                .takeIf { it.isNotBlank() } ?: return null
+            val files = node.path("files")
+            val fileCount = if (files.isArray && files.size() < COMPARE_FILES_CAP) files.size() else 0
+            CompareInfo(
+                mergeBaseSha = mergeBase,
+                changedFiles = fileCount,
+                commits = node.path("total_commits").asInt(0),
+                // The names come in the same response. Whether the array was
+                // truncated or not, what it holds is real — so the list is kept
+                // even when the *count* had to be given up as unknown, and the
+                // consumer says "at least these".
+                files = if (files.isArray) files.mapNotNull {
+                    it.path("filename").asText("").takeIf { n -> n.isNotBlank() }
+                } else emptyList(),
+                filesTruncated = files.isArray && files.size() >= COMPARE_FILES_CAP,
+            )
+          } catch (e: Exception) {
+            LOG.warn("Failed parsing compare response: ${e.message}")
+            null
+          }
+        }
+
+        // GitHub's own limit on the `files` array of a compare response.
+        const val COMPARE_FILES_CAP: Int = 300
 
         // GitHub's documented limits for output.annotations.
         const val MAX_ANNOTATIONS_PER_REQUEST: Int = 50

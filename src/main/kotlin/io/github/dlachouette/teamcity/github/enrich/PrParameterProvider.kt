@@ -73,6 +73,34 @@ class PrParameterProvider(
         const val PARAM_PR_TARGET_BRANCH: String = "teamcity.github.bridge.pullRequest.targetBranch"
         const val PARAM_PR_HEAD_SHA: String = "teamcity.github.bridge.pullRequest.headSha"
 
+        // --- what the pull request is and what it changes (1.10.0) ---
+
+        // The PR's page on GitHub: the one value that lets a build, a script or
+        // a notification point back at what it is judging.
+        const val PARAM_PR_URL: String = "teamcity.github.bridge.pullRequest.url"
+
+        // The base branch's head at the time of the event. Kept distinct from
+        // the merge base on purpose — see below.
+        const val PARAM_PR_BASE_SHA: String = "teamcity.github.bridge.pullRequest.baseSha"
+
+        // Where the branches diverged. **This** is what a diff-scoped step must
+        // compare against: `git diff <mergeBase>..<headSha>` is the pull
+        // request's own change, while diffing against the base branch's head
+        // also shows everything that landed on the base since. Empty when
+        // `mergeBase.enabled` is off or the lookup failed — a step that needs it
+        // should say so rather than silently diff the wrong range.
+        const val PARAM_PR_MERGE_BASE: String = "teamcity.github.bridge.pullRequest.mergeBase"
+
+        // Size of the change, for a gate that does not want the file list.
+        const val PARAM_PR_CHANGED_FILES: String = "teamcity.github.bridge.pullRequest.changedFiles"
+        const val PARAM_PR_ADDITIONS: String = "teamcity.github.bridge.pullRequest.additions"
+        const val PARAM_PR_DELETIONS: String = "teamcity.github.bridge.pullRequest.deletions"
+        const val PARAM_PR_COMMITS: String = "teamcity.github.bridge.pullRequest.commits"
+
+        // Comma-separated label names, in GitHub's order. Same list the
+        // metadata gate filters on, exposed so a build step can act on it too.
+        const val PARAM_PR_LABELS: String = "teamcity.github.bridge.pullRequest.labels"
+
         // Aliases under the bundled `pullRequests` feature's namespace,
         // emitted only when the operator opts in (legacyAliases.enabled).
         // Lets teams migrate off the bundled feature without rewriting DSL
@@ -98,6 +126,14 @@ class PrParameterProvider(
             PARAM_PR_SOURCE_BRANCH,
             PARAM_PR_TARGET_BRANCH,
             PARAM_PR_HEAD_SHA,
+            PARAM_PR_URL,
+            PARAM_PR_BASE_SHA,
+            PARAM_PR_MERGE_BASE,
+            PARAM_PR_CHANGED_FILES,
+            PARAM_PR_ADDITIONS,
+            PARAM_PR_DELETIONS,
+            PARAM_PR_COMMITS,
+            PARAM_PR_LABELS,
         )
 
         val DEFAULT_NON_PR_PARAMS: Map<String, String> = mapOf(
@@ -109,6 +145,14 @@ class PrParameterProvider(
             PARAM_PR_SOURCE_BRANCH to "",
             PARAM_PR_TARGET_BRANCH to "",
             PARAM_PR_HEAD_SHA to "",
+            PARAM_PR_URL to "",
+            PARAM_PR_BASE_SHA to "",
+            PARAM_PR_MERGE_BASE to "",
+            PARAM_PR_CHANGED_FILES to "",
+            PARAM_PR_ADDITIONS to "",
+            PARAM_PR_DELETIONS to "",
+            PARAM_PR_COMMITS to "",
+            PARAM_PR_LABELS to "",
         )
 
         private val LOG = Logger.getInstance(PrParameterProvider::class.java.name)
@@ -153,6 +197,8 @@ class PrParameterProvider(
             return params(prNumber, pr, legacyAliases)
         }
 
+        private fun count(n: Int?): String = if (n == null || n <= 0) "" else n.toString()
+
         // The PR-context parameter map. `pr` is null when the number is
         // known (from the branch name) but the GitHub lookup failed.
         private fun params(prNumber: Int, pr: PrInfo?, legacyAliases: Boolean): Map<String, String> {
@@ -165,6 +211,17 @@ class PrParameterProvider(
                 PARAM_PR_SOURCE_BRANCH to (pr?.headRef ?: ""),
                 PARAM_PR_TARGET_BRANCH to (pr?.baseRef ?: ""),
                 PARAM_PR_HEAD_SHA to (pr?.headSha ?: ""),
+                PARAM_PR_URL to (pr?.htmlUrl ?: ""),
+                PARAM_PR_BASE_SHA to (pr?.baseSha ?: ""),
+                PARAM_PR_MERGE_BASE to (pr?.mergeBaseSha ?: ""),
+                // A count is emitted only when GitHub actually sent one: the
+                // objects in `GET /commits/{sha}/pulls` carry no counts, and "0"
+                // would read as "this PR changes nothing".
+                PARAM_PR_CHANGED_FILES to count(pr?.changedFiles),
+                PARAM_PR_ADDITIONS to count(pr?.additions),
+                PARAM_PR_DELETIONS to count(pr?.deletions),
+                PARAM_PR_COMMITS to count(pr?.commits),
+                PARAM_PR_LABELS to (pr?.labels?.joinToString(",") ?: ""),
             )
             if (legacyAliases) {
                 params[ALIAS_PR_NUMBER] = prNumber.toString()

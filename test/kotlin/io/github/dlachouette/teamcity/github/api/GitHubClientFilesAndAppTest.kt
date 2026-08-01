@@ -2,6 +2,7 @@ package io.github.dlachouette.teamcity.github.api
 
 import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -50,5 +51,51 @@ class GitHubClientFilesAndAppTest {
         val created = GitHubClient.parseCreatedToken("""{"token":"ghs_x"}""")
         assertEquals("ghs_x", created?.token)
         assertEquals(null, created?.expiresAt)
+    }
+
+    // One compare call answers three things, and the file count is the one to be
+    // careful with: GitHub caps the array at 300 and does not say when it
+    // truncated, so a count at the cap is "unknown" rather than 300.
+    @Test
+    fun `parseCompare reads the merge base and the counts`() {
+        val json = """
+            {"merge_base_commit":{"sha":"diverged"},"total_commits":4,
+             "files":[{"filename":"a.cpp"},{"filename":"b.cpp"}]}
+        """.trimIndent()
+        val c = GitHubClient.parseCompare(json)!!
+        assertEquals("diverged", c.mergeBaseSha)
+        assertEquals(2, c.changedFiles)
+        assertEquals(4, c.commits)
+    }
+
+    // The names are worth keeping even when the count has to be given up: a
+    // truncated list is still a list of real files, and the page says "the first
+    // of them" rather than pretending it is all of them.
+    @Test
+    fun `parseCompare keeps the file names it was given`() {
+        val json = """
+            {"merge_base_commit":{"sha":"d"},"total_commits":1,
+             "files":[{"filename":"src/a.cpp"},{"filename":"docs/b.md"}]}
+        """.trimIndent()
+        val c = GitHubClient.parseCompare(json)!!
+        assertEquals(listOf("src/a.cpp", "docs/b.md"), c.files)
+        assertEquals(false, c.filesTruncated)
+    }
+
+    @Test
+    fun `parseCompare treats a capped file array as unknown`() {
+        val files = (1..GitHubClient.COMPARE_FILES_CAP).joinToString(",") { """{"filename":"f$it"}""" }
+        val json = """{"merge_base_commit":{"sha":"d"},"total_commits":9,"files":[$files]}"""
+        val c = GitHubClient.parseCompare(json)!!
+        assertEquals(0, c.changedFiles, "a truncated array must not be reported as a count")
+        assertEquals(9, c.commits)
+        assertEquals(GitHubClient.COMPARE_FILES_CAP, c.files.size, "the names it did send are still real")
+        assertEquals(true, c.filesTruncated)
+    }
+
+    @Test
+    fun `parseCompare without a merge base is not a compare answer`() {
+        assertNull(GitHubClient.parseCompare("""{"total_commits":1}"""))
+        assertNull(GitHubClient.parseCompare("not json"))
     }
 }

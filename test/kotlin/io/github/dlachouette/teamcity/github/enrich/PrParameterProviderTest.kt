@@ -3,6 +3,7 @@ package io.github.dlachouette.teamcity.github.enrich
 import io.github.dlachouette.teamcity.github.api.PrInfo
 import io.github.dlachouette.teamcity.github.testsupport.LoggerBootstrap
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PrParameterProviderTest {
@@ -187,9 +188,12 @@ class PrParameterProviderTest {
         assertEquals("189", params[PrParameterProvider.PARAM_PR_NUMBER])
     }
 
+    // The invariant that matters is not the count but the pairing: every key the
+    // provider advertises must have a non-PR default, or a DSL condition on a
+    // non-PR branch hits an unresolved parameter. 16 as of 1.10.0.
     @Test
-    fun `ALL_KEYS lists exactly 8 keys and matches DEFAULT_NON_PR_PARAMS`() {
-        assertEquals(8, PrParameterProvider.ALL_KEYS.size)
+    fun `every advertised key has a non-PR default`() {
+        assertEquals(16, PrParameterProvider.ALL_KEYS.size)
         assertEquals(PrParameterProvider.ALL_KEYS.toSet(), PrParameterProvider.DEFAULT_NON_PR_PARAMS.keys)
     }
 
@@ -206,4 +210,72 @@ class PrParameterProviderTest {
         headRef = headRef, baseRef = baseRef, headSha = headSha,
         draft = draft, state = "open",
     )
+
+    // --- what the pull request is and what it changes (1.10.0) ---
+
+    // The values that make a build able to point back at what it is judging,
+    // and a step able to diff the right range.
+    @Test
+    fun `publishes the PR url, the base sha, the merge base and the counts`() {
+        val pr = PrInfo(
+            number = 42, title = "t", author = "a", headRef = "Feature/x", baseRef = "main",
+            headSha = "head", draft = false, state = "open",
+            htmlUrl = "https://github.com/acme/widgets/pull/42",
+            baseSha = "basehead", changedFiles = 7, additions = 120, deletions = 3, commits = 2,
+            mergeBaseSha = "diverged", labels = listOf("ci", "area:api"),
+        )
+        val p = PrParameterProvider.computeParams("pull/42") { pr }
+        assertEquals("https://github.com/acme/widgets/pull/42", p[PrParameterProvider.PARAM_PR_URL])
+        assertEquals("basehead", p[PrParameterProvider.PARAM_PR_BASE_SHA])
+        assertEquals("diverged", p[PrParameterProvider.PARAM_PR_MERGE_BASE])
+        assertEquals("7", p[PrParameterProvider.PARAM_PR_CHANGED_FILES])
+        assertEquals("120", p[PrParameterProvider.PARAM_PR_ADDITIONS])
+        assertEquals("3", p[PrParameterProvider.PARAM_PR_DELETIONS])
+        assertEquals("2", p[PrParameterProvider.PARAM_PR_COMMITS])
+        assertEquals("ci,area:api", p[PrParameterProvider.PARAM_PR_LABELS])
+    }
+
+    // The base branch's head is NOT the merge base, and the two must never be
+    // conflated: a diff against the head also contains what landed on the base
+    // since the branch started.
+    @Test
+    fun `the merge base is empty rather than wrong when it was not resolved`() {
+        val pr = PrInfo(
+            number = 42, title = "t", author = "a", headRef = "Feature/x", baseRef = "main",
+            headSha = "head", draft = false, state = "open", baseSha = "basehead",
+        )
+        val p = PrParameterProvider.computeParams("pull/42") { pr }
+        assertEquals("basehead", p[PrParameterProvider.PARAM_PR_BASE_SHA])
+        assertEquals("", p[PrParameterProvider.PARAM_PR_MERGE_BASE])
+    }
+
+    // `GET /commits/{sha}/pulls` returns PR objects without the counts. Zero
+    // would read as "this pull request changes nothing".
+    @Test
+    fun `a count GitHub did not send is empty, not zero`() {
+        val pr = PrInfo(
+            number = 42, title = "t", author = "a", headRef = "Feature/x", baseRef = "main",
+            headSha = "head", draft = false, state = "open",
+        )
+        val p = PrParameterProvider.computeParams("pull/42") { pr }
+        assertEquals("", p[PrParameterProvider.PARAM_PR_CHANGED_FILES])
+        assertEquals("", p[PrParameterProvider.PARAM_PR_COMMITS])
+        assertEquals("", p[PrParameterProvider.PARAM_PR_LABELS])
+    }
+
+    // Every key is always emitted, so DSL conditions never hit an unresolved
+    // parameter — the new ones included.
+    @Test
+    fun `the new keys are part of the always-emitted set`() {
+        listOf(
+            PrParameterProvider.PARAM_PR_URL,
+            PrParameterProvider.PARAM_PR_BASE_SHA,
+            PrParameterProvider.PARAM_PR_MERGE_BASE,
+            PrParameterProvider.PARAM_PR_CHANGED_FILES,
+            PrParameterProvider.PARAM_PR_LABELS,
+        ).forEach { key ->
+            assertTrue(PrParameterProvider.ALL_KEYS.contains(key), key)
+            assertTrue(PrParameterProvider.DEFAULT_NON_PR_PARAMS.containsKey(key), key)
+        }
+    }
 }

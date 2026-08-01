@@ -29,6 +29,21 @@ object BridgeProjectParams {
     const val PR_TRIGGER_ENABLED: String = "teamcity.github.bridge.prTrigger.enabled"
     const val PR_TRIGGER_BRANCHES: String = "teamcity.github.bridge.prTrigger.branches"
 
+    // A prefix to cut off the front of every Check Run name this project posts.
+    //
+    // The name is `TeamCity / <full build configuration name>`, and on a deep
+    // tree that is mostly ancestry a reviewer does not need — while GitHub's merge
+    // box truncates the end, which is the part that identifies the build. Setting
+    // `TeamCity / Sandbox / test_ci / PR /` turns
+    // `TeamCity / Sandbox / test_ci / PR / Build / Linux / Build (Linux, x64, Release)`
+    // into `Build / Linux / Build (Linux, x64, Release)`.
+    //
+    // **This renames the checks.** GitHub identifies a Check Run row by
+    // `(name, head_sha)`, so changing it starts a new row and leaves the old ones
+    // where they are, and any branch protection rule that requires the old name
+    // must be updated or it will wait for a check that never arrives again.
+    const val CHECK_NAME_STRIP_PREFIX: String = "teamcity.github.bridge.checkName.stripPrefix"
+
     // May the bridge write on the diff of this project's pull requests?
     //
     // Read **own-only, over the whole chain** and not resolved like every other

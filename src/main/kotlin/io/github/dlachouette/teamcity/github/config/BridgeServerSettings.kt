@@ -154,6 +154,30 @@ class BridgeServerSettings(
     // clean, at the cost of the PR column falling back to what the ref says.
     fun prTagEnabled(): Boolean = boolSetting(KEY_PR_TAG_ENABLED, true)
 
+    // Resolve where the pull request's branch diverged from its base
+    // (`GET /compare/{base}...{head}` -> `merge_base_commit.sha`) and publish it
+    // as a build parameter.
+    //
+    // On by default, and the cost is bounded: one call **per cache fill**, not
+    // per build, since the answer is stored with the pull request it describes
+    // and invalidated by the same events. What it buys is the only correct base
+    // for a "what did this PR change" diff — the base branch's current head
+    // includes everything that landed on the base since the branch started, so a
+    // diff-scoped analysis given that instead reviews other people's commits.
+    //
+    // Turn it off on a server that is close to its GitHub rate limit and whose
+    // builds do not read the parameter.
+    fun mergeBaseEnabled(): Boolean = boolSetting(KEY_MERGE_BASE, true)
+
+    // List the pull request's changed files on the build page's "Pull request"
+    // tab.
+    //
+    // On by default. The list is filled by the same compare call that resolves the
+    // merge base, so a warm cache costs nothing; a cold one costs one call, and
+    // only because somebody opened the tab. Turn it off to guarantee that opening
+    // a build page never talks to GitHub.
+    fun prTabChangedFilesEnabled(): Boolean = boolSetting(KEY_PR_TAB_FILES, true)
+
     // Show the PR tag, or keep it only as a search key.
     //
     // The two are separate questions and TeamCity forces the trade-off: its
@@ -227,6 +251,7 @@ class BridgeServerSettings(
         gitHubClient.baseDelayMs = httpBaseDelayMs()
         prInfoCache.ttlMs = prInfoCacheTtlSeconds() * 1000L
         prInfoCache.staleGraceMs = prInfoStaleGraceSeconds() * 1000L
+        prInfoCache.mergeBaseEnabled = mergeBaseEnabled()
         LOG.info(
             "Applied GitHub Bridge server settings: apiVersion=${apiVersion()}, " +
                 "prInfoTtl=${prInfoCacheTtlSeconds()}s, staleGrace=${prInfoStaleGraceSeconds()}s, " +
@@ -238,6 +263,7 @@ class BridgeServerSettings(
                 "${if (prTagEnabled() && !prTagDisplayEnabled()) " (hidden)" else ""}, " +
                 "queueCleanup=${queueCleanupEnabled()}, cancelObsolete=${cancelObsoleteEnabled()}, " +
                 "annotations=${checkRunAnnotationsEnabled()}, logScan=${checkRunLogScanEnabled()}, " +
+                "mergeBase=${mergeBaseEnabled()}, " +
                 "testStats=${checkRunTestStatsEnabled()}, timings=${checkRunTimingsEnabled()}, " +
                 "infraNeutral=${infraFailureNeutralEnabled()}, " +
                 "allowlist=${repoAllowlist().size} entr(y/ies)"
@@ -288,6 +314,8 @@ class BridgeServerSettings(
         const val KEY_PR_TAG_ENABLED: String = "prTag.enabled"
         const val KEY_PR_TAG_PREFIX: String = "prTag.prefix"
         const val KEY_PR_TAG_DISPLAY: String = "prTag.display"
+        const val KEY_MERGE_BASE: String = "mergeBase.enabled"
+        const val KEY_PR_TAB_FILES: String = "prTab.changedFiles"
         const val DEFAULT_PR_TAG_PREFIX: String = "pr-"
         const val KEY_REPO_ALLOWLIST: String = "repo.allowlist"
         const val KEY_COMMENT_ASSOCIATIONS: String = "comment.allowedAssociations"

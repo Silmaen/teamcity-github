@@ -29,6 +29,11 @@ class PrInfoCache(
     var staleGraceMs: Long = DEFAULT_STALE_GRACE_MS
     var clock: () -> Long = { System.currentTimeMillis() }
 
+    // Whether to resolve the merge base when filling the cache. Pushed in from
+    // `BridgeServerSettings.applyTo`, like the TTL and the grace window, so a
+    // change on the admin page takes effect without a restart.
+    var mergeBaseEnabled: Boolean = true
+
     fun get(
         repo: RepoCoords,
         number: Int,
@@ -43,6 +48,7 @@ class PrInfoCache(
         }
 
         val fresh = gitHubClient.getPr(accessToken, repo, number, apiBase)
+            ?.let { enrich(it, repo, accessToken, apiBase) }
         if (fresh != null) {
             store[key] = Entry(fresh, now)
             return fresh
@@ -85,6 +91,7 @@ class PrInfoCache(
         }
 
         val selected = selectForCommit(gitHubClient.listPrsForCommit(accessToken, repo, sha, apiBase), sha)
+            ?.let { enrich(it, repo, accessToken, apiBase) }
         commitStore[key] = CommitEntry(selected, now)
         if (selected != null) {
             // Seed the number-keyed store so a follow-up get(number) for
@@ -99,6 +106,41 @@ class PrInfoCache(
 
     fun invalidate(repo: RepoCoords, number: Int) {
         store.remove(Key(repo, number))
+    }
+
+    // Fill in what only a compare call knows: where the branches diverged, and —
+    // for a pull request resolved from a commit, where GitHub omits them — how
+    // big the change is.
+    //
+    // Done here rather than in the client so it happens **once per cache fill**
+    // instead of once per read, and applied on **both** fetch paths. Missing it on
+    // the commit path was a real bug: a branch-source build resolves its pull
+    // request from the commit, so exactly the builds that most need the merge base
+    // were the ones never getting it.
+    private fun enrich(
+        pr: PrInfo,
+        repo: RepoCoords,
+        accessToken: String,
+        apiBase: String,
+    ): PrInfo {
+        if (!mergeBaseEnabled) return pr
+        if (pr.baseRef.isBlank() || pr.headSha.isBlank()) return pr
+        val cmp = try {
+            gitHubClient.compare(accessToken, repo, pr.baseRef, pr.headSha, apiBase)
+        } catch (e: Exception) {
+            LOG.debug("Compare lookup failed for ${repo.slug}#${pr.number}: ${e.message}")
+            null
+        } ?: return pr
+        return pr.copy(
+            mergeBaseSha = cmp.mergeBaseSha,
+            changedFileNames = cmp.files,
+            changedFilesTruncated = cmp.filesTruncated,
+            // Only fill a count the pull request object left at zero, and only
+            // when the compare response actually knew it. Never overwrite a
+            // number GitHub already gave us with a possibly-truncated one.
+            changedFiles = if (pr.changedFiles > 0) pr.changedFiles else cmp.changedFiles,
+            commits = if (pr.commits > 0) pr.commits else cmp.commits,
+        )
     }
 
     fun size(): Int = store.size

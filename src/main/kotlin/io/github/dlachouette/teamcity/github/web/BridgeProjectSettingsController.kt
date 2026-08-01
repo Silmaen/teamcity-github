@@ -80,6 +80,10 @@ class BridgeProjectSettingsController(
                 if (request.getParameter("prBuildRefBranch") != null) PrBuildRef.BRANCH.name.lowercase()
                 else PrBuildRef.PULL.name.lowercase(),
             )
+            applyParam(
+                project, BridgeProjectParams.CHECK_NAME_STRIP_PREFIX,
+                request.getParameter("checkNameStripPrefix").orEmpty().trim(),
+            )
             // Written explicitly either way: this is the parameter a parent
             // project uses to hold annotations off for its whole subtree, so
             // "what does this project say" must be readable without guessing.
