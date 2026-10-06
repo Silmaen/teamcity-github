@@ -48,4 +48,17 @@ class ReportHelpersTest {
             stripCheckNamePrefix(full, "teamcity / sandbox / test_ci / pr /"),
         )
     }
+
+    // A fixed name is how a required check survives a move in the project tree.
+
+    @Test
+    fun `a fixed check name is used verbatim, prefix and stripping aside`() {
+        assertEquals("PR Ready", resolveCheckRunName("Sandbox / Analysis / PR Ready", "  PR Ready ", "TeamCity / Sandbox /"))
+    }
+
+    @Test
+    fun `without a fixed name the name derives from the tree`() {
+        assertEquals("Analysis / PR Ready", resolveCheckRunName("Sandbox / Analysis / PR Ready", null, "TeamCity / Sandbox /"))
+        assertEquals("TeamCity / Sandbox / Analysis / PR Ready", resolveCheckRunName("Sandbox / Analysis / PR Ready", "   ", null))
+    }
 }

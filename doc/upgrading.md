@@ -23,6 +23,29 @@ Settings are read by key, so a key an older or newer version does not know is
 **ignored, not rejected** — the file survives an upgrade and a rollback
 unchanged.
 
+## To the next release (unreleased)
+
+One default changes; nothing else needs touching.
+
+### Draft pull requests are opt-in
+
+`triggerOnPrDraft` now defaults to **off**. A feature saved from the UI already
+stores its value and keeps behaving as before; one that never stored it —
+typically a Kotlin DSL configuration — stops running on drafts and posts
+*"Skipped: draft PR"* instead. Where drafts should still build, set
+`param("triggerOnPrDraft", "true")`. The self-test **Draft setting along
+composite chains** lists the composites that would build a draft-skipping
+dependency anyway.
+
+### A required check can keep its name
+
+The feature's new **Check name** (`checkName`) fixes a configuration's Check Run
+name, so moving it in the project tree no longer renames the check a branch
+protection rule requires. Setting it on an existing check **is** a rename, with
+the same consequence as `checkName.stripPrefix` below: update the rule in the
+same change. The self-test **Unique check names** warns when two configurations
+post the same name to one repository.
+
 ## To 1.10.0
 
 Nothing breaks on upgrade, and no setting needs to change for the plugin to keep

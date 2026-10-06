@@ -58,12 +58,13 @@ class GitHubBridgeBuildFeature(
         if (params[PARAM_SKIP_IF_COMMIT_PASSED] == "true") flags += "reuse passed commits"
         val triggers = if (flags.isEmpty()) "on demand only" else flags.joinToString(" + ")
         val publish = if (params[PARAM_PUBLISH_CHECKS] == "false") "; GitHub publication OFF" else ""
+        val checkName = params[PARAM_CHECK_NAME]?.trim()?.takeIf { it.isNotEmpty() }?.let { "; check name '$it'" }.orEmpty()
         val annotations = if (params[PARAM_ANNOTATE_DIFF] == "false") "; diff annotations OFF" else ""
         val overrides = mutableListOf<String>()
         if (!params[PARAM_BRANCH_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "branch list override"
         if (!params[PARAM_PR_TRIGGER_OVERRIDE].isNullOrBlank()) overrides += "PR list override"
         val base = if (overrides.isEmpty()) "triggers: $triggers" else "triggers: $triggers; ${overrides.joinToString(", ")}"
-        return base + publish + annotations
+        return base + publish + checkName + annotations
     }
 
     override fun getParametersProcessor(): PropertiesProcessor = PropertiesProcessor { input ->
@@ -92,6 +93,9 @@ class GitHubBridgeBuildFeature(
         }
         BranchSpecMatcher.validate(input[PARAM_LABEL_FILTER])?.let {
             invalid += InvalidProperty(PARAM_LABEL_FILTER, it)
+        }
+        if (input[PARAM_CHECK_NAME].orEmpty().contains('\n')) {
+            invalid += InvalidProperty(PARAM_CHECK_NAME, "A check name is a single line.")
         }
 
         invalid
@@ -139,6 +143,11 @@ class GitHubBridgeBuildFeature(
         const val PARAM_LABEL_FILTER: String = "labelFilter"
         const val PARAM_SKIP_IF_COMMIT_PASSED: String = "skipIfCommitPassed"
         const val PARAM_PUBLISH_CHECKS: String = "publishChecks"
+
+        // Optional fixed Check Run name, used verbatim. Absent: the name
+        // derives from the project tree (`checkRunName`), and so changes
+        // when the configuration moves.
+        const val PARAM_CHECK_NAME: String = "checkName"
 
         // This build configuration's say on writing compiler diagnostics on the
         // pull request's diff. Unchecked stores the literal `false`, which vetoes

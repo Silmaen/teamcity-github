@@ -98,6 +98,22 @@
 </tr>
 
 <tr>
+    <th><label for="checkName">Check name:</label></th>
+    <td>
+        <props:textProperty name="checkName" className="longField"/>
+        <div class="bridge-feature-help">
+            The name of this build configuration's row on GitHub, used verbatim.
+            Leave it empty to derive it from the project tree
+            (<code>TeamCity / &lt;project&gt; / &lt;configuration&gt;</code>, minus the
+            project's prefix to strip) &mdash; but then moving the configuration
+            renames the check, and a branch protection rule requiring the old
+            name waits for ever. Set it on a check that a rule requires.
+        </div>
+        <span class="error" id="error_checkName"></span>
+    </td>
+</tr>
+
+<tr>
     <th><label for="annotateDiff">Annotate the diff:</label></th>
     <td>
         <props:checkboxProperty name="annotateDiff"/>

@@ -2,6 +2,7 @@ package io.github.dlachouette.teamcity.github.report
 
 import com.intellij.openapi.diagnostic.Logger
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
+import io.github.dlachouette.teamcity.github.feature.GitHubBridgeBuildFeature
 import jetbrains.buildServer.serverSide.SBuildType
 
 private val LOG = Logger.getInstance("io.github.dlachouette.teamcity.github.report.ReportHelpers")
@@ -15,16 +16,33 @@ private val LOG = Logger.getInstance("io.github.dlachouette.teamcity.github.repo
 // On a deep project tree the full name is mostly ancestry nobody reading a pull
 // request needs ("TeamCity / Sandbox / test_ci / PR / Build / Linux / Build
 // (Linux, x64, Release)"), and GitHub's merge box truncates what is left.
+//
+// A build configuration may also fix its name outright — see
+// `GitHubBridgeBuildFeature.PARAM_CHECK_NAME` — so that moving it in the
+// project tree does not rename the check a branch protection rule requires.
 fun checkRunName(buildType: SBuildType): String {
-    val full = "$CHECK_NAME_PREFIX${buildType.fullName}"
+    val custom = try {
+        buildType.resolvedSettings
+            .getBuildFeaturesOfType(GitHubBridgeBuildFeature.FEATURE_TYPE)
+            .firstOrNull()?.parameters?.get(GitHubBridgeBuildFeature.PARAM_CHECK_NAME)
+    } catch (e: Exception) {
+        LOG.debug("Could not read the check name of ${buildType.externalId}: ${e.message}")
+        null
+    }
     val strip = try {
         buildType.project.parameters[BridgeProjectParams.CHECK_NAME_STRIP_PREFIX]
     } catch (e: Exception) {
         LOG.debug("Could not read the check-name prefix for ${buildType.externalId}: ${e.message}")
         null
     }
-    return stripCheckNamePrefix(full, strip)
+    return resolveCheckRunName(buildType.fullName, custom, strip)
 }
+
+// Pure helper: a fixed name wins verbatim (no "TeamCity / ", no stripping);
+// otherwise the name derives from the configuration's place in the tree.
+fun resolveCheckRunName(buildTypeFullName: String, checkName: String?, stripPrefix: String?): String =
+    checkName?.trim()?.takeIf { it.isNotEmpty() }
+        ?: stripCheckNamePrefix("$CHECK_NAME_PREFIX$buildTypeFullName", stripPrefix)
 
 const val CHECK_NAME_PREFIX: String = "TeamCity / "
 

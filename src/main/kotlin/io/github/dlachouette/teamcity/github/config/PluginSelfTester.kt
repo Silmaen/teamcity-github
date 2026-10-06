@@ -7,6 +7,7 @@ import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.feature.BundledPublisherDetector
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.DraftChainDetector
+import io.github.dlachouette.teamcity.github.report.CheckNameCollisionDetector
 import io.github.dlachouette.teamcity.github.web.SignatureVerifier
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SProject
@@ -41,7 +42,30 @@ class PluginSelfTester(
         out += testGitHubApiWithToken(projects, tokenResults)
         out += testNoDoubleStatusPublisher()
         out += testDraftChainConsistent()
+        out += testUniqueCheckNames()
         return out
+    }
+
+    // Configuration check: two build configurations publishing the same Check
+    // Run name to one repository overwrite each other's row on every shared
+    // commit. WARN: the plugin works, but the row GitHub shows is a coin toss.
+    private fun testUniqueCheckNames(): TestResult {
+        val name = "Unique check names"
+        val collisions = try {
+            CheckNameCollisionDetector.scan(projectManager.activeBuildTypes)
+        } catch (e: Exception) {
+            return TestResult(name, Status.SKIP, "Could not inspect build configurations: ${e.message}")
+        }
+        if (collisions.isEmpty()) {
+            return TestResult(name, Status.PASS, "Every publishing build configuration has its own Check Run name in its repository")
+        }
+        val listed = collisions.take(10).joinToString("; ") { "'${it.checkName}' on ${it.repo}: ${it.buildTypes.joinToString(", ")}" }
+        return TestResult(
+            name, Status.WARN,
+            "${collisions.size} Check Run name(s) are shared by several build configurations, which overwrite each other's row on GitHub: $listed" +
+                (if (collisions.size > 10) " (+${collisions.size - 10} more)" else "") +
+                ". Give each its own \"Check name\", or adjust the project's prefix to strip.",
+        )
     }
 
     // Configuration check: a composite that runs on drafts builds its whole

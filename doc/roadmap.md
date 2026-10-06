@@ -65,25 +65,6 @@ after-the-fact republish as the safety net.
 **Effort.** Small to medium: the TeamCity-side lookup avoids a GitHub call per
 queued build but must mirror the chain's reuse rule exactly.
 
-## A stable name for a required check
-
-**Problem.** A Check Run is named after the configuration's place in the
-project tree (`TeamCity / <buildType fullName>`, minus `checkName.stripPrefix`).
-Moving the required gate between sub-projects renames its check — on Owl,
-moving PR Ready to the root turned `Analysis / PR Ready` into `PR Ready` —
-and the branch protection then waits for a check that will never come again.
-The self-test in *Warn when a required check can never arrive* would detect
-this; a fixed name would prevent it.
-
-**Feasible.** `checkRunName` is computed in one place, and every published
-row goes through it.
-
-**Design.** An optional `checkName` parameter on the build feature. When set,
-it is the row's name verbatim (still unique per configuration, which the
-self-test can verify); when absent, today's derivation applies.
-
-**Effort.** Small.
-
 ## A superseded build is skipped, not cancelled
 
 **Problem.** When a new commit is pushed, the builds of the previous head are
