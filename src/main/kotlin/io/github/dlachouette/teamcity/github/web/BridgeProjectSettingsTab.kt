@@ -46,6 +46,12 @@ class BridgeProjectSettingsTab(
         model["prTriggerBranches"] = params[BridgeProjectParams.PR_TRIGGER_BRANCHES].orEmpty()
         model["checkNameStripPrefix"] = params[BridgeProjectParams.CHECK_NAME_STRIP_PREFIX].orEmpty()
         model["autoAssignAuthor"] = params[BridgeProjectParams.AUTO_ASSIGN_AUTHOR] == "true"
+        // The project's own rules are what the textarea edits; a line that does
+        // not parse is saved anyway (nothing typed is lost) and listed here,
+        // since it is ignored at runtime.
+        val labelRules = project.ownParameters[BridgeProjectParams.LABEL_RULES].orEmpty()
+        model["labelRules"] = labelRules
+        model["labelRuleErrors"] = io.github.dlachouette.teamcity.github.labels.LabelRules.parse(labelRules).errors
         model["prBuildRefBranch"] = PrBuildRef.parse(params[BridgeProjectParams.PR_BUILD_REF]) == PrBuildRef.BRANCH
 
         // Annotations are the one setting read own-per-project over the whole

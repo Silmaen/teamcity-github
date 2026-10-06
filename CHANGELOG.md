@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Label rules** (`teamcity.github.bridge.labelRules`, per project) add labels to a pull request by changed paths, author or team, branches and title; labels are only added, and one removed by hand is not put back.
 - **Assign to the author** (`teamcity.github.bridge.autoAssignAuthor`, opt-in per project) assigns a pull request opened with nobody assigned to its author; it needs the App's **Issues: write**.
 - The "Queued" row now says where the build stands — "26th in queue, ~4m to start — <TeamCity's wait reason>" — posted at enqueue and refreshed once if TeamCity had no estimate yet.
 - A **Required checks** self-test row per repository warns about every check a protected branch requires that no build configuration posts, which would leave pull requests waiting for ever.

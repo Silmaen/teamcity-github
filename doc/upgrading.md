@@ -45,6 +45,12 @@ The project setting **Assign to the author**
 needs the App's **Issues: write**: accept the permission on the App's
 installation page first, or each assignment logs a `403`.
 
+### Opt-in: label pull requests by rules
+
+The project setting **Label rules** (`teamcity.github.bridge.labelRules`) is
+empty by default. Like assignment it needs **Issues: write**, and `@org/team`
+conditions need the organisation's **Members: read**.
+
 ### Superseded builds are skipped, not cancelled
 
 A build the bridge stops because a newer commit was pushed now concludes

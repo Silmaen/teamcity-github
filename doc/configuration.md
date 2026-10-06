@@ -318,6 +318,7 @@ branches like `main`, `Release/*`) and `prTrigger` (PR branches,
 | `teamcity.github.bridge.annotations.enabled` | `true` (anything but `false`) | Annotate the diff | May the bridge pin compiler diagnostics to the pull request's diff for this project's builds? **Read own-per-project over the whole chain, not resolved** — unlike every other key in this table: a `false` on an ancestor project holds for its entire subtree and a sub-project setting `true` does **not** take it back. The verdict is the AND of the server flag, every project in the chain, and the build configuration's `annotateDiff` — one `false` anywhere wins. Nothing else the bridge reports is affected. See [Who may annotate a diff](#who-may-annotate-a-diff). |
 | `teamcity.github.bridge.prBuildRef` | `pull` | Build PRs on their own branch | Which ref a PR build runs on. `pull` (default) = the synthetic `pull/N` ref, mapped by the VCS root's branch spec — the only option that works for PRs from forks. `branch` = the PR's **own head branch** (e.g. `Feature/foo`): readable in every TeamCity screen, and a push builds **once** instead of twice once a PR exists, because there is no second ref for the same commit. See [Branch-source PR builds](#branch-source-pr-builds-v190) below. |
 | `teamcity.github.bridge.autoAssignAuthor` | _off_ | Assign to the author | `true`: a pull request **opened** with nobody assigned is assigned to its author — once, never replacing an assignee, never putting back one a human removed, never for a bot author. Needs the App's **Issues: write** (a `403` is logged naming the missing permission). Inherited by sub-projects. |
+| `teamcity.github.bridge.labelRules` | _empty_ | Label rules | Rules that **add** labels to a pull request, one per line: `<label> <= <condition> ; <condition>` (all conditions must hold). Conditions: `paths` (VCS-filter entries, comma-separated, like `pathFilter`), `author` (logins and `@org/team`, comma-separated), `base` / `head` (branch-filter entries), `title` (regex, case-insensitive). Applied on opened, reopened, ready-for-review, each push and each edit. A label removed by hand is never put back. A line that does not parse is kept but ignored, and listed on the tab. Needs **Issues: write**; `@org/team` also needs the organisation's **Members: read**. A rule adding a label a `labelFilter` gates on starts those builds. See [Label rules](#label-rules). |
 | `teamcity.github.bridge.checkName.stripPrefix` (v1.10.0+) | _empty_ | Strip this prefix from Check Run names | A prefix cut off the front of every Check Run name this project posts. The name is `TeamCity / <full build configuration name>`, which on a deep tree is mostly ancestry a reviewer does not need — while GitHub's merge box truncates the **end**, the part that identifies the build. Setting `TeamCity / Sandbox / test_ci / PR /` turns `TeamCity / Sandbox / test_ci / PR / Build / Linux / Build (Linux, x64, Release)` into `Build / Linux / Build (Linux, x64, Release)`. Matched literally, and ignored when it does not match. **This renames the checks:** GitHub identifies a row by `(name, head_sha)`, so a new row starts, the old ones stay where they are, and any **branch protection rule requiring the old name will wait for a check that never arrives again** — update the rule in the same change. A configuration with its own `checkName` is not affected. |
 
 A BuildType participates only when (a) the surrounding project chain
@@ -536,6 +537,26 @@ override, `checkName` — has no effect on that pull request's own triggering; i
 takes effect once merged. This is on purpose: otherwise a pull request could
 grant itself a build (or hide from one) just by editing its gates. Until it is merged,
 a build that the old gates hold back can still be started by hand.
+
+### Label rules
+
+```text
+# <label>       <= <condition> ; <condition>
+network         <= paths +:src/net/**, -:src/net/test/**
+team: core      <= author @acme/core, alice
+docs            <= paths +:docs/** ; title ^docs
+release         <= base +:Release/*
+```
+
+- A label is everything left of the first ` <= `, so `team: core` is fine; a
+  condition value cannot contain `;`.
+- Every condition of a line must hold; a label is added when any of its lines
+  holds. Labels are **only added** — removing a rule never removes a label.
+- A label the bridge added and later finds missing was removed by somebody: it
+  is not added again on the next push (remembered in
+  `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/applied-labels.tsv`,
+  forgotten when the pull request closes).
+- Rules from every project using the repository apply.
 
 ## Configuration precedence
 

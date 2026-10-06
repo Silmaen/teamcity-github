@@ -419,10 +419,12 @@ permission (and subscribing to `issue_comment`) is an **opt-in** for
 operators who also want to trigger from PR conversation comments.
 
 **By default, the plugin never writes to a pull request.** Its only write is the
-Check Run lifecycle, which is the **Checks** permission. The one exception is
+Check Run lifecycle, which is the **Checks** permission. The exceptions are
 opt-in: `teamcity.github.bridge.autoAssignAuthor` assigns a newly opened, unassigned
-pull request to its author, which needs **Issues: write** — grant it only if you
-turn the setting on. Likewise **Administration: read**, optional, only lets the
+pull request to its author, and `teamcity.github.bridge.labelRules` adds labels
+(never removes them); both need **Issues: write** — grant it only if you use
+them. Team conditions in label rules also need the organisation's **Members:
+read**. Likewise **Administration: read**, optional, only lets the
 *Required checks* self-test read classic branch protection; it is never used to
 write. Pull-requests **write** was
 required for one feature — the sticky summary comment — and that feature was
