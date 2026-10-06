@@ -6,6 +6,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A **Draft setting along composite chains** self-test row warns about every composite that runs on drafts while a dependency in its chain skips them, since the composite builds that dependency anyway.
+
 ### Changed
 
 - **Draft pull requests are now opt-in**: `triggerOnPrDraft` defaults to off, so a configuration (above all a composite gate pulling its snapshot chain) no longer runs on every draft push and posts "Skipped: draft PR" instead. **Upgrade:** only a feature that never stored the parameter (typically Kotlin DSL) changes behaviour — set `triggerOnPrDraft=true` there to keep building drafts; one saved from the UI already holds its value.

@@ -6,6 +6,7 @@ import io.github.dlachouette.teamcity.github.api.RepoCoords
 import io.github.dlachouette.teamcity.github.api.TokenResolver
 import io.github.dlachouette.teamcity.github.feature.BundledPublisherDetector
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
+import io.github.dlachouette.teamcity.github.feature.DraftChainDetector
 import io.github.dlachouette.teamcity.github.web.SignatureVerifier
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SProject
@@ -39,7 +40,31 @@ class PluginSelfTester(
         out += testTokenResolutionForProjects(projects, tokenResults)
         out += testGitHubApiWithToken(projects, tokenResults)
         out += testNoDoubleStatusPublisher()
+        out += testDraftChainConsistent()
         return out
+    }
+
+    // Configuration check: a composite that runs on drafts builds its whole
+    // snapshot chain on every draft push, overriding the dependencies that
+    // were set to skip drafts. WARN, never FAIL: it may be deliberate.
+    private fun testDraftChainConsistent(): TestResult {
+        val name = "Draft setting along composite chains"
+        val mismatches = try {
+            DraftChainDetector.scan(projectManager.activeBuildTypes)
+        } catch (e: Exception) {
+            return TestResult(name, Status.SKIP, "Could not inspect build configurations: ${e.message}")
+        }
+        if (mismatches.isEmpty()) {
+            return TestResult(name, Status.PASS, "No composite runs on drafts while one of its dependencies skips them")
+        }
+        val listed = mismatches.take(10).joinToString("; ") { "${it.composite} -> ${it.skippingDependencies.joinToString(", ")}" }
+        return TestResult(
+            name, Status.WARN,
+            "${mismatches.size} composite(s) run on draft PRs and pull in dependencies that skip drafts, " +
+                "which then build anyway and post no \"Skipped: draft PR\" row: $listed" +
+                (if (mismatches.size > 10) " (+${mismatches.size - 10} more)" else "") +
+                ". Uncheck \"Run on PR (draft)\" on the composite, or check it on those dependencies if drafts should run them.",
+        )
     }
 
     // Configuration check: a build configuration must not carry both this
