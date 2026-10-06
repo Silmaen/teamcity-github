@@ -46,6 +46,15 @@ the same consequence as `checkName.stripPrefix` below: update the rule in the
 same change. The self-test **Unique check names** warns when two configurations
 post the same name to one repository.
 
+### A self-test reads branch protection
+
+**Required checks / `<repo>`** compares the checks your branches require with
+the names the bridge posts, and warns about a required name nothing posts. It
+reads rulesets with the App's existing permissions. To cover classic branch
+protection too, grant the App **administration: read** (repository
+permission); without it the row says classic protection was not read. Nothing
+else uses that permission, and nothing is ever written.
+
 ## To 1.10.0
 
 Nothing breaks on upgrade, and no setting needs to change for the plugin to keep

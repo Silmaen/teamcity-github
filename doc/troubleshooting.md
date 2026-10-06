@@ -344,6 +344,35 @@ grep -E "SUPPRESS_METADATA|metadata out of scope" <TC_DATA_DIR>/logs/teamcity-gi
 A build that passed the metadata gate is enqueued normally; one that was
 excluded shows the suppression and the posted skipped Check Run.
 
+## Symptom: a pull request waits on a required check that never arrives
+
+### What you see
+
+The merge box says *"Required statuses must pass"* and lists a check as
+*"Expected — Waiting for status to be reported"*, while every TeamCity build of
+the pull request has finished and reported.
+
+### Cause
+
+The branch protection rule (or ruleset) requires a name the bridge does not
+post. GitHub matches the name literally, and a Check Run is named after the
+configuration's place in the project tree: renaming or moving the
+configuration, or setting `teamcity.github.bridge.checkName.stripPrefix`,
+renames the check, and the rule keeps waiting for the old one.
+
+### Fix
+
+Run the self-tests: the **Required checks / `<repo>`** row lists every required
+name no build configuration posts, with the branches requiring it. Either update
+the rule to the name the build page's *Pull request* tab shows under **Reports
+as**, or give the configuration that name with the feature's **Check name**
+(`checkName`), which then survives later moves. A listed name another system
+posts (GitHub Actions, another CI) is fine as it is.
+
+The row reads rulesets with the App's default permissions; classic branch
+protection needs **administration: read** on the App, and is reported as not
+read without it.
+
 ## Symptom: 404 on `/app/teamcity-github-bridge/info`
 
 ### What you see

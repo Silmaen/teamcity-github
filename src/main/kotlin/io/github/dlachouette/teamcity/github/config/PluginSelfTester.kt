@@ -8,6 +8,7 @@ import io.github.dlachouette.teamcity.github.feature.BundledPublisherDetector
 import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.DraftChainDetector
 import io.github.dlachouette.teamcity.github.report.CheckNameCollisionDetector
+import io.github.dlachouette.teamcity.github.report.RequiredCheckAudit
 import io.github.dlachouette.teamcity.github.web.SignatureVerifier
 import jetbrains.buildServer.serverSide.ProjectManager
 import jetbrains.buildServer.serverSide.SProject
@@ -40,10 +41,73 @@ class PluginSelfTester(
         val tokenResults = mutableMapOf<String, ResolvedAccessForTest?>()
         out += testTokenResolutionForProjects(projects, tokenResults)
         out += testGitHubApiWithToken(projects, tokenResults)
+        out += testRequiredChecksArrive(projects, tokenResults)
         out += testNoDoubleStatusPublisher()
         out += testDraftChainConsistent()
         out += testUniqueCheckNames()
         return out
+    }
+
+    // Configuration check: every check a protected branch requires must be one
+    // the bridge posts, or pull requests wait on it for ever. One row per
+    // repository, reusing the tokens test #6 resolved. WARN, never FAIL: a
+    // required name may come from another system the plugin cannot see.
+    private fun testRequiredChecksArrive(
+        targets: List<OptedInTarget>,
+        tokenResults: Map<String, ResolvedAccessForTest?>,
+    ): List<TestResult> {
+        if (targets.isEmpty()) return emptyList()
+        val produced = try {
+            CheckNameCollisionDetector.publishers(projectManager.activeBuildTypes)
+                .groupBy({ it.repo.lowercase() }, { it.checkName })
+        } catch (e: Exception) {
+            return listOf(TestResult("Required checks", Status.SKIP, "Could not inspect build configurations: ${e.message}"))
+        }
+        return targets.groupBy { it.repo.lowercase() }.map { (repoKey, group) ->
+            val slug = group.first().repo
+            val name = "Required checks / $slug"
+            val access = group.firstNotNullOfOrNull { tokenResults[it.key()] }
+                ?: return@map TestResult(name, Status.SKIP, "Skipped: no token for this repository")
+            val repo = try {
+                RepoCoords.parse(slug)
+            } catch (e: IllegalArgumentException) {
+                return@map TestResult(name, Status.SKIP, "Skipped: '$slug' is not an owner/name slug")
+            }
+            auditRequiredChecks(name, repo, access, produced[repoKey].orEmpty().toSet())
+        }
+    }
+
+    private fun auditRequiredChecks(name: String, repo: RepoCoords, access: ResolvedAccessForTest, produced: Set<String>): TestResult {
+        val branches = gitHubClient.listGatedBranches(access.token, repo, access.apiBase)
+            ?: return TestResult(name, Status.SKIP, "Could not read the repository's branches")
+        val lookups = branches.take(MAX_AUDITED_BRANCHES).associateWith { gitHubClient.requiredChecks(access.token, repo, it, access.apiBase) }
+        if (lookups.values.none { it.classicReadable || it.rulesReadable }) {
+            return TestResult(name, Status.SKIP, "The App can read neither branch protection nor rulesets on ${repo.slug}")
+        }
+        val audit = RequiredCheckAudit.compare(lookups.mapValues { it.value.names }, produced)
+        val notes = buildList {
+            if (lookups.values.any { !it.classicReadable }) {
+                add("classic branch protection not read (it needs the App's 'administration: read'); rulesets only")
+            }
+            if (branches.size > MAX_AUDITED_BRANCHES) add("only the first $MAX_AUDITED_BRANCHES of ${branches.size} protected branches audited")
+            if (audit.unrequired.isNotEmpty()) {
+                add("posted but required nowhere: " + audit.unrequired.take(10).joinToString(", ") { "'$it'" } +
+                    (if (audit.unrequired.size > 10) " (+${audit.unrequired.size - 10} more)" else ""))
+            }
+        }.joinToString("; ").let { if (it.isEmpty()) "" else " ($it)" }
+        if (audit.missing.isEmpty()) {
+            val required = lookups.values.flatMap { it.names }.toSet().size
+            val what = if (required == 0) "No audited branch requires a check" else "All $required required check(s) are posted by a build configuration"
+            return TestResult(name, Status.PASS, what + notes)
+        }
+        val listed = audit.missing.entries.take(10).joinToString("; ") { (check, on) -> "'$check' (${on.joinToString(", ")})" }
+        return TestResult(
+            name, Status.WARN,
+            "${audit.missing.size} required check(s) that no build configuration posts: $listed" +
+                (if (audit.missing.size > 10) " (+${audit.missing.size - 10} more)" else "") +
+                ". Unless another system posts them, every pull request on those branches waits for ever: " +
+                "fix the rule, or give the configuration that check name (\"Check name\")$notes.",
+        )
     }
 
     // Configuration check: two build configurations publishing the same Check
@@ -352,6 +416,9 @@ class PluginSelfTester(
 
     companion object {
         private val LOG = Logger.getInstance(PluginSelfTester::class.java.name)
+
+        // Each audited branch costs two GitHub calls.
+        private const val MAX_AUDITED_BRANCHES: Int = 20
     }
 }
 
