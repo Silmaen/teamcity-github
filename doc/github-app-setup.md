@@ -208,7 +208,8 @@ Two permissions are **optional**, each needed by one opt-in feature only:
 
 | Resource | Access | Only for |
 |---|---|---|
-| **Issues** | Write | `teamcity.github.bridge.autoAssignAuthor` — assigning a new pull request to its author |
+| **Issues** | Write | `teamcity.github.bridge.autoAssignAuthor` and `teamcity.github.bridge.labelRules` — assigning and labelling pull requests |
+| **Members** (organisation) | Read | `@org/team` conditions in label rules |
 | **Administration** | Read | the **Required checks** self-test reading classic branch protection (rulesets need nothing more) |
 
 Do **not** grant **Commit statuses** or **Webhooks** — this plugin

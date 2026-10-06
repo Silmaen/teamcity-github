@@ -176,6 +176,25 @@
             </td>
         </tr>
         <tr>
+            <th><label for="labelRules">Label rules:</label></th>
+            <td>
+                <textarea id="labelRules" name="labelRules" rows="5" placeholder="network <= paths +:src/net/**"><c:out value="${labelRules}"/></textarea>
+                <c:if test="${not empty labelRuleErrors}">
+                    <div class="bridge-banner bad">
+                        These lines are ignored:
+                        <ul><c:forEach items="${labelRuleErrors}" var="e"><li><c:out value="${e}"/></li></c:forEach></ul>
+                    </div>
+                </c:if>
+                <div class="bridge-help">
+                    One rule per line: <code>&lt;label&gt; &lt;= &lt;condition&gt; ; &lt;condition&gt;</code>, all
+                    conditions required. Conditions: <code>paths</code>, <code>author</code> (logins or
+                    <code>@org/team</code>), <code>base</code>, <code>head</code>, <code>title</code> (regex).
+                    Labels are only added, never removed, and one removed by hand is not put back.
+                    Needs the App's <strong>Issues: write</strong>.
+                </div>
+            </td>
+        </tr>
+        <tr>
             <td></td>
             <td><input type="submit" class="btn btn_primary" value="Save GitHub Bridge settings"/></td>
         </tr>

@@ -152,6 +152,44 @@ open class GitHubClient {
         return resp.code
     }
 
+    // POST /repos/{slug}/issues/{n}/labels — adds, never replaces; a label the
+    // repository does not have yet is created. Same permission as assignment.
+    open fun addLabels(
+        accessToken: String,
+        repo: RepoCoords,
+        number: Int,
+        labels: Collection<String>,
+        apiBase: String = DEFAULT_API_BASE,
+    ): Int? {
+        val body = MAPPER.createObjectNode().apply { putArray("labels").also { a -> labels.forEach { a.add(it) } } }.toString()
+        val resp = request("POST", "$apiBase/repos/${repo.slug}/issues/$number/labels", accessToken, body)
+            ?: return null
+        if (!resp.isSuccess) LOG.warn("POST issues/$number/labels returned ${resp.code} for ${repo.slug}: ${resp.body}")
+        return resp.code
+    }
+
+    // GET /orgs/{org}/teams/{team}/memberships/{login}: true for an active
+    // member, false for a 404, null when GitHub cannot say (typically a 403:
+    // the App lacks the organisation's `members: read`).
+    open fun isTeamMember(
+        accessToken: String,
+        org: String,
+        teamSlug: String,
+        login: String,
+        apiBase: String = DEFAULT_API_BASE,
+    ): Boolean? {
+        val url = "$apiBase/orgs/${encodePathSegment(org)}/teams/${encodePathSegment(teamSlug)}/memberships/${encodePathSegment(login)}"
+        val resp = request("GET", url, accessToken) ?: return null
+        return when {
+            resp.isSuccess -> runCatching { MAPPER.readTree(resp.body).path("state").asText("") == "active" }.getOrDefault(false)
+            resp.code == 404 -> false
+            else -> {
+                LOG.warn("GET team membership $org/$teamSlug returned ${resp.code}; the App may lack the organisation's 'members: read'")
+                null
+            }
+        }
+    }
+
     // ----- Branch protection (read-only, for the self-tests) -----
 
     // The branches a required check can gate: the default branch plus every

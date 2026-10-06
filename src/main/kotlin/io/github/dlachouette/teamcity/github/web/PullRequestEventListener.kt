@@ -44,6 +44,7 @@ class PullRequestEventListener(
     private val tokenResolver: TokenResolver,
     private val gitHubClient: GitHubClient,
     private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
+    private val prLabeler: io.github.dlachouette.teamcity.github.labels.PrLabeler,
 ) {
 
     // Webhook deliveries land here without an authenticated user in
@@ -280,6 +281,7 @@ class PullRequestEventListener(
         // that were going to report into it — queued and running alike — then
         // stop.
         if (payload.action == PrAction.CLOSED) {
+            prLabeler.onPullRequest(payload, emptyList())
             cancelBuildsForClosedPr(payload)
             return
         }
@@ -292,6 +294,7 @@ class PullRequestEventListener(
         }
 
         autoAssignAuthor(payload, candidates)
+        prLabeler.onPullRequest(payload, candidates)
 
         // Bucket each candidate by the gate decision.
         val targets = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()

@@ -56,6 +56,10 @@ object BridgeProjectParams {
     // App's `issues: write`. Resolved like the other keys, so a parent project
     // can turn it on for its subtree.
     const val AUTO_ASSIGN_AUTHOR: String = "teamcity.github.bridge.autoAssignAuthor"
+
+    // Rules that add labels to a pull request — see `LabelRules` for the
+    // format. Same write permission as `AUTO_ASSIGN_AUTHOR`.
+    const val LABEL_RULES: String = "teamcity.github.bridge.labelRules"
 }
 
 // Which ref the bridge enqueues a PR build on.

@@ -88,6 +88,10 @@ class BridgeProjectSettingsController(
             // project uses to hold annotations off for its whole subtree, so
             // "what does this project say" must be readable without guessing.
             applyBool(project, BridgeProjectParams.ANNOTATIONS_ENABLED, request.getParameter("annotationsEnabled") != null)
+            applyParam(
+                project, BridgeProjectParams.LABEL_RULES,
+                request.getParameter("labelRules").orEmpty().replace("\r\n", "\n").trim(),
+            )
             // Off is the default: cleared rather than written, so an inherited
             // "on" from a parent project still applies here.
             applyParam(

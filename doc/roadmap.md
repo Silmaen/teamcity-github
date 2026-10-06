@@ -27,41 +27,6 @@ is visible rather than silent.
 
 **Effort.** Small.
 
-## Label a pull request by rules
-
-**Problem.** Labels are how a team routes a pull request — which reviewers,
-which board, which pipeline (`labelFilter` already gates builds on them) — but
-setting them is manual and forgotten.
-
-**Feasible.** Every input a rule needs is already read: the changed files
-(`listPrFiles`, used by `pathFilter`), the author, the title, body, base and
-head branches (`PrInfo`). `POST /repos/{o}/{r}/issues/{n}/labels` adds labels.
-
-**Design.** A project-level list of rules, each "label ← conditions", all
-conditions of a rule ANDed:
-
-- **paths** — the pull request touches files matching a VCS-filter spec
-  (same syntax as `pathFilter`): `+:src/net/**` → `network`;
-- **author** — the author is in a list of logins, or a member of a GitHub
-  team (`GET /orgs/{org}/teams/{team}/memberships/{user}`, which needs the
-  organisation **members: read** permission);
-- **branches / title** — the base or head branch matches a spec, the title
-  matches a pattern (`[WIP]`, `fix:`).
-
-Applied on `opened` and `synchronize` (a new push can touch new paths).
-Labels are **only added**, never removed — a human's removal must stick, so
-the plugin remembers what it added per pull request and does not re-add it.
-Echo the matched rule in the log, so "why does it have this label" has an
-answer.
-
-**Effort.** Medium: the rule format and its editor are most of the work.
-Two traps: the App's **issues: write**, already needed by `autoAssignAuthor`, and the **`labeled` event
-loops back** into the listener — a rule adding `ci-full` will enqueue the
-builds a `labelFilter` gates on it, which is useful but must be deliberate,
-and the plugin's own `labeled` events must never re-run the labelling.
-`actions/labeler` covers the paths part already; the case for doing it here
-is the author/team rules and having one configuration place.
-
 ## Report code coverage and its trend
 
 **Problem.** Coverage is measured on the agent and stays in TeamCity;
