@@ -1,0 +1,86 @@
+<%--
+  Shared look of the GitHub Bridge screens: the (?) documentation link, the
+  in-page tabs, and the small notes under a field. Included statically by
+  every configuration screen, so the three of them read as one product.
+
+  Tabs: a `.bridge-tabs` bar of `<a data-tab="x">` links over `.bridge-panel`
+  blocks with `id="bridge-tab-x"`. The open tab is kept in the URL hash, so a
+  form post that redirects back (`...#bridge-tab-x`) reopens where the user was,
+  and a link can point at a tab. Panels are only hidden, never removed: a form
+  spanning several tabs still submits every field.
+--%>
+<c:set var="bridgeDoc" value="https://github.com/silmaen/teamcity-github/blob/main/doc/"/>
+<style>
+    .bridge-doc {
+        display: inline-block; width: 15px; height: 15px; line-height: 15px;
+        margin-left: 6px; border-radius: 50%; text-align: center;
+        font-size: 10px; font-weight: bold; text-decoration: none !important;
+        color: #fff !important; background: #8a94a6; vertical-align: 1px;
+    }
+    .bridge-doc:hover { background: #3f7fe4; }
+    .bridge-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #d5d9e0; margin: 8px 0 16px; }
+    .bridge-tabs a {
+        padding: 6px 14px; color: #555; text-decoration: none; border: 1px solid transparent;
+        border-bottom: none; border-radius: 4px 4px 0 0; margin-bottom: -1px;
+    }
+    .bridge-tabs a:hover { color: #222; background: #f3f5f8; }
+    .bridge-tabs a.bridge-tab-on { color: #222; background: #fff; border-color: #d5d9e0; font-weight: 600; }
+    .bridge-tabs a .bridge-badge {
+        display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; border-radius: 8px;
+        font-size: 10px; line-height: 16px; text-align: center; color: #fff; background: #d64545;
+    }
+    .bridge-panel { display: none; }
+    .bridge-panel.bridge-panel-on { display: block; }
+    .bridge-section-title { font-size: 14px; font-weight: 600; margin: 18px 0 8px; }
+    .bridge-section-title:first-child { margin-top: 0; }
+    .bridge-intro { color: #555; max-width: 640px; margin: 0 0 12px; }
+    .bridge-note { color: #777; font-size: 11px; margin-top: 3px; max-width: 560px; }
+    .bridge-note code, .bridge-intro code { background: #f3f5f8; padding: 0 3px; border-radius: 2px; }
+    .bridge-form { border-collapse: collapse; }
+    .bridge-form th { text-align: left; vertical-align: top; padding: 9px 16px 9px 0; white-space: nowrap; font-weight: normal; width: 220px; }
+    .bridge-form td { padding: 6px 0; vertical-align: top; }
+    .bridge-form input[type=text], .bridge-form input[type=password] { width: 380px; }
+    .bridge-form textarea { width: 520px; font-family: monospace; }
+    .bridge-banner { padding: 8px 12px; border-radius: 3px; margin-bottom: 12px; max-width: 640px; }
+    .bridge-banner.ok { background: #e6f4ea; border: 1px solid #b7dfc2; }
+    .bridge-banner.bad { background: #fce8e6; border: 1px solid #f0b4ae; }
+    .bridge-banner.warn { background: #fff4e5; border: 1px solid #f3cf8f; }
+    .bridge-banner ul { margin: 4px 0 0 18px; padding: 0; }
+    .bridge-actions { margin-top: 14px; }
+</style>
+<script type="text/javascript">
+    (function () {
+        function show(id) {
+            var panels = document.querySelectorAll('.bridge-panel');
+            if (!panels.length) return;
+            var target = document.getElementById(id) ? id : panels[0].id;
+            for (var i = 0; i < panels.length; i++) {
+                panels[i].classList.toggle('bridge-panel-on', panels[i].id === target);
+            }
+            var links = document.querySelectorAll('.bridge-tabs a[data-tab]');
+            for (var j = 0; j < links.length; j++) {
+                links[j].classList.toggle('bridge-tab-on', 'bridge-tab-' + links[j].getAttribute('data-tab') === target);
+            }
+            var forms = document.querySelectorAll('form[data-bridge-keep-tab]');
+            for (var k = 0; k < forms.length; k++) {
+                var field = forms[k].querySelector('input[name=bridgeTab]');
+                if (field) field.value = target.replace('bridge-tab-', '');
+            }
+        }
+        // Called at the bottom of each page, once its panels exist: the tab
+        // named in the URL hash, else `defaultTab`, else the first one.
+        function init(defaultTab) {
+            var fromHash = (location.hash || '').replace('#', '');
+            show(fromHash.indexOf('bridge-tab-') === 0 ? fromHash : 'bridge-tab-' + (defaultTab || ''));
+        }
+        window.BridgeTabs = { show: show, init: init };
+        document.addEventListener('click', function (e) {
+            var a = e.target.closest ? e.target.closest('.bridge-tabs a[data-tab]') : null;
+            if (!a) return;
+            e.preventDefault();
+            var id = 'bridge-tab-' + a.getAttribute('data-tab');
+            if (history.replaceState) history.replaceState(null, '', '#' + id); else location.hash = id;
+            show(id);
+        });
+    })();
+</script>

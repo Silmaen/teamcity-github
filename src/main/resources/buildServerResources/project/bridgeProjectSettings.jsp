@@ -1,202 +1,189 @@
 <%--
   TeamCity GitHub Bridge - project settings tab.
 
-  Renders under Administration -> <project> -> GitHub Bridge
-  (Integrations group). Edits the six project-level parameters that
-  configure the bridge for every opted-in BuildType in the project:
-  repo, connectionId, and the two trigger-path toggles + branch lists.
+  Renders under Administration -> <project> -> GitHub Bridge (Integrations
+  group). One form over four tabs — Repository, Triggers, Reporting, Pull
+  requests — posted to BridgeProjectSettingsController, which writes the
+  project's own parameters and redirects back to the tab the user was on.
 
-  Posts to BridgeProjectSettingsController, which writes them as the
-  project's own parameters and persists.
+  These apply to every build configuration of the project (and its
+  sub-projects) that carries the GitHub Bridge integration feature.
 --%>
 <%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core" %>
-
-<style>
-    .bridge-form th { text-align: left; vertical-align: top; padding: 8px 12px 8px 0; white-space: nowrap; }
-    .bridge-form td { padding: 6px 0; }
-    .bridge-form input[type=text] { width: 360px; }
-    .bridge-form textarea { width: 360px; font-family: monospace; }
-    .bridge-help { color: #666; font-size: 11px; margin-top: 4px; max-width: 520px; }
-    .bridge-help code { background: #f5f5f5; padding: 1px 4px; border-radius: 2px; }
-    .bridge-banner { padding: 8px 12px; border-radius: 3px; margin-bottom: 12px; max-width: 540px; }
-    .bridge-banner.ok { background: #e6f4ea; border: 1px solid #b7dfc2; }
-    .bridge-banner.bad { background: #fce8e6; border: 1px solid #f0b4ae; }
-</style>
+<%@ include file="../common/bridgeUi.jspf" %>
+<c:set var="projectDoc" value="${bridgeDoc}configuration.md#3-per-project-parameters"/>
 
 <c:if test="${not empty resultBanner}">
     <div class="bridge-banner ${resultBanner['level']}"><c:out value="${resultBanner['text']}"/></div>
 </c:if>
 
-<p class="bridge-help">
-    These values apply to every build configuration in this project that
-    carries the <em>GitHub Bridge integration</em> build feature
-    (add it under a build configuration's <em>Build Features</em> tab).
-    Sub-projects inherit these values unless they set their own.
-    Per-build-configuration options (path filters, approval/comment
-    triggers, branch-list overrides) live on the build feature itself.
+<p class="bridge-intro">
+    Applies to every build configuration of this project, and of its sub-projects, that carries the
+    <em>GitHub Bridge integration</em> build feature. A sub-project can override any value.
+    <a class="bridge-doc" href="${projectDoc}" target="_blank" title="Documentation">?</a>
 </p>
 
-<form method="post" action="${saveUrl}">
+<div class="bridge-tabs">
+    <a href="#bridge-tab-repository" data-tab="repository">Repository</a>
+    <a href="#bridge-tab-triggers" data-tab="triggers">Triggers</a>
+    <a href="#bridge-tab-reporting" data-tab="reporting">Reporting</a>
+    <a href="#bridge-tab-pullrequests" data-tab="pullrequests">Pull requests
+        <c:if test="${not empty labelRuleErrors}"><span class="bridge-badge">!</span></c:if></a>
+</div>
+
+<form method="post" action="${saveUrl}" data-bridge-keep-tab>
     <input type="hidden" name="projectExternalId" value="<c:out value='${projectExternalId}'/>"/>
     <input type="hidden" name="${csrfTokenName}" value="<c:out value='${csrfToken}'/>"/>
+    <input type="hidden" name="bridgeTab" value="repository"/>
 
-    <table class="bridge-form">
-        <tr>
-            <th><label for="repo">GitHub repository:</label></th>
-            <td>
-                <input type="text" id="repo" name="repo" value="<c:out value='${repo}'/>" placeholder="owner/name" required/>
-                <div class="bridge-help">Required. Format <code>owner/name</code>, e.g. <code>acme/widgets</code>.</div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="connectionId">GitHub App connection ID:</label></th>
-            <td>
-                <input type="text" id="connectionId" name="connectionId" value="<c:out value='${connectionId}'/>" placeholder="managed or PROJECT_EXT_42" required/>
-                <div class="bridge-help">
-                    Required. Use <code>managed</code> to use the server-managed GitHub App
-                    created from <em>Administration &rarr; GitHub Bridge</em> &mdash; <strong>or</strong>
-                    the internal ID of a TeamCity GitHub App connection (e.g.
-                    <code>PROJECT_EXT_42</code>, found under
-                    <em>Administration &rarr; &lt;project&gt; &rarr; Connections</em>).
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="branchTriggerEnabled">Trigger on non-PR branches:</label></th>
-            <td>
-                <input type="checkbox" id="branchTriggerEnabled" name="branchTriggerEnabled" <c:if test="${branchTriggerEnabled}">checked</c:if>/>
-                <div class="bridge-help">When off, the bridge never triggers builds on non-PR branches for this project.</div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="branchTriggerBranches">Non-PR branch filter:</label></th>
-            <td>
-                <textarea id="branchTriggerBranches" name="branchTriggerBranches" rows="3"><c:out value="${branchTriggerBranches}"/></textarea>
-                <div class="bridge-help">
-                    Optional. VCS branch-filter syntax (<code>+:pattern</code> / <code>-:pattern</code>
-                    per line, <code>/regex/</code> for Java regex). Empty = match every branch.
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="prTriggerEnabled">Trigger on pull requests:</label></th>
-            <td>
-                <input type="checkbox" id="prTriggerEnabled" name="prTriggerEnabled" <c:if test="${prTriggerEnabled}">checked</c:if>/>
-                <div class="bridge-help">When off, the bridge never triggers builds for pull requests in this project.</div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="prTriggerBranches">PR source-branch filter:</label></th>
-            <td>
-                <textarea id="prTriggerBranches" name="prTriggerBranches" rows="3"><c:out value="${prTriggerBranches}"/></textarea>
-                <div class="bridge-help">
-                    Optional. Matched against the PR's source branch name (e.g.
-                    <code>Feature/foo</code>), not the <code>pull/N</code> literal. Empty = match every PR.
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="prBuildRefBranch">Build PRs on their own branch:</label></th>
-            <td>
-                <input type="checkbox" id="prBuildRefBranch" name="prBuildRefBranch" <c:if test="${prBuildRefBranch}">checked</c:if>/>
-                <div class="bridge-help">
-                    Off (default): a PR build runs on the synthetic <code>pull/N</code> ref.<br/>
-                    On: it runs on the PR's own head branch (e.g. <code>Feature/foo</code>) &mdash; readable in every
-                    TeamCity screen, and a push builds <em>once</em> instead of twice once a PR exists.
-                    Requires the head branches to be in the VCS root's branch spec
-                    (e.g. <code>+:refs/heads/Feature/*</code>); pull requests from forks are ignored either way.
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="checkNameStripPrefix">Shorten check names:</label></th>
-            <td>
-                <input type="text" id="checkNameStripPrefix" name="checkNameStripPrefix"
-                       value="<c:out value='${checkNameStripPrefix}'/>"
-                       placeholder="TeamCity / MyProject / Subproject / PR /"/>
-                <div class="bridge-help">
-                    Optional. A prefix cut off the front of every Check Run name this
-                    project posts. The name is
-                    <code>TeamCity / &lt;full build configuration name&gt;</code>, which on a
-                    deep tree is mostly ancestry a reviewer does not need &mdash; while GitHub's
-                    merge box truncates the <em>end</em>, the part that identifies the build.
-                    Declaring <code>TeamCity / Sandbox / test_ci / PR /</code> turns
-                    <code>&hellip; / PR / Build / Linux / Build (Linux, x64, Release)</code> into
-                    <code>Build / Linux / Build (Linux, x64, Release)</code>.
-                    A trailing slash is optional, and a prefix that does not match is ignored.
-                    <div style="margin-top:.5em;padding:.4em .6em;background:#fff4e5;border-left:3px solid #e8a33d;color:#663c00;">
-                        <strong>This renames the checks.</strong> GitHub identifies a Check Run
-                        by its <em>name</em> and commit, so changing this starts new rows and
-                        leaves the existing ones untouched &mdash; and any <strong>branch
-                        protection rule</strong> that requires the old name will wait for a
-                        check that never arrives again. Update the rules in the same change.
+    <%-- ===== Repository ===== --%>
+    <div class="bridge-panel" id="bridge-tab-repository">
+        <table class="bridge-form">
+            <tr>
+                <th><label for="repo">GitHub repository:</label></th>
+                <td>
+                    <input type="text" id="repo" name="repo" value="<c:out value='${repo}'/>" placeholder="owner/name"/>
+                    <div class="bridge-note">Required, e.g. <code>acme/widgets</code>.</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="connectionId">GitHub App connection ID:</label></th>
+                <td>
+                    <input type="text" id="connectionId" name="connectionId" value="<c:out value='${connectionId}'/>" placeholder="managed"/>
+                    <div class="bridge-note">
+                        Required. <code>managed</code> for the App created under <em>Administration &rarr; GitHub Bridge</em>,
+                        or a TeamCity GitHub App connection ID such as <code>PROJECT_EXT_42</code>.
+                        <a class="bridge-doc" href="${bridgeDoc}github-app-setup.md" target="_blank" title="Documentation">?</a>
                     </div>
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="annotationsEnabled">Annotate the diff:</label></th>
-            <td>
-                <input type="checkbox" id="annotationsEnabled" name="annotationsEnabled" <c:if test="${annotationsEnabled}">checked</c:if>/>
-                <label for="annotationsEnabled" style="font-weight:normal;">
-                    This project's builds may pin compiler errors and warnings to the pull request's diff.
-                </label>
-                <div class="bridge-help">
-                    Three levels can each say no &mdash; the server (<em>Administration &rarr; GitHub Bridge</em>),
-                    this project chain, and each build configuration's <em>GitHub Bridge integration</em>
-                    feature &mdash; and <strong>one &quot;no&quot; anywhere wins</strong>. Unticking it here holds
-                    annotations off for this project <em>and every project under it</em>: a sub-project
-                    ticking its own box does not take that back. Everything else the bridge reports
-                    (status, timings, tests, artifacts) is unaffected.
+                </td>
+            </tr>
+            <tr>
+                <th><label for="prBuildRefBranch">Build PRs on their own branch:</label></th>
+                <td>
+                    <input type="checkbox" id="prBuildRefBranch" name="prBuildRefBranch" <c:if test="${prBuildRefBranch}">checked</c:if>/>
+                    <label for="prBuildRefBranch">Run a PR build on its head branch (<code>Feature/x</code>), not <code>pull/N</code></label>
+                    <div class="bridge-note">
+                        Readable everywhere in TeamCity, and one build per push. The head branches must be in the
+                        VCS root's branch spec.
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <%-- ===== Triggers ===== --%>
+    <div class="bridge-panel" id="bridge-tab-triggers">
+        <p class="bridge-intro">
+            Which builds the bridge may start for this project. Each build configuration can narrow this further
+            in its feature. Rules: one per line, <code>+:pattern</code> / <code>-:pattern</code>; empty matches all.
+            <a class="bridge-doc" href="${projectDoc}" target="_blank" title="Documentation">?</a>
+        </p>
+        <table class="bridge-form">
+            <tr>
+                <th><label for="prTriggerEnabled">Pull requests:</label></th>
+                <td>
+                    <input type="checkbox" id="prTriggerEnabled" name="prTriggerEnabled" <c:if test="${prTriggerEnabled}">checked</c:if>/>
+                    <label for="prTriggerEnabled">Start builds for pull requests</label>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="prTriggerBranches">PR source branches:</label></th>
+                <td>
+                    <textarea id="prTriggerBranches" name="prTriggerBranches" rows="3" placeholder="+:Feature/*"><c:out value="${prTriggerBranches}"/></textarea>
+                    <div class="bridge-note">Matched on the PR's source branch, not on <code>pull/N</code>.</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="branchTriggerEnabled">Other branches:</label></th>
+                <td>
+                    <input type="checkbox" id="branchTriggerEnabled" name="branchTriggerEnabled" <c:if test="${branchTriggerEnabled}">checked</c:if>/>
+                    <label for="branchTriggerEnabled">Start builds on non-PR branches</label>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="branchTriggerBranches">Non-PR branches:</label></th>
+                <td>
+                    <textarea id="branchTriggerBranches" name="branchTriggerBranches" rows="3" placeholder="+:main"><c:out value="${branchTriggerBranches}"/></textarea>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <%-- ===== Reporting ===== --%>
+    <div class="bridge-panel" id="bridge-tab-reporting">
+        <table class="bridge-form">
+            <tr>
+                <th><label for="checkNameStripPrefix">Strip this prefix from Check Run names:</label></th>
+                <td>
+                    <input type="text" id="checkNameStripPrefix" name="checkNameStripPrefix"
+                           value="<c:out value='${checkNameStripPrefix}'/>" placeholder="TeamCity / MyProject / PR /"/>
+                    <div class="bridge-note">
+                        Shortens <code>TeamCity / &lt;project path&gt; / &lt;configuration&gt;</code>, which GitHub truncates
+                        at the end. Ignored when it does not match.
+                    </div>
+                    <div class="bridge-banner warn" style="margin-top:6px;">
+                        <strong>This renames the checks.</strong> A branch protection rule requiring an old name
+                        then waits for ever: update the rules in the same change, or give required checks a fixed
+                        <em>Check name</em> in their feature.
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="annotationsEnabled">Annotate the diff:</label></th>
+                <td>
+                    <input type="checkbox" id="annotationsEnabled" name="annotationsEnabled" <c:if test="${annotationsEnabled}">checked</c:if>/>
+                    <label for="annotationsEnabled">Builds may pin compiler errors and warnings to the pull request's diff</label>
+                    <div class="bridge-note">Off here holds it off for every sub-project too; the server and each feature can also turn it off.</div>
                     <c:if test="${not empty annotationsVetoedBy}">
-                        <div style="margin-top:.5em;padding:.4em .6em;background:#fff4e5;border-left:3px solid #e8a33d;color:#663c00;">
-                            <strong>Already off above.</strong> The parent project
-                            <strong><c:out value="${annotationsVetoedBy}"/></strong> has annotations
-                            turned off, so no build in this project annotates a diff whatever this
-                            checkbox says. Remove the &quot;no&quot; there to change that.
+                        <div class="bridge-banner warn" style="margin-top:6px;">
+                            <strong>Already off above:</strong> the parent project
+                            <strong><c:out value="${annotationsVetoedBy}"/></strong> turned annotations off, whatever this says.
                         </div>
                     </c:if>
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="autoAssignAuthor">Assign to the author:</label></th>
-            <td>
-                <input type="checkbox" id="autoAssignAuthor" name="autoAssignAuthor" <c:if test="${autoAssignAuthor}">checked</c:if>/>
-                <label for="autoAssignAuthor" style="font-weight:normal;">
-                    A pull request opened with nobody assigned is assigned to its author.
-                </label>
-                <div class="bridge-help">
-                    Once, when the pull request is opened: an existing assignee is never replaced,
-                    and an assignee someone removes later is not put back. Bot authors are skipped,
-                    and GitHub ignores an author who cannot be assigned (no access to the repository).
-                    Needs the App's <strong>Issues: write</strong> permission, which it does not ask
-                    for by default. Unticked here still inherits a parent project's &quot;on&quot;.
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <th><label for="labelRules">Label rules:</label></th>
-            <td>
-                <textarea id="labelRules" name="labelRules" rows="5" placeholder="network <= paths +:src/net/**"><c:out value="${labelRules}"/></textarea>
-                <c:if test="${not empty labelRuleErrors}">
-                    <div class="bridge-banner bad">
-                        These lines are ignored:
-                        <ul><c:forEach items="${labelRuleErrors}" var="e"><li><c:out value="${e}"/></li></c:forEach></ul>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <%-- ===== Pull requests ===== --%>
+    <div class="bridge-panel" id="bridge-tab-pullrequests">
+        <p class="bridge-intro">
+            Both write to the pull request: the App needs the <strong>Issues: write</strong> permission.
+            <a class="bridge-doc" href="${bridgeDoc}github-app-setup.md" target="_blank" title="Permissions">?</a>
+        </p>
+        <table class="bridge-form">
+            <tr>
+                <th><label for="autoAssignAuthor">Assign to the author:</label></th>
+                <td>
+                    <input type="checkbox" id="autoAssignAuthor" name="autoAssignAuthor" <c:if test="${autoAssignAuthor}">checked</c:if>/>
+                    <label for="autoAssignAuthor">A pull request opened with nobody assigned goes to its author</label>
+                    <div class="bridge-note">Never replaces an assignee, never for a bot. Unticked still inherits a parent's "on".</div>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="labelRules">Label rules:</label></th>
+                <td>
+                    <textarea id="labelRules" name="labelRules" rows="6"
+                              placeholder="network <= paths +:src/net/**&#10;team: core <= author @acme/core&#10;docs <= paths +:docs/** ; title ^docs"><c:out value="${labelRules}"/></textarea>
+                    <c:if test="${not empty labelRuleErrors}">
+                        <div class="bridge-banner bad" style="margin-top:6px;">
+                            These lines are ignored:
+                            <ul><c:forEach items="${labelRuleErrors}" var="e"><li><c:out value="${e}"/></li></c:forEach></ul>
+                        </div>
+                    </c:if>
+                    <div class="bridge-note">
+                        <code>&lt;label&gt; &lt;= &lt;condition&gt; ; &lt;condition&gt;</code>, one rule per line, all conditions required:
+                        <code>paths</code>, <code>author</code> (logins, <code>@org/team</code>), <code>base</code>, <code>head</code>,
+                        <code>title</code> (regex). Labels are only added; one removed by hand stays removed.
+                        <a class="bridge-doc" href="${bridgeDoc}configuration.md#label-rules" target="_blank" title="Documentation">?</a>
                     </div>
-                </c:if>
-                <div class="bridge-help">
-                    One rule per line: <code>&lt;label&gt; &lt;= &lt;condition&gt; ; &lt;condition&gt;</code>, all
-                    conditions required. Conditions: <code>paths</code>, <code>author</code> (logins or
-                    <code>@org/team</code>), <code>base</code>, <code>head</code>, <code>title</code> (regex).
-                    Labels are only added, never removed, and one removed by hand is not put back.
-                    Needs the App's <strong>Issues: write</strong>.
-                </div>
-            </td>
-        </tr>
-        <tr>
-            <td></td>
-            <td><input type="submit" class="btn btn_primary" value="Save GitHub Bridge settings"/></td>
-        </tr>
-    </table>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="bridge-actions">
+        <input type="submit" class="btn btn_primary" value="Save"/>
+    </div>
 </form>
+<script type="text/javascript">BridgeTabs.init('repository');</script>

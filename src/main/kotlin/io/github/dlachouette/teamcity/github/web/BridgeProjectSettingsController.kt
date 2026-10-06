@@ -121,9 +121,13 @@ class BridgeProjectSettingsController(
         project.addParameter(SimpleParameter(key, enabled.toString()))
     }
 
+    // Back to the in-page tab the form was posted from (`bridgeTab`, letters
+    // only), so a save does not drop the user on the first tab.
     private fun redirect(request: HttpServletRequest, projectId: String, result: String): ModelAndView {
+        val tab = request.getParameter("bridgeTab")?.takeIf { it.matches(Regex("[a-z]{1,32}")) }
         val url = request.contextPath.trimEnd('/') +
-            "/admin/editProject.html?projectId=$projectId&tab=${BridgeProjectSettingsTab.TAB_ID}&bridgeResult=$result"
+            "/admin/editProject.html?projectId=$projectId&tab=${BridgeProjectSettingsTab.TAB_ID}&bridgeResult=$result" +
+            (tab?.let { "#bridge-tab-$it" } ?: "")
         return ModelAndView(RedirectView(url, true))
     }
 
