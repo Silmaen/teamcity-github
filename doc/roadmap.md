@@ -95,6 +95,63 @@ is visible rather than silent.
 
 **Effort.** Small.
 
+## Assign a pull request to its author
+
+**Problem.** A pull request opened without an assignee shows up as nobody's
+in the PR list and in "assigned to me" filters, and the author has to remember
+to assign themselves every time.
+
+**Feasible.** The listener already handles `pull_request.opened` (and
+`ready_for_review`) and knows the author (`user.login`). `POST
+/repos/{o}/{r}/issues/{n}/assignees` does the rest.
+
+**Design.** An opt-in project setting (`autoAssignAuthor`, off by default):
+on `opened`, when the pull request has no assignee, assign its author. Never
+replace an existing assignee, never re-assign after someone removed it. A
+bot author is skipped; GitHub silently ignores a login that cannot be
+assigned (a fork contributor without access), which is the right outcome.
+
+**Effort.** Small in code, but it is the plugin's **first write to a pull
+request** since the sticky comment went: the App needs **issues: write** (or
+pull requests: write, given back up after 1.10.0 lowered it to read).
+Opt-in, and the self-test / *Verify App configuration* should report the
+missing permission only when the setting is on.
+
+## Label a pull request by rules
+
+**Problem.** Labels are how a team routes a pull request — which reviewers,
+which board, which pipeline (`labelFilter` already gates builds on them) — but
+setting them is manual and forgotten.
+
+**Feasible.** Every input a rule needs is already read: the changed files
+(`listPrFiles`, used by `pathFilter`), the author, the title, body, base and
+head branches (`PrInfo`). `POST /repos/{o}/{r}/issues/{n}/labels` adds labels.
+
+**Design.** A project-level list of rules, each "label ← conditions", all
+conditions of a rule ANDed:
+
+- **paths** — the pull request touches files matching a VCS-filter spec
+  (same syntax as `pathFilter`): `+:src/net/**` → `network`;
+- **author** — the author is in a list of logins, or a member of a GitHub
+  team (`GET /orgs/{org}/teams/{team}/memberships/{user}`, which needs the
+  organisation **members: read** permission);
+- **branches / title** — the base or head branch matches a spec, the title
+  matches a pattern (`[WIP]`, `fix:`).
+
+Applied on `opened` and `synchronize` (a new push can touch new paths).
+Labels are **only added**, never removed — a human's removal must stick, so
+the plugin remembers what it added per pull request and does not re-add it.
+Echo the matched rule in the log, so "why does it have this label" has an
+answer.
+
+**Effort.** Medium: the rule format and its editor are most of the work.
+Two traps: the same write permission as above, and the **`labeled` event
+loops back** into the listener — a rule adding `ci-full` will enqueue the
+builds a `labelFilter` gates on it, which is useful but must be deliberate,
+and the plugin's own `labeled` events must never re-run the labelling.
+`actions/labeler` covers the paths part already; the case for doing it here
+is the author/team rules and having one configuration place.
+
 ## Resolve a Check Run left `in_progress`
 
 **Problem.** If the server stops between a build's start and its finish, or
