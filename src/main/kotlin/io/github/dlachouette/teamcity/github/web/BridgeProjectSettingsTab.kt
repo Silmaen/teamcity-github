@@ -45,6 +45,7 @@ class BridgeProjectSettingsTab(
         model["prTriggerEnabled"] = params[BridgeProjectParams.PR_TRIGGER_ENABLED] != "false"
         model["prTriggerBranches"] = params[BridgeProjectParams.PR_TRIGGER_BRANCHES].orEmpty()
         model["checkNameStripPrefix"] = params[BridgeProjectParams.CHECK_NAME_STRIP_PREFIX].orEmpty()
+        model["autoAssignAuthor"] = params[BridgeProjectParams.AUTO_ASSIGN_AUTHOR] == "true"
         model["prBuildRefBranch"] = PrBuildRef.parse(params[BridgeProjectParams.PR_BUILD_REF]) == PrBuildRef.BRANCH
 
         // Annotations are the one setting read own-per-project over the whole

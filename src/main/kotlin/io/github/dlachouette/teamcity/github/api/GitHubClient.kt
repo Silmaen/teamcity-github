@@ -135,6 +135,23 @@ open class GitHubClient {
         }
     }
 
+    // POST /repos/{slug}/issues/{n}/assignees — a pull request is an issue for
+    // assignment. Needs the App's `issues: write` (or `pull_requests: write`).
+    // GitHub answers 201 and silently drops a login that cannot be assigned.
+    open fun addAssignee(
+        accessToken: String,
+        repo: RepoCoords,
+        number: Int,
+        login: String,
+        apiBase: String = DEFAULT_API_BASE,
+    ): Int? {
+        val body = MAPPER.createObjectNode().apply { putArray("assignees").add(login) }.toString()
+        val resp = request("POST", "$apiBase/repos/${repo.slug}/issues/$number/assignees", accessToken, body)
+            ?: return null
+        if (!resp.isSuccess) LOG.warn("POST issues/$number/assignees returned ${resp.code} for ${repo.slug}: ${resp.body}")
+        return resp.code
+    }
+
     // ----- Branch protection (read-only, for the self-tests) -----
 
     // The branches a required check can gate: the default branch plus every

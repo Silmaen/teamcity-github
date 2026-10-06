@@ -53,6 +53,11 @@ object WebhookPayloadParser {
             val labels = pr.path("labels").mapNotNull {
                 it.path("name").asText("").takeIf { n -> n.isNotBlank() }
             }
+            val user = pr.path("user")
+            val author = user.path("login").asText("")
+            val assignees = pr.path("assignees").mapNotNull {
+                it.path("login").asText("").takeIf { n -> n.isNotBlank() }
+            }
 
             PrEventPayload(
                 action = action,
@@ -67,6 +72,9 @@ object WebhookPayloadParser {
                 body = body,
                 labels = labels,
                 headRepo = headRepo,
+                author = author,
+                authorIsBot = user.path("type").asText("") == "Bot" || author.endsWith("[bot]"),
+                assignees = assignees,
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse pull_request payload: ${e.message}")
