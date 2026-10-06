@@ -10,24 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## A superseded build is skipped, not cancelled
-
-**Problem.** When a new commit is pushed, the builds of the previous head are
-stopped (`cancelObsolete.enabled`) and their rows conclude `cancelled`, which
-GitHub draws in red. On the old commit that is harmless, but in the PR's
-history and in a draft workflow ("push, look, push again") it reads like a
-failure the reviewer has to dismiss.
-
-**Feasible.** The cancellation is the plugin's own (`cancelObsolete`), so it
-knows why the build stopped, and GitHub accepts `skipped` and `neutral` on a
-completed run.
-
-**Design.** Conclude a build stopped as superseded with `skipped` and the
-summary "Superseded by <short sha>"; keep `cancelled` for a build a human
-stopped.
-
-**Effort.** Small.
-
 ## Say where the build is in the queue
 
 **Problem.** The `queued` Check Run says "Queued" and nothing else. A

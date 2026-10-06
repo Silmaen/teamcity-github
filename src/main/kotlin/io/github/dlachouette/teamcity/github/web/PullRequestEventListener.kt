@@ -558,10 +558,10 @@ class PullRequestEventListener(
                         featureEnabled = featureEnabled,
                     )
                 ) return@eachRunning
-                val reason = "superseded on PR #${payload.prNumber} " +
-                    "(was building ${build.revisions.firstOrNull()?.revision?.take(7)}, " +
-                    "head is now ${payload.headSha.take(7)})"
-                if (stopBuild(build, bt, ref, reason)) stopped++
+                val comment = ObsoleteBuildPolicy.supersededComment(
+                    payload.headSha, payload.prNumber, build.revisions.firstOrNull()?.revision,
+                )
+                if (stopBuild(build, bt, ref, comment)) stopped++
             }
         }
         if (stopped > 0) {
@@ -571,7 +571,8 @@ class PullRequestEventListener(
 
     // Stop one running build, or say why not. Returns true when it was actually
     // stopped, so the callers can count. `reason` is used both as the
-    // cancellation comment TeamCity shows on the build and in the log.
+    // cancellation comment TeamCity shows on the build and in the log; it
+    // gets the `teamcity-github-bridge: ` prefix unless it already has it.
     private fun stopBuild(
         build: SRunningBuild,
         bt: BuildTypeEx,
@@ -586,7 +587,8 @@ class PullRequestEventListener(
             // A null user is what the SDK expects from a system-side
             // cancellation (`stop` takes a @Nullable User); we run as the
             // system user here, as the whole listener does.
-            build.stop(null, "teamcity-github-bridge: $reason")
+            val comment = if (reason.startsWith(COMMENT_PREFIX)) reason else "$COMMENT_PREFIX$reason"
+            build.stop(null, comment)
             metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.BUILDS_STOPPED)
             LOG.info("Stopped ${bt.externalId} build #${build.buildNumber} on $ref: $reason")
             true
@@ -828,6 +830,8 @@ class PullRequestEventListener(
 
     companion object {
         private val LOG = Logger.getInstance(PullRequestEventListener::class.java.name)
+
+        private const val COMMENT_PREFIX: String = "teamcity-github-bridge: "
 
         private const val HISTORY_SCAN_DEPTH: Int = 50
 

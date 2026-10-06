@@ -67,6 +67,24 @@ object ObsoleteBuildPolicy {
         featureEnabled: Boolean,
     ): Boolean = mayStop(build, prRef, cleanupEnabled, featureEnabled)
 
+    // The cancellation comment of a build stopped because a push superseded it,
+    // and how the publisher reads it back. TeamCity keeps the comment on the
+    // build (`canceledInfo`), so it is the one channel from the stop to the
+    // `buildInterrupted` that publishes it: a superseded build concludes
+    // `skipped` ("Superseded by …"), not `cancelled`, which GitHub draws in red
+    // as if something had failed. A build a human stopped keeps `cancelled`.
+    const val SUPERSEDED_MARKER: String = "teamcity-github-bridge: superseded by"
+
+    fun supersededComment(newHeadSha: String, prNumber: Int, oldSha: String?): String =
+        "$SUPERSEDED_MARKER ${newHeadSha.take(7)} on PR #$prNumber" +
+            (oldSha?.let { " (was building ${it.take(7)})" } ?: "")
+
+    // The superseding commit (short), or null when the comment is not ours.
+    fun supersededBy(cancelComment: String?): String? =
+        SUPERSEDED.find(cancelComment.orEmpty())?.groupValues?.get(1)
+
+    private val SUPERSEDED = Regex("^${Regex.escape(SUPERSEDED_MARKER)} ([0-9a-fA-F]{4,40})\\b")
+
     // The guards both cases share: the switches, and the scope invariant.
     private fun mayStop(
         build: RunningBuildFacts,

@@ -181,8 +181,9 @@ bridge stops them:
                  was building 4e2b7d0, PR #189 head is now 9f3c1ab
 ```
 
-The old commit's Check Run becomes "Build cancelled" (published by
-`buildInterrupted`); it cannot collide with the new commit's row, which
+The old commit's Check Run becomes **"Superseded by 9f3c1ab"**, concluded
+`skipped` rather than a red `cancelled` (published by `buildInterrupted`, which
+recognises the bridge's own stop comment); it cannot collide with the new commit's row, which
 is keyed on a different SHA. TeamCity already drops obsolete **queued**
 builds itself, so only started ones are touched.
 

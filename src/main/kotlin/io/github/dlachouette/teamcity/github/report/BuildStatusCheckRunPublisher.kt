@@ -15,6 +15,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.queue.ObsoleteBuildPolicy
 import io.github.dlachouette.teamcity.github.queue.PassedBuildLookup
 import io.github.dlachouette.teamcity.github.queue.QueueCleanupPolicy
 import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
@@ -286,7 +287,8 @@ class BuildStatusCheckRunPublisher(
         val revisions = build.revisions.ifEmpty { build.buildPromotion.revisions }
         val ctx = resolveContext(build.buildType, revisions) ?: return
         val failure = classifyFailure(build)
-        val mapping = refineForFailureCause(
+        val superseded = supersededOutcome(build.isInterrupted, build.canceledInfo?.comment)
+        val mapping = superseded ?: refineForFailureCause(
             mapBuildOutcome(build.buildStatus, build.isInterrupted),
             failure,
             serverSettings.infraFailureNeutralEnabled(),
@@ -306,6 +308,7 @@ class BuildStatusCheckRunPublisher(
                 joinSections(
                     // First: whether the commit was even judged. A reviewer
                     // reading "failed" needs to know it was our CI, not them.
+                    superseded?.let { SUPERSEDED_SUMMARY },
                     infrastructureNote(failure, mapping.conclusion),
                     timingBlock(build),
                     statusTextOf(build),
@@ -974,6 +977,23 @@ class BuildStatusCheckRunPublisher(
         // model (it does not fail the build by default), so we report
         // SUCCESS. Interrupted builds map to CANCELLED regardless of
         // the underlying status.
+        // A build the bridge stopped because a push superseded it: `skipped`,
+        // not the red `cancelled`. On the old commit nobody needs it, and in
+        // a "push, look, push again" workflow a column of red rows reads like
+        // failures to dismiss. The required checks of the pull request are on
+        // the new head, so `skipped` here satisfies nothing it should not.
+        // Recognised by the cancellation comment the bridge itself wrote
+        // (`ObsoleteBuildPolicy.supersededComment`); anything else stays
+        // `cancelled`.
+        fun supersededOutcome(interrupted: Boolean, cancelComment: String?): BuildOutcomeMapping? {
+            if (!interrupted) return null
+            val sha = ObsoleteBuildPolicy.supersededBy(cancelComment) ?: return null
+            return BuildOutcomeMapping(CheckRunConclusion.SKIPPED, "Superseded by $sha")
+        }
+
+        const val SUPERSEDED_SUMMARY: String =
+            "A newer commit was pushed to the pull request, so this build was stopped: its result would not have been read."
+
         fun mapBuildOutcome(status: Status, isInterrupted: Boolean): BuildOutcomeMapping {
             if (isInterrupted) {
                 return BuildOutcomeMapping(CheckRunConclusion.CANCELLED, "Build cancelled")
