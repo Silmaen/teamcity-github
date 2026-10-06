@@ -22,11 +22,14 @@ import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.BuildProblemTypes
 import jetbrains.buildServer.messages.Status
 import jetbrains.buildServer.serverSide.BuildPromotion
+import jetbrains.buildServer.serverSide.BuildPromotionManager
 import jetbrains.buildServer.serverSide.BuildRevision
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuild
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SBuildType
+import jetbrains.buildServer.serverSide.ProjectManager
+import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.SQueuedBuild
 import jetbrains.buildServer.serverSide.SRunningBuild
 import jetbrains.buildServer.serverSide.STestRun
@@ -34,7 +37,9 @@ import jetbrains.buildServer.serverSide.artifacts.BuildArtifactsViewMode
 import jetbrains.buildServer.serverSide.WebLinks
 import jetbrains.buildServer.serverSide.executors.ExecutorServices
 import jetbrains.buildServer.users.User
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 // Publishes a Check Run to GitHub at every lifecycle transition for
@@ -64,10 +69,41 @@ class BuildStatusCheckRunPublisher(
     private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
     private val metrics: io.github.dlachouette.teamcity.github.web.BridgeMetrics,
     private val executorServices: ExecutorServices,
+    private val buildPromotionManager: BuildPromotionManager,
+    private val projectManager: ProjectManager,
+    serverPaths: ServerPaths,
 ) : BuildServerAdapter() {
+
+    // Rows left open on GitHub, reconciled against TeamCity — see
+    // `reconcileOpenRows`. Loaded here rather than on `serverStartup`, which a
+    // plugin uploaded to a running server never receives.
+    private val openRows = OpenCheckRunRegistry(
+        File(File(serverPaths.pluginDataDirectory, PLUGIN_DATA_DIR), OpenCheckRunRegistry.FILE_NAME),
+    ).also { it.load() }
+
+    private val scheduled = mutableListOf<ScheduledFuture<*>>()
 
     init {
         buildServer.addListener(this)
+        val executor = executorServices.normalExecutorService
+        scheduled += executor.scheduleWithFixedDelay(
+            { runCatching { openRows.flush() } }, FLUSH_PERIOD_S, FLUSH_PERIOD_S, TimeUnit.SECONDS,
+        )
+        scheduled += executor.scheduleWithFixedDelay(
+            {
+                try {
+                    reconcileOpenRows()
+                } catch (e: Exception) {
+                    LOG.warn("Reconciling open Check Runs failed: ${e.message}", e)
+                }
+            },
+            RECONCILE_FIRST_DELAY_S, RECONCILE_PERIOD_S, TimeUnit.SECONDS,
+        )
+    }
+
+    override fun serverShutdown() {
+        scheduled.forEach { it.cancel(false) }
+        openRows.flush()
     }
 
     // Promotions whose "Queued" post was withheld because the row already
@@ -98,7 +134,7 @@ class BuildStatusCheckRunPublisher(
     override fun buildFinished(build: SRunningBuild) {
         if (isPersonal(build.buildPromotion)) return
         try {
-            publishCompleted(build)
+            publishCompleted(build, build.isInterrupted)
         } catch (e: Exception) {
             LOG.warn("Failed publishing completed Check Run for ${build.buildTypeExternalId} #${build.buildId}: ${e.message}", e)
         }
@@ -107,7 +143,7 @@ class BuildStatusCheckRunPublisher(
     override fun buildInterrupted(build: SRunningBuild) {
         if (isPersonal(build.buildPromotion)) return
         try {
-            publishCompleted(build)
+            publishCompleted(build, build.isInterrupted)
         } catch (e: Exception) {
             LOG.warn("Failed publishing cancelled Check Run for interrupted ${build.buildTypeExternalId} #${build.buildId}: ${e.message}", e)
         }
@@ -231,7 +267,7 @@ class BuildStatusCheckRunPublisher(
             outputSummary = "TeamCity has queued this build; waiting for a compatible agent.",
             detailsUrl = safeUrl { webLinks.getQueuedBuildUrl(queuedBuild) },
         )
-        post(ctx, request, "queued")
+        if (post(ctx, request, "queued")) openRows.open(promotion.id, ctx.buildType.externalId, ctx.headSha)
     }
 
     // True iff `DraftBuildQueueCleaner` is about to remove this queued build,
@@ -276,20 +312,23 @@ class BuildStatusCheckRunPublisher(
             // From here on GitHub counts the elapsed time itself.
             startedAt = build.startDate?.time?.let { BuildTimeline.iso(it) },
         )
-        post(ctx, request, "in-progress")
+        if (post(ctx, request, "in-progress")) openRows.open(build.buildPromotion.id, ctx.buildType.externalId, ctx.headSha)
     }
 
-    private fun publishCompleted(build: SRunningBuild) {
+    // `interrupted`: `SRunningBuild.isInterrupted` at a lifecycle event; for a
+    // build only found finished later (`reconcileOpenRows`), a non-null
+    // `canceledInfo`. True when the row now carries the conclusion.
+    private fun publishCompleted(build: SBuild, interrupted: Boolean): Boolean {
         // A build that "failed to start" (e.g. a failed snapshot
         // dependency) may carry no revisions of its own; fall back to the
         // promotion's revisions (resolved at enqueue) so we still resolve
         // the head SHA and report it instead of leaving the row stuck.
         val revisions = build.revisions.ifEmpty { build.buildPromotion.revisions }
-        val ctx = resolveContext(build.buildType, revisions) ?: return
+        val ctx = resolveContext(build.buildType, revisions) ?: return false
         val failure = classifyFailure(build)
-        val superseded = supersededOutcome(build.isInterrupted, build.canceledInfo?.comment)
+        val superseded = supersededOutcome(interrupted, build.canceledInfo?.comment)
         val mapping = superseded ?: refineForFailureCause(
-            mapBuildOutcome(build.buildStatus, build.isInterrupted),
+            mapBuildOutcome(build.buildStatus, interrupted),
             failure,
             serverSettings.infraFailureNeutralEnabled(),
         )
@@ -330,7 +369,9 @@ class BuildStatusCheckRunPublisher(
             startedAt = build.startDate?.time?.let { BuildTimeline.iso(it) },
             completedAt = BuildTimeline.iso(finishInstantOf(build)),
         )
-        post(ctx, request, "completed (${mapping.conclusion.apiValue})")
+        val ok = post(ctx, request, "completed (${mapping.conclusion.apiValue})")
+        if (ok) openRows.close(build.buildPromotion.id)
+        return ok
     }
 
     private fun publishQueueRemoved(queuedBuild: SQueuedBuild, user: User?, comment: String) {
@@ -344,8 +385,12 @@ class BuildStatusCheckRunPublisher(
             queuedRowWithheld = queuedRowWithheld.remove(promotion.id),
         )
         // The build left the queue to actually RUN: a running SBuild exists and
-        // buildStarted / buildFinished own the Check Run row.
-        if (action == QueueRemovalAction.LIFECYCLE_OWNS_ROW) return
+        // buildStarted / buildFinished own the Check Run row. When that build is
+        // another promotion's, this one's open row is now that build's to close.
+        if (action == QueueRemovalAction.LIFECYCLE_OWNS_ROW) {
+            if (associated?.buildPromotion?.id != promotion.id) openRows.close(promotion.id)
+            return
+        }
 
         val ctx = resolveContext(promotion.buildType, promotion.revisions) ?: return
 
@@ -387,7 +432,7 @@ class BuildStatusCheckRunPublisher(
                     detailsUrl = safeUrl { webLinks.getViewResultsUrl(build) },
                 )
                 val label = if (action == QueueRemovalAction.REPORT_OWN_OUTCOME) "finished" else "equivalent"
-                post(ctx, request, "queue-removed/$label (${mapping.conclusion.apiValue})")
+                if (post(ctx, request, "queue-removed/$label (${mapping.conclusion.apiValue})")) openRows.close(promotion.id)
             }
             QueueRemovalAction.REPORT_CANCELLED -> {
                 // No associated build at all. A user removing a queued build is a
@@ -403,14 +448,14 @@ class BuildStatusCheckRunPublisher(
                     outputSummary = truncateSummary(summary),
                     detailsUrl = safeUrl { webLinks.getConfigurationHomePageUrl(ctx.buildType) },
                 )
-                post(ctx, request, "queue-removed/cancelled")
+                if (post(ctx, request, "queue-removed/cancelled")) openRows.close(promotion.id)
             }
             QueueRemovalAction.KEEP_FINISHED_ROW ->
                 // No "Queued" was posted for this duplicate, so the row still shows
                 // the finished build of this commit; cancelling the duplicate does
                 // not change what that commit's result is.
                 LOG.debug("Queue exit of withheld ${ctx.buildType.externalId} (${promotion.branch?.name}); row left as it is")
-            QueueRemovalAction.IGNORE ->
+            QueueRemovalAction.IGNORE -> {
                 // System removal with no associated build. In a dependency fan-out
                 // the plugin (and TeamCity's chain optimization) create duplicate
                 // queued promotions of the shared dependency; tearing those down
@@ -421,14 +466,95 @@ class BuildStatusCheckRunPublisher(
                 // "Build could not start"). The same is true for gate-suppressed
                 // builds our queue cleaner removed (it owns their Skipped row).
                 LOG.debug("Ignoring system queue removal with no associated build for ${ctx.buildType.externalId} (${promotion.branch?.name})")
+                openRows.close(promotion.id)
+            }
             QueueRemovalAction.LIFECYCLE_OWNS_ROW -> Unit
         }
     }
 
-    private fun post(ctx: PrBuildContext, request: CheckRunRequest, label: String) {
+    // Give every row left open on GitHub the conclusion TeamCity now knows.
+    //
+    // An entry is opened by a successful `queued` / `in_progress` post and
+    // closed by the post that concludes the row. One still there after
+    // `RECONCILE_GRACE_MS` missed its conclusion — the server stopped, an event
+    // was missed, or the concluding post failed — and a required check left
+    // that way blocks the merge until a human re-runs it.
+    //
+    // Re-posting is safe: GitHub keys the row on (name, sha), so a conclusion
+    // that did land is only written again. The sweep stays bounded: entries are
+    // only the rows this server opened, and one older than `MAX_OPEN_AGE_MS`
+    // is dropped rather than resurrected on a commit nobody looks at any more.
+    private fun reconcileOpenRows() {
+        val entries = openRows.snapshot()
+        if (entries.isEmpty()) return
+        var concluded = 0
+        entries.forEach { entry ->
+            val promotion = try {
+                buildPromotionManager.findPromotionById(entry.promotionId)
+            } catch (e: Exception) {
+                null
+            }
+            val associated = promotion?.associatedBuild
+            val action = decideReconcile(
+                ageMs = System.currentTimeMillis() - entry.openedAt,
+                stillQueued = promotion?.queuedBuild != null,
+                associatedPresent = associated != null,
+                associatedFinished = associated?.isFinished == true,
+            )
+            val buildType = promotion?.buildType ?: projectManager.findBuildTypeByExternalId(entry.buildTypeExternalId)
+            val done = when (action) {
+                ReconcileAction.WAIT -> false
+                ReconcileAction.EXPIRE -> {
+                    LOG.info("Dropping open Check Run of ${entry.buildTypeExternalId}@${entry.headSha}: older than the reconcile window")
+                    true
+                }
+                ReconcileAction.PUBLISH_BUILD -> publishCompleted(associated!!, associated.canceledInfo != null)
+                ReconcileAction.PUBLISH_LATEST_ON_COMMIT -> buildType != null && concludeWithoutBuild(buildType, entry.headSha)
+            }
+            if (done) {
+                openRows.close(entry.promotionId)
+                if (action != ReconcileAction.EXPIRE) concluded++
+            }
+        }
+        if (concluded > 0) LOG.info("Concluded $concluded Check Run(s) left open on GitHub")
+        openRows.flush()
+    }
+
+    // The promotion is gone, or left the queue with no build behind it, and
+    // the event saying so was missed. The row then shows the newest finished
+    // build of that configuration on that commit — which may well be what
+    // replaced this promotion — and only when there is none, a cancellation.
+    private fun concludeWithoutBuild(buildType: SBuildType, headSha: String): Boolean {
+        val latest = try {
+            buildType.history.asSequence()
+                .take(PassedBuildLookup.HISTORY_SCAN_DEPTH)
+                .firstOrNull { !it.buildPromotion.isPersonal && it.revisions.any { r -> r.revision == headSha } }
+        } catch (e: Exception) {
+            null
+        }
+        if (latest != null) return publishCompleted(latest, latest.canceledInfo != null)
+        val config = BridgeFeatureReader.read(buildType)?.takeIf { it.publishChecks } ?: return true
+        if (!serverSettings.isRepoAllowed(config.repo.slug)) return true
+        val ctx = contextFor(buildType, config, headSha) ?: return false
+        val request = CheckRunRequest(
+            name = checkRunName(buildType),
+            headSha = headSha,
+            status = CheckRunStatus.COMPLETED,
+            conclusion = CheckRunConclusion.CANCELLED,
+            outputTitle = "Build no longer in TeamCity",
+            outputSummary = "TeamCity has no build left for this commit (it was removed while the bridge was not " +
+                "listening). Re-run the check to build it again.",
+            detailsUrl = safeUrl { webLinks.getConfigurationHomePageUrl(buildType) },
+        )
+        return post(ctx, request, "reconciled/vanished")
+    }
+
+    // True when GitHub accepted the row; false on failure and in dry-run, so a
+    // row is only ever tracked as open once it really is.
+    private fun post(ctx: PrBuildContext, request: CheckRunRequest, label: String): Boolean {
         if (serverSettings.dryRun()) {
             LOG.info("[dry-run] would POST $label Check Run for ${ctx.repo.slug}@${ctx.headSha}")
-            return
+            return false
         }
         val ok = gitHubClient.postCheckRun(ctx.accessToken, ctx.repo, request, ctx.apiBase)
         if (!ok) {
@@ -438,6 +564,7 @@ class BuildStatusCheckRunPublisher(
             metrics.inc(io.github.dlachouette.teamcity.github.web.BridgeMetrics.CHECK_RUNS_POSTED)
             LOG.info("Published $label Check Run for ${ctx.repo.slug}@${ctx.headSha}")
         }
+        return ok
     }
 
     private fun resolveContext(buildType: SBuildType?, revisions: List<BuildRevision>): PrBuildContext? {
@@ -449,6 +576,10 @@ class BuildStatusCheckRunPublisher(
         if (!serverSettings.isRepoAllowed(config.repo.slug)) return null
 
         val headSha = revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return null
+        return contextFor(buildType, config, headSha)
+    }
+
+    private fun contextFor(buildType: SBuildType, config: BridgeFeatureConfig, headSha: String): PrBuildContext? {
         // TokenResolver already logs the cause (rate-limited).
         val access = tokenResolver.resolveAccessToken(buildType.project, config.connectionId, config.repo) ?: return null
         return PrBuildContext(
@@ -865,6 +996,32 @@ class BuildStatusCheckRunPublisher(
         // all, its `buildStarted` takes the row over.
         fun keepsFinishedRow(inChain: Boolean, passedOnCommit: Boolean): Boolean = inChain && passedOnCommit
 
+        // Pure decision for one open row (`reconcileOpenRows`). Order matters: a
+        // row still young may have its conclusion in flight; a build still
+        // queued or running will conclude it through its own events.
+        fun decideReconcile(
+            ageMs: Long,
+            stillQueued: Boolean,
+            associatedPresent: Boolean,
+            associatedFinished: Boolean,
+        ): ReconcileAction = when {
+            ageMs > MAX_OPEN_AGE_MS -> ReconcileAction.EXPIRE
+            ageMs < RECONCILE_GRACE_MS -> ReconcileAction.WAIT
+            stillQueued -> ReconcileAction.WAIT
+            associatedPresent && !associatedFinished -> ReconcileAction.WAIT
+            associatedPresent -> ReconcileAction.PUBLISH_BUILD
+            else -> ReconcileAction.PUBLISH_LATEST_ON_COMMIT
+        }
+
+        const val PLUGIN_DATA_DIR: String = "teamcity-github-bridge"
+        const val FLUSH_PERIOD_S: Long = 30
+        // The first sweep waits for agents to reconnect after a restart, so a
+        // build still running on one is seen as running.
+        const val RECONCILE_FIRST_DELAY_S: Long = 180
+        const val RECONCILE_PERIOD_S: Long = 600
+        const val RECONCILE_GRACE_MS: Long = 5 * 60_000L
+        const val MAX_OPEN_AGE_MS: Long = 7 * 24 * 3_600_000L
+
         // Bound on `queuedRowWithheld`, should queue-exit events ever be missed.
         const val MAX_WITHHELD: Int = 10_000
 
@@ -1070,6 +1227,9 @@ data class BuildOutcomeMapping(
 // What to do with a "queued" publish attempt whose build is still in the
 // queue and belongs to us: post now, retry later, or give up.
 enum class QueuedAction { PUBLISH, RETRY, GIVE_UP }
+
+// What to do with a row left open on GitHub (`decideReconcile`).
+enum class ReconcileAction { WAIT, PUBLISH_BUILD, PUBLISH_LATEST_ON_COMMIT, EXPIRE }
 
 // What to do when a build leaves the queue: leave the row to the running build's
 // lifecycle events, report a finished build's outcome (its own, or the equivalent
