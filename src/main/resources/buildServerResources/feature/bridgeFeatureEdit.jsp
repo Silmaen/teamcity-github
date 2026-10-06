@@ -148,8 +148,10 @@
         <div class="bridge-feature-help">
             When unchecked, an automatic build for a draft PR is dropped and
             a "Skipped: draft PR" row is posted instead. An explicit Run or
-            GitHub command on a draft still runs. Defaults to checked, and
-            requires "Run on PR (ready)".
+            GitHub command on a draft still runs. Defaults to unchecked, and
+            requires "Run on PR (ready)". Check it for fast feedback on drafts;
+            on a composite, it pulls the whole snapshot chain in whatever each
+            dependency's own setting says.
         </div>
         <span class="error" id="error_triggerOnPrDraft"></span>
     </td>

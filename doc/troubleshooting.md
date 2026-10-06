@@ -67,7 +67,8 @@ A BuildType participates only when **both** of these are true:
 Draft behaviour is **not** a parameter. It is the per-feature
 **`triggerOnPrDraft`** checkbox (with **`triggerOnPrReady`** as its
 prerequisite — `triggerOnPrDraft` is only honoured when
-`triggerOnPrReady` is on). With `triggerOnPrDraft` off, an **automatic**
+`triggerOnPrReady` is on), **off by default**. With
+`triggerOnPrDraft` off, an **automatic**
 trigger on a draft PR is removed from the queue and reported as a
 **"Skipped: draft PR"** Check Run; an explicit Run or GitHub command on the
 same draft PR runs normally (1.9.0+).
@@ -234,7 +235,7 @@ TeamCity, instead of being removed from the queue and reported as a
 
 | Cause | Fix |
 |---|---|
-| The BuildType's feature has `triggerOnPrDraft` left **on** | The draft gate only suppresses when the **"GitHub Bridge integration"** feature has `triggerOnPrDraft` **unchecked** (and `triggerOnPrReady` checked). Open `Edit Configuration -> Build Features -> GitHub Bridge integration` and uncheck "trigger on draft PRs". |
+| The BuildType's feature has `triggerOnPrDraft` **checked** (a feature saved up to 1.10.0 may have stored the old default, `true`) | The draft gate only suppresses when the **"GitHub Bridge integration"** feature has `triggerOnPrDraft` **unchecked** (and `triggerOnPrReady` checked). Open `Edit Configuration -> Build Features -> GitHub Bridge integration` and uncheck "trigger on draft PRs". |
 | The BuildType has no "GitHub Bridge integration" feature at all | Without the feature the BuildType is not opted in; nothing gates it. Add the feature (or inherit it from a template — needs 1.6.0+). |
 | The project does not set `teamcity.github.bridge.repo` | Set it on the project's GitHub Bridge tab; the slug must match `repository.full_name` from GitHub. With no repo the config never resolves and the gate is skipped. |
 | The project's `teamcity.github.bridge.connectionId` is wrong/empty | Set `managed` or a valid `PROJECT_EXT_<N>` / `CID_<hash>`. With no token the plugin cannot fetch PR draft state and fails open. The log shows `Cannot resolve token`. |

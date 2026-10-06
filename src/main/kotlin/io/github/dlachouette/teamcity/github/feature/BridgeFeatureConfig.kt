@@ -195,10 +195,10 @@ object BridgeFeatureReader {
             ?.takeIf { it.isNotBlank() }
             ?: projectParams[BridgeProjectParams.PR_TRIGGER_BRANCHES].orEmpty()
 
-        // Per-BT HARD flags (default true).
+        // Per-BT HARD flags (default true, except drafts: default false).
         val triggerOnBranch = featureParams[GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_BRANCH] != "false"
         val triggerOnPrReady = featureParams[GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_READY] != "false"
-        val rawTriggerOnPrDraft = featureParams[GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_DRAFT] != "false"
+        val rawTriggerOnPrDraft = GitHubBridgeBuildFeature.triggerOnPrDraft(featureParams)
         // Tolerance: a stored state of (PrReady=OFF, PrDraft=ON) is
         // nonsensical (you can't run on drafts if you don't run on
         // ready). Treat as (OFF, OFF).

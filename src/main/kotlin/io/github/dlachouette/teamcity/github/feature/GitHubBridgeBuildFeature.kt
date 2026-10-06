@@ -16,7 +16,7 @@ import jetbrains.buildServer.web.openapi.PluginDescriptor
 //                                                non-PR branches?
 //   - triggerOnPrReady   (HARD, default true) — does this BT run on
 //                                                ready PRs?
-//   - triggerOnPrDraft   (HARD, default true) — does this BT also run
+//   - triggerOnPrDraft   (HARD, default false) — does this BT also run
 //                                                on draft PRs?
 //                                                Requires triggerOnPrReady=true.
 //   - branchTriggerBranchesOverride            — REPLACES the project's
@@ -43,7 +43,7 @@ class GitHubBridgeBuildFeature(
     override fun getDefaultParameters(): Map<String, String> = mapOf(
         PARAM_TRIGGER_ON_BRANCH to "true",
         PARAM_TRIGGER_ON_PR_READY to "true",
-        PARAM_TRIGGER_ON_PR_DRAFT to "true",
+        PARAM_TRIGGER_ON_PR_DRAFT to DEFAULT_TRIGGER_ON_PR_DRAFT.toString(),
         PARAM_PUBLISH_CHECKS to "true",
         PARAM_ANNOTATE_DIFF to "true",
     )
@@ -52,7 +52,7 @@ class GitHubBridgeBuildFeature(
         val flags = mutableListOf<String>()
         if (params[PARAM_TRIGGER_ON_BRANCH] != "false") flags += "branches"
         if (params[PARAM_TRIGGER_ON_PR_READY] != "false") {
-            if (params[PARAM_TRIGGER_ON_PR_DRAFT] != "false") flags += "PR (ready + draft)"
+            if (triggerOnPrDraft(params)) flags += "PR (ready + draft)"
             else flags += "PR (ready only)"
         }
         if (params[PARAM_SKIP_IF_COMMIT_PASSED] == "true") flags += "reuse passed commits"
@@ -72,7 +72,7 @@ class GitHubBridgeBuildFeature(
         // Constraint: triggerOnPrDraft=true requires triggerOnPrReady=true.
         // (You cannot run on drafts if you don't run on ready.)
         val ready = input[PARAM_TRIGGER_ON_PR_READY] != "false"
-        val draft = input[PARAM_TRIGGER_ON_PR_DRAFT] != "false"
+        val draft = triggerOnPrDraft(input)
         if (draft && !ready) {
             invalid += InvalidProperty(
                 PARAM_TRIGGER_ON_PR_DRAFT,
@@ -105,6 +105,15 @@ class GitHubBridgeBuildFeature(
         const val PARAM_TRIGGER_ON_BRANCH: String = "triggerOnBranch"
         const val PARAM_TRIGGER_ON_PR_READY: String = "triggerOnPrReady"
         const val PARAM_TRIGGER_ON_PR_DRAFT: String = "triggerOnPrDraft"
+
+        // Drafts are opt-in: a draft is "not ready yet", and a composite
+        // left on the default would pull its whole snapshot chain in.
+        const val DEFAULT_TRIGGER_ON_PR_DRAFT: Boolean = false
+
+        // The one place the stored value meets its default; an absent or
+        // unrecognised value means the default.
+        fun triggerOnPrDraft(params: Map<String, String?>): Boolean =
+            params[PARAM_TRIGGER_ON_PR_DRAFT]?.toBooleanStrictOrNull() ?: DEFAULT_TRIGGER_ON_PR_DRAFT
         const val PARAM_BRANCH_TRIGGER_OVERRIDE: String = "branchTriggerBranchesOverride"
         const val PARAM_PR_TRIGGER_OVERRIDE: String = "prTriggerBranchesOverride"
 
