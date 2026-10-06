@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A **Check name** (`checkName`) on the feature fixes a configuration's Check Run name, so moving it in the project tree no longer renames a required check; a **Unique check names** self-test warns when two configurations post the same name to one repository.
 - A **Draft setting along composite chains** self-test row warns about every composite that runs on drafts while a dependency in its chain skips them, since the composite builds that dependency anyway.
 
 ### Changed
