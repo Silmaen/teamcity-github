@@ -291,6 +291,8 @@ class PullRequestEventListener(
             return
         }
 
+        autoAssignAuthor(payload, candidates)
+
         // Bucket each candidate by the gate decision.
         val targets = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
         val branchSkips = mutableListOf<Pair<BuildTypeEx, BridgeFeatureConfig>>()
@@ -566,6 +568,43 @@ class PullRequestEventListener(
         }
         if (stopped > 0) {
             LOG.info("PR #${payload.prNumber} updated: stopped $stopped superseded build(s) for ${payload.repo.slug}")
+        }
+    }
+
+    // `autoAssignAuthor`: on `opened`, a pull request nobody is assigned to is
+    // assigned to its author. On if any project using this repository says so.
+    // Best effort: a failure is logged and never stops the build triggering.
+    private fun autoAssignAuthor(
+        payload: PrEventPayload,
+        candidates: List<Pair<BuildTypeEx, BridgeFeatureConfig>>,
+    ) {
+        val enabledIn = candidates.firstOrNull { (bt, _) ->
+            bt.project.parameters[BridgeProjectParams.AUTO_ASSIGN_AUTHOR] == "true"
+        }
+        val login = AutoAssign.assignee(
+            action = payload.action,
+            enabled = enabledIn != null,
+            author = payload.author,
+            authorIsBot = payload.authorIsBot,
+            assignees = payload.assignees,
+        ) ?: return
+        val (bt, config) = enabledIn ?: return
+        if (serverSettings.dryRun()) {
+            LOG.info("[dry-run] would assign ${payload.repo.slug}#${payload.prNumber} to $login")
+            return
+        }
+        try {
+            val access = tokenResolver.resolveAccessToken(bt.project, config.connectionId, payload.repo) ?: return
+            when (val code = gitHubClient.addAssignee(access.token, payload.repo, payload.prNumber, login, access.apiBase)) {
+                in 200..299 -> LOG.info("Assigned ${payload.repo.slug}#${payload.prNumber} to its author $login")
+                403 -> LOG.warn(
+                    "Could not assign ${payload.repo.slug}#${payload.prNumber} to $login: the GitHub App lacks " +
+                        "'Issues: write' (${BridgeProjectParams.AUTO_ASSIGN_AUTHOR} is on in ${bt.project.externalId})",
+                )
+                else -> LOG.warn("Could not assign ${payload.repo.slug}#${payload.prNumber} to $login (HTTP $code)")
+            }
+        } catch (e: Exception) {
+            LOG.warn("Assigning ${payload.repo.slug}#${payload.prNumber} to $login failed: ${e.message}")
         }
     }
 
@@ -912,6 +951,11 @@ data class PrEventPayload(
     val labels: List<String> = emptyList(),
     // `owner/name` the head branch lives in — see ForkGuard.
     val headRepo: String = "",
+    // Who opened it, whether that is a bot, and who is assigned — for
+    // `autoAssignAuthor`.
+    val author: String = "",
+    val authorIsBot: Boolean = false,
+    val assignees: List<String> = emptyList(),
 )
 
 // pull_request_review submitted with state=approved.

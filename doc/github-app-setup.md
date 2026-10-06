@@ -204,6 +204,13 @@ the Option A manifest requests):
 | **Pull requests** | Read | `GET /repos/{owner}/{repo}/pulls/{N}` for the draft status, and the commit-to-PR lookup. **Read is enough**: the plugin's only write is the Check Run lifecycle, which is the *Checks* permission. |
 | **Contents** | Read | Required transitively for repository visibility |
 
+Two permissions are **optional**, each needed by one opt-in feature only:
+
+| Resource | Access | Only for |
+|---|---|---|
+| **Issues** | Write | `teamcity.github.bridge.autoAssignAuthor` — assigning a new pull request to its author |
+| **Administration** | Read | the **Required checks** self-test reading classic branch protection (rulesets need nothing more) |
+
 Do **not** grant **Commit statuses** or **Webhooks** — this plugin
 does not need them. (TeamCity's bundled `commitStatusPublisher` /
 connection-test flow may ask for them; those are for coexistence

@@ -38,6 +38,13 @@ TeamCity now knows for any row whose own event was missed (a server restart
 mid-build, a failed post). A row opened before this release is not in the file,
 so a row stuck from before the upgrade still needs one manual re-run.
 
+### Opt-in: assign a new pull request to its author
+
+The project setting **Assign to the author**
+(`teamcity.github.bridge.autoAssignAuthor`) is off by default. Turning it on
+needs the App's **Issues: write**: accept the permission on the App's
+installation page first, or each assignment logs a `403`.
+
 ### Superseded builds are skipped, not cancelled
 
 A build the bridge stops because a newer commit was pushed now concludes

@@ -160,6 +160,22 @@
             </td>
         </tr>
         <tr>
+            <th><label for="autoAssignAuthor">Assign to the author:</label></th>
+            <td>
+                <input type="checkbox" id="autoAssignAuthor" name="autoAssignAuthor" <c:if test="${autoAssignAuthor}">checked</c:if>/>
+                <label for="autoAssignAuthor" style="font-weight:normal;">
+                    A pull request opened with nobody assigned is assigned to its author.
+                </label>
+                <div class="bridge-help">
+                    Once, when the pull request is opened: an existing assignee is never replaced,
+                    and an assignee someone removes later is not put back. Bot authors are skipped,
+                    and GitHub ignores an author who cannot be assigned (no access to the repository).
+                    Needs the App's <strong>Issues: write</strong> permission, which it does not ask
+                    for by default. Unticked here still inherits a parent project's &quot;on&quot;.
+                </div>
+            </td>
+        </tr>
+        <tr>
             <td></td>
             <td><input type="submit" class="btn btn_primary" value="Save GitHub Bridge settings"/></td>
         </tr>

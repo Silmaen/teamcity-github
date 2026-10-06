@@ -418,8 +418,13 @@ to pull requests, not issues — which is why GitHub does not deliver the
 permission (and subscribing to `issue_comment`) is an **opt-in** for
 operators who also want to trigger from PR conversation comments.
 
-**The plugin never writes to a pull request.** Its only write is the Check Run
-lifecycle, which is the **Checks** permission. Pull-requests **write** was
+**By default, the plugin never writes to a pull request.** Its only write is the
+Check Run lifecycle, which is the **Checks** permission. The one exception is
+opt-in: `teamcity.github.bridge.autoAssignAuthor` assigns a newly opened, unassigned
+pull request to its author, which needs **Issues: write** — grant it only if you
+turn the setting on. Likewise **Administration: read**, optional, only lets the
+*Required checks* self-test read classic branch protection; it is never used to
+write. Pull-requests **write** was
 required for one feature — the sticky summary comment — and that feature was
 removed in 1.10.0, so the scope came back down to read. An installation that
 still grants write is not exercising it; revoke it if you want the App's

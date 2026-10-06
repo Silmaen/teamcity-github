@@ -50,6 +50,12 @@ object BridgeProjectParams {
     // key here: a `false` on an ancestor holds for its whole subtree and a
     // sub-project cannot take it back. See `AnnotationGate`.
     const val ANNOTATIONS_ENABLED: String = "teamcity.github.bridge.annotations.enabled"
+
+    // Assign a newly opened pull request to its author when nobody is assigned.
+    // Opt-in (default off): it is a write to the pull request, and needs the
+    // App's `issues: write`. Resolved like the other keys, so a parent project
+    // can turn it on for its subtree.
+    const val AUTO_ASSIGN_AUTHOR: String = "teamcity.github.bridge.autoAssignAuthor"
 }
 
 // Which ref the bridge enqueues a PR build on.
