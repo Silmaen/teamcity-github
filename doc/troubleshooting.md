@@ -344,6 +344,53 @@ grep -E "SUPPRESS_METADATA|metadata out of scope" <TC_DATA_DIR>/logs/teamcity-gi
 A build that passed the metadata gate is enqueued normally; one that was
 excluded shows the suppression and the posted skipped Check Run.
 
+## Symptom: a gating change in a pull request is ignored
+
+### What you see
+
+A pull request edits its own versioned settings — unchecks
+`triggerOnPrDraft`, widens a `pathFilter`, adds a `labelFilter` — and the
+bridge keeps triggering (or skipping) that pull request as if nothing changed.
+
+### Cause
+
+The bridge decides whether to start a pull-request build from the settings of
+the **default branch**, the ones TeamCity holds; `PREFER_VCS` only changes what
+an already-started build runs. A gate changed in a pull request therefore takes
+effect **once merged**. This is deliberate: a pull request must not be able to
+grant itself a build by editing its gates. See
+[configuration.md](configuration.md#whose-settings-decide-a-trigger-versioned-settings).
+
+### Fix
+
+Merge the settings change (on its own, if the rest of the pull request is not
+ready), or start the build by hand in the meantime.
+
+## Symptom: "No compatible agents" on a build that does not carry the bridge
+
+### What you see
+
+A build configuration **without** the *GitHub Bridge integration* feature —
+often a composite, a deployment or a configuration copied from a PR build —
+waits in the queue with *"No compatible agents"*, and its agent requirements
+list an implicit one on a `teamcity.github.bridge.pullRequest.*` parameter
+("exists" / "must have a value").
+
+### Cause
+
+The bridge publishes its PR parameters
+(`teamcity.github.bridge.pullRequest.number`, `.title`, …) only for builds that
+opted in. A configuration that references one — typically in its **build number
+format** (`%teamcity.github.bridge.pullRequest.number%`), or in a step — without
+carrying the feature leaves the reference unresolved, and TeamCity turns an
+unresolved reference into an implicit agent requirement that no agent meets.
+
+### Fix
+
+Either add the feature to that configuration — with **Publish to GitHub**
+unchecked and every trigger off if it should stay invisible and on demand — or
+stop referencing the bridge's parameters there.
+
 ## Symptom: a pull request waits on a required check that never arrives
 
 ### What you see

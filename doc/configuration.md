@@ -521,6 +521,21 @@ BuildType (it shows under Build Features with a summary like
 `triggers: branches + PR (ready only)`). The project params alone are
 not enough — the feature must also be present.
 
+### Whose settings decide a trigger (versioned settings)
+
+With versioned settings (Kotlin DSL or XML in the repository), the bridge
+decides **whether to start** a pull-request build from the settings TeamCity
+currently holds, which are those of the **default branch**. The *"use settings
+from VCS"* option (`PREFER_VCS`) only changes what an already-started build
+**runs**: its steps, parameters and requirements as the PR branch defines them.
+
+So a gating setting changed **in a pull request** — `triggerOnPrDraft`,
+`triggerOnPrReady`, `pathFilter`, `labelFilter`, the phrases, a branch-list
+override, `checkName` — has no effect on that pull request's own triggering; it
+takes effect once merged. This is on purpose: otherwise a pull request could
+grant itself a build (or hide from one) just by editing its gates. Until it is merged,
+a build that the old gates hold back can still be started by hand.
+
 ## Configuration precedence
 
 ```mermaid
