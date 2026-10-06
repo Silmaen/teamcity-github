@@ -527,8 +527,17 @@ composite gate) show "Queued" again once it is marked ready, although nothing
 reruns. The composite re-queues them, the publisher posts "Queued" for the new
 promotions — which replaces the green rows, GitHub keeping one row per name and
 SHA — and queue optimization then satisfies them with the finished builds.
-**Fixed after 1.10.0:** the publisher now posts that equivalent build's outcome
-again (`Published queue-removed/equivalent (success) Check Run ...` in the log).
+**Fixed after 1.10.0**, twice over: a re-queued chain member whose commit
+already passed in its configuration gets **no** "Queued" post at all, so the
+green row never flickers (`Not posting Queued for ... the chain should reuse #N`
+in the log); and should the row change anyway, the equivalent build's outcome is
+posted again when the duplicate leaves the queue (`Published
+queue-removed/equivalent (success) Check Run ...`).
+
+Only a build that another queued build depends on is spared its "Queued": a
+standalone re-run of a green commit (a manual Run, a trigger) is going to run
+and is shown queued as usual. Only a **successful** finished build counts; a
+re-queued failure still shows "Queued" until it is reused or reruns.
 
 ## Symptom: no "Queued" Check Run — it only appears when the build starts
 

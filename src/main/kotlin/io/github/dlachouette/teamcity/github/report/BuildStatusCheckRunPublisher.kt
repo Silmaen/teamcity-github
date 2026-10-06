@@ -15,6 +15,7 @@ import io.github.dlachouette.teamcity.github.feature.BridgeFeatureReader
 import io.github.dlachouette.teamcity.github.feature.BridgeProjectParams
 import io.github.dlachouette.teamcity.github.feature.BridgeGate
 import io.github.dlachouette.teamcity.github.feature.GateDecision
+import io.github.dlachouette.teamcity.github.queue.PassedBuildLookup
 import io.github.dlachouette.teamcity.github.queue.QueueCleanupPolicy
 import io.github.dlachouette.teamcity.github.feature.resolvesPrFromCommit
 import jetbrains.buildServer.BuildProblemTypes
@@ -32,6 +33,7 @@ import jetbrains.buildServer.serverSide.artifacts.BuildArtifactsViewMode
 import jetbrains.buildServer.serverSide.WebLinks
 import jetbrains.buildServer.serverSide.executors.ExecutorServices
 import jetbrains.buildServer.users.User
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 // Publishes a Check Run to GitHub at every lifecycle transition for
@@ -67,6 +69,12 @@ class BuildStatusCheckRunPublisher(
         buildServer.addListener(this)
     }
 
+    // Promotions whose "Queued" post was withheld because the row already
+    // shows a finished build of the same commit (`keepsFinishedRow`). Their
+    // queue exit must not replace that row either. Entries leave on start or
+    // on removal from the queue, both of which always fire.
+    private val queuedRowWithheld: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
     override fun buildTypeAddedToQueue(queuedBuild: SQueuedBuild) {
         if (isPersonal(queuedBuild.buildPromotion)) return
         try {
@@ -77,6 +85,7 @@ class BuildStatusCheckRunPublisher(
     }
 
     override fun buildStarted(build: SRunningBuild) {
+        queuedRowWithheld.remove(build.buildPromotion.id)
         if (isPersonal(build.buildPromotion)) return
         try {
             publishInProgress(build)
@@ -204,6 +213,14 @@ class BuildStatusCheckRunPublisher(
             LOG.debug("Skipping queued Check Run for ${ctx.buildType.externalId}; the cleaner will own this row")
             return
         }
+        val passed = passedOnCommit(promotion, ctx)
+        if (keepsFinishedRow(inChain = promotion.numberOfDependedOnMe > 0, passedOnCommit = passed != null)) {
+            if (queuedRowWithheld.size >= MAX_WITHHELD) queuedRowWithheld.clear()
+            queuedRowWithheld += promotion.id
+            LOG.info("Not posting Queued for ${ctx.buildType.externalId}@${ctx.headSha}: the chain should reuse " +
+                "#${passed?.buildNumber}, whose row stays as it is")
+            return
+        }
         val request = CheckRunRequest(
             name = checkRunName(ctx.buildType),
             headSha = ctx.headSha,
@@ -233,6 +250,16 @@ class BuildStatusCheckRunPublisher(
             gate.pr?.title.orEmpty(), gate.pr?.body.orEmpty(), gate.pr?.labels.orEmpty(),
         )
         return QueueCleanupPolicy.removes(decision, gate.trigger, serverSettings.queueCleanupEnabled())
+    }
+
+    // A finished, successful build of this configuration on this commit — the
+    // build a chain's duplicate would be satisfied with. Null when there is
+    // none, or when history cannot be read.
+    private fun passedOnCommit(promotion: BuildPromotion, ctx: PrBuildContext) = try {
+        PassedBuildLookup.find(ctx.buildType, ctx.headSha, promotion.associatedBuildId)
+    } catch (e: Exception) {
+        LOG.debug("Could not look up a passed build of ${ctx.buildType.externalId}@${ctx.headSha}: ${e.message}")
+        null
     }
 
     private fun publishInProgress(build: SBuild) {
@@ -311,6 +338,7 @@ class BuildStatusCheckRunPublisher(
             associatedFinished = associated?.isFinished == true,
             associatedIsOwn = associated?.buildPromotion?.id == promotion.id,
             removedByUser = user != null,
+            queuedRowWithheld = queuedRowWithheld.remove(promotion.id),
         )
         // The build left the queue to actually RUN: a running SBuild exists and
         // buildStarted / buildFinished own the Check Run row.
@@ -374,6 +402,11 @@ class BuildStatusCheckRunPublisher(
                 )
                 post(ctx, request, "queue-removed/cancelled")
             }
+            QueueRemovalAction.KEEP_FINISHED_ROW ->
+                // No "Queued" was posted for this duplicate, so the row still shows
+                // the finished build of this commit; cancelling the duplicate does
+                // not change what that commit's result is.
+                LOG.debug("Queue exit of withheld ${ctx.buildType.externalId} (${promotion.branch?.name}); row left as it is")
             QueueRemovalAction.IGNORE ->
                 // System removal with no associated build. In a dependency fan-out
                 // the plugin (and TeamCity's chain optimization) create duplicate
@@ -798,18 +831,39 @@ class BuildStatusCheckRunPublisher(
         // caller before this is reached.
         // Pure decision for a build leaving the queue (`buildRemovedFromQueue`
         // fires for every exit: started, optimized, cancelled, failed to start).
+        //
+        // `queuedRowWithheld`: no "Queued" was posted (`keepsFinishedRow`). A
+        // satisfied duplicate still republishes its equivalent — the same
+        // outcome, harmless, and the safety net if the row did change — but a
+        // removal with no build behind it leaves the finished row alone.
         fun decideQueueRemoval(
             associatedPresent: Boolean,
             associatedFinished: Boolean,
             associatedIsOwn: Boolean,
             removedByUser: Boolean,
+            queuedRowWithheld: Boolean = false,
         ): QueueRemovalAction = when {
             associatedPresent && !associatedFinished -> QueueRemovalAction.LIFECYCLE_OWNS_ROW
             associatedPresent && associatedIsOwn -> QueueRemovalAction.REPORT_OWN_OUTCOME
             associatedPresent -> QueueRemovalAction.REPORT_EQUIVALENT_OUTCOME
+            queuedRowWithheld -> QueueRemovalAction.KEEP_FINISHED_ROW
             removedByUser -> QueueRemovalAction.REPORT_CANCELLED
             else -> QueueRemovalAction.IGNORE
         }
+
+        // Pure decision: withhold the "Queued" post, because GitHub keeps one row
+        // per (name, sha) and that row already shows this commit passing here.
+        //
+        // Only for a promotion some other queued build depends on — the case
+        // where the chain's reuse rule satisfies it with the finished build and
+        // nothing runs (Owl: a draft's green subset, re-queued by the PR Ready
+        // composite on ready). A standalone duplicate (a Run, a trigger) is
+        // going to run, and gets its "Queued". If a chain member does run after
+        // all, its `buildStarted` takes the row over.
+        fun keepsFinishedRow(inChain: Boolean, passedOnCommit: Boolean): Boolean = inChain && passedOnCommit
+
+        // Bound on `queuedRowWithheld`, should queue-exit events ever be missed.
+        const val MAX_WITHHELD: Int = 10_000
 
         fun decideQueuedAction(revisionReady: Boolean, attempt: Int): QueuedAction = when {
             revisionReady -> QueuedAction.PUBLISH
@@ -1006,5 +1060,6 @@ enum class QueueRemovalAction {
     REPORT_OWN_OUTCOME,
     REPORT_EQUIVALENT_OUTCOME,
     REPORT_CANCELLED,
+    KEEP_FINISHED_ROW,
     IGNORE,
 }

@@ -10,34 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Never replace a finished row with "Queued"
-
-**Problem.** GitHub keeps one Check Run row per `(name, head_sha)`, and the
-publisher posts "Queued" the moment a promotion of an opted-in configuration
-enters the queue. When that promotion is a duplicate of a build that already
-finished on the same commit, the "Queued" post *replaces* the finished row.
-Seen on Owl: a draft PR ran its fast subset green; marked ready, the PR Ready
-composite re-queued those dependencies, their green rows turned "Queued", and
-TeamCity's queue optimization then satisfied the duplicates with the finished
-builds — nothing reran, but the PR showed pending checks. The unreleased fix
-(republish the equivalent build's outcome on `buildRemovedFromQueue`) repairs
-the row after the fact; the row still flickers to "Queued", and a missed
-removal event leaves it there.
-
-**Feasible.** Before posting "Queued", the publisher can ask TeamCity whether
-a finished build of the same configuration exists on the same revision — the
-condition under which the composite's chain will reuse it (`reuseBuilds =
-SUCCESSFUL`) — or look up the existing row on GitHub (`GET
-/repos/{o}/{r}/commits/{sha}/check-runs?check_name=…`).
-
-**Design.** Skip the "Queued" post when the row for that name and SHA is
-already `completed` and a reusable finished build backs it; let the
-promotion's own `buildStarted` take over if it does run. Keep the
-after-the-fact republish as the safety net.
-
-**Effort.** Small to medium: the TeamCity-side lookup avoids a GitHub call per
-queued build but must mirror the chain's reuse rule exactly.
-
 ## A superseded build is skipped, not cancelled
 
 **Problem.** When a new commit is pushed, the builds of the previous head are

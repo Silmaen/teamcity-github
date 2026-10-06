@@ -128,21 +128,7 @@ class DraftBuildQueueCleaner(
         val buildType = promotion.buildType ?: return
         val headSha = promotion.revisions.firstOrNull()?.revision?.takeIf { it.isNotBlank() } ?: return
 
-        // Same build configuration, same commit, any ref: GitHub keys a Check
-        // Run on (name, sha), so two refs of one commit are one row anyway.
-        // A personal build is never that evidence: it passed on a patch that
-        // is not in the repository, and republishing it would put a personal
-        // build's result on the commit (see BuildStatusCheckRunPublisher —
-        // personal builds publish nothing).
-        val passed = buildType.history.asSequence()
-            .take(HISTORY_SCAN_DEPTH)
-            .firstOrNull { build ->
-                build.buildId != promotion.associatedBuildId &&
-                    !build.buildPromotion.isPersonal &&
-                    build.canceledInfo == null &&
-                    build.buildStatus.isSuccessful &&
-                    build.revisions.any { it.revision == headSha }
-            } ?: return
+        val passed = PassedBuildLookup.find(buildType, headSha, promotion.associatedBuildId) ?: return
 
         try {
             queuedBuild.removeFromQueue(
@@ -160,9 +146,6 @@ class DraftBuildQueueCleaner(
 
     companion object {
         private val LOG = Logger.getInstance(DraftBuildQueueCleaner::class.java.name)
-
-        // How far back to look for a successful build of the same commit.
-        private const val HISTORY_SCAN_DEPTH: Int = 50
     }
 }
 

@@ -19,6 +19,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A Check Run no longer stays "Queued" when queue optimization satisfies its build with one that already finished (a draft PR turned ready re-queues the composite's green dependencies): the finished build's outcome is posted again.
+- A green row no longer flickers to "Queued" when a chain re-queues a dependency that already passed on that commit: no "Queued" is posted for it, and cancelling the duplicate leaves the row as it is.
 
 ## [1.10.0] - 2026-08-01
 
