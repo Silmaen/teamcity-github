@@ -329,4 +329,46 @@ class BuildStatusCheckRunPublisherTest {
     fun `joinSections passes a single section through`() {
         assertEquals("only\n", BuildStatusCheckRunPublisher.joinSections(null, "only\n"))
     }
+
+    // A chain's duplicate of a build that already passed on the commit: posting
+    // "Queued" would replace the green row, and queue optimization then reuses
+    // the finished build, so nothing would ever move the row on.
+    @Test
+    fun `a chain duplicate of a passed commit keeps the finished row`() {
+        assertTrue(BuildStatusCheckRunPublisher.keepsFinishedRow(inChain = true, passedOnCommit = true))
+        // A standalone duplicate is going to run: it gets its "Queued".
+        assertFalse(BuildStatusCheckRunPublisher.keepsFinishedRow(inChain = false, passedOnCommit = true))
+        assertFalse(BuildStatusCheckRunPublisher.keepsFinishedRow(inChain = true, passedOnCommit = false))
+    }
+
+    @Test
+    fun `a withheld duplicate leaving the queue with no build leaves the row alone`() {
+        for (byUser in listOf(false, true)) {
+            assertEquals(
+                QueueRemovalAction.KEEP_FINISHED_ROW,
+                BuildStatusCheckRunPublisher.decideQueueRemoval(
+                    associatedPresent = false, associatedFinished = false, associatedIsOwn = false,
+                    removedByUser = byUser, queuedRowWithheld = true,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `a withheld duplicate satisfied or started still follows its build`() {
+        assertEquals(
+            QueueRemovalAction.REPORT_EQUIVALENT_OUTCOME,
+            BuildStatusCheckRunPublisher.decideQueueRemoval(
+                associatedPresent = true, associatedFinished = true, associatedIsOwn = false,
+                removedByUser = false, queuedRowWithheld = true,
+            ),
+        )
+        assertEquals(
+            QueueRemovalAction.LIFECYCLE_OWNS_ROW,
+            BuildStatusCheckRunPublisher.decideQueueRemoval(
+                associatedPresent = true, associatedFinished = false, associatedIsOwn = true,
+                removedByUser = false, queuedRowWithheld = true,
+            ),
+        )
+    }
 }
