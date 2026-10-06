@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A Check Run no longer stays "Queued" when queue optimization satisfies its build with one that already finished (a draft PR turned ready re-queues the composite's green dependencies): the finished build's outcome is posted again.
+
 ## [1.10.0] - 2026-08-01
 
 What GitHub sees of a build — why it failed, what its tests did, where its time

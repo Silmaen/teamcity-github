@@ -490,6 +490,16 @@ You should see a `Published queue-removed/finished (failure) Check
 Run ...` (or `completed (failure)`) line for the affected build
 instead of only a `queued` one.
 
+### Second case: a draft PR turned ready
+
+The builds that already passed while the PR was a draft (the dependencies of a
+composite gate) show "Queued" again once it is marked ready, although nothing
+reruns. The composite re-queues them, the publisher posts "Queued" for the new
+promotions — which replaces the green rows, GitHub keeping one row per name and
+SHA — and queue optimization then satisfies them with the finished builds.
+**Fixed after 1.10.0:** the publisher now posts that equivalent build's outcome
+again (`Published queue-removed/equivalent (success) Check Run ...` in the log).
+
 ## Symptom: no "Queued" Check Run — it only appears when the build starts
 
 ### What you see
