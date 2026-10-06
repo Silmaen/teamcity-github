@@ -194,20 +194,6 @@ Docker-in-Docker.
   DEBUG lines `carries no queue wait-reason statistic; keys present: […]`
   and `agent-wait statistics: …` exist to identify the real keys from a
   live server; once known, wire them.
-- **Document the implicit agent requirement trap.** A build-number pattern
-  referencing `teamcity.github.bridge.pullRequest.*` becomes an implicit
-  agent requirement ("must have a value") on a configuration that does not
-  carry the bridge feature, and the build then finds no compatible agent.
-  Worth a section in [troubleshooting.md](troubleshooting.md).
-- **Document whose settings decide a trigger.** With versioned settings, the
-  bridge decides whether to trigger a pull-request build from the settings of
-  the **default branch**; `PREFER_VCS` only changes what a started build runs.
-  A gating parameter changed in a PR (`triggerOnPrDraft`, `pathFilter`, …)
-  therefore takes effect only once merged — on purpose, or a PR could grant
-  itself a build — but nothing says so, and Owl lost a few rounds wondering
-  why its draft fix was ignored. Worth a paragraph in
-  [configuration.md](configuration.md) and in
-  [troubleshooting.md](troubleshooting.md).
 - **Exercise the publisher's SDK paths with hand-written fakes.** The queue
   and lifecycle decisions are tested as pure helpers (`decideQueuedAction`, and
   `decideQueueRemoval` with the queue-removal fix), but the glue that reads `BuildPromotion`,
