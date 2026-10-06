@@ -199,6 +199,68 @@ class BuildStatusCheckRunPublisherTest {
         )
     }
 
+    // A build leaving the queue to run: its own buildStarted / buildFinished
+    // own the row, whether it is this promotion's build or an equivalent one.
+    @Test
+    fun `a build that left the queue to run is left to its lifecycle events`() {
+        for (own in listOf(true, false)) {
+            assertEquals(
+                QueueRemovalAction.LIFECYCLE_OWNS_ROW,
+                BuildStatusCheckRunPublisher.decideQueueRemoval(
+                    associatedPresent = true, associatedFinished = false, associatedIsOwn = own, removedByUser = false,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `a promotion whose own build failed to start reports that outcome`() {
+        assertEquals(
+            QueueRemovalAction.REPORT_OWN_OUTCOME,
+            BuildStatusCheckRunPublisher.decideQueueRemoval(
+                associatedPresent = true, associatedFinished = true, associatedIsOwn = true, removedByUser = false,
+            ),
+        )
+    }
+
+    // Seen on a draft PR turned ready: the composite re-queued dependencies that had
+    // already passed, their "Queued" rows replaced the green ones (one row per name
+    // and SHA), and queue optimization then satisfied them with the finished builds.
+    // Staying silent there left the rows on "Queued" for good.
+    @Test
+    fun `a promotion optimized into a finished build reports that build's outcome`() {
+        for (byUser in listOf(false, true)) {
+            assertEquals(
+                QueueRemovalAction.REPORT_EQUIVALENT_OUTCOME,
+                BuildStatusCheckRunPublisher.decideQueueRemoval(
+                    associatedPresent = true, associatedFinished = true, associatedIsOwn = false, removedByUser = byUser,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `a user removing a build that never ran reports a cancellation`() {
+        assertEquals(
+            QueueRemovalAction.REPORT_CANCELLED,
+            BuildStatusCheckRunPublisher.decideQueueRemoval(
+                associatedPresent = false, associatedFinished = false, associatedIsOwn = false, removedByUser = true,
+            ),
+        )
+    }
+
+    // A system teardown of a duplicate promotion: the real build reports for itself,
+    // and a generic status here would clobber its result.
+    @Test
+    fun `a system removal with no build stays silent`() {
+        assertEquals(
+            QueueRemovalAction.IGNORE,
+            BuildStatusCheckRunPublisher.decideQueueRemoval(
+                associatedPresent = false, associatedFinished = false, associatedIsOwn = false, removedByUser = false,
+            ),
+        )
+    }
+
     // The opt-in gate moved from buildType.parameters to the
     // "GitHub Bridge integration" BuildFeature in v1.5.0. The
     // equivalent of the previous `isOptedIn` tests now lives in
