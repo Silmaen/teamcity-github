@@ -135,6 +135,59 @@ open class GitHubClient {
         }
     }
 
+    // ----- Branch protection (read-only, for the self-tests) -----
+
+    // The branches a required check can gate: the default branch plus every
+    // branch GitHub reports as protected (classic protection or a ruleset).
+    // Null when the repository cannot be read at all.
+    open fun listGatedBranches(
+        accessToken: String,
+        repo: RepoCoords,
+        apiBase: String = DEFAULT_API_BASE,
+    ): List<String>? {
+        val repoResp = request("GET", "$apiBase/repos/${repo.slug}", accessToken) ?: return null
+        if (!repoResp.isSuccess) {
+            LOG.warn("GET repos/${repo.slug} returned ${repoResp.code}")
+            return null
+        }
+        val default = parseDefaultBranch(repoResp.body)
+        val protected = request("GET", "$apiBase/repos/${repo.slug}/branches?protected=true&per_page=100", accessToken)
+            ?.takeIf { it.isSuccess }?.let { parseBranchNames(it.body) }.orEmpty()
+        return (listOfNotNull(default) + protected).distinct()
+    }
+
+    // Check names a branch requires, from both places GitHub keeps them.
+    //
+    // Rulesets (`GET /rules/branches/{b}`) need only `metadata: read`. Classic
+    // protection (`GET /branches/{b}/protection/required_status_checks`) needs
+    // `administration: read`, which the App does not ask for by default: a 403
+    // there leaves `classicReadable=false` rather than failing the lookup. A
+    // 404 means "no such requirement", not an error.
+    open fun requiredChecks(
+        accessToken: String,
+        repo: RepoCoords,
+        branch: String,
+        apiBase: String = DEFAULT_API_BASE,
+    ): RequiredChecks {
+        val b = encodePathSegment(branch)
+        val names = linkedSetOf<String>()
+        val classic = request("GET", "$apiBase/repos/${repo.slug}/branches/$b/protection/required_status_checks", accessToken)
+        val classicReadable = when {
+            classic == null -> false
+            classic.isSuccess -> { names += parseClassicRequiredChecks(classic.body); true }
+            classic.code == 404 -> true
+            else -> false
+        }
+        val rules = request("GET", "$apiBase/repos/${repo.slug}/rules/branches/$b?per_page=100", accessToken)
+        val rulesReadable = when {
+            rules == null -> false
+            rules.isSuccess -> { names += parseRulesetRequiredChecks(rules.body); true }
+            rules.code == 404 -> true
+            else -> false
+        }
+        return RequiredChecks(names, classicReadable, rulesReadable)
+    }
+
     // ----- GitHub App management (manifest creation + verification) -----
 
     // POST /app-manifests/{code}/conversions — exchanges the temporary
@@ -307,6 +360,49 @@ open class GitHubClient {
 
         // Cap pagination of the PR-files endpoint (100/page).
         const val MAX_PR_FILES_PAGES: Int = 10
+
+        // Branch names may hold `/` (`Release/2026-06`); GitHub takes the
+        // segment percent-encoded.
+        fun encodePathSegment(segment: String): String =
+            java.net.URLEncoder.encode(segment, Charsets.UTF_8).replace("+", "%20")
+
+        // Public for testing — `default_branch` of a repository object.
+        fun parseDefaultBranch(json: String): String? = try {
+            MAPPER.readTree(json).path("default_branch").asText("").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+
+        // Public for testing — `name` of each element of a branches array.
+        fun parseBranchNames(json: String): List<String> = try {
+            val node = MAPPER.readTree(json)
+            if (!node.isArray) emptyList()
+            else node.mapNotNull { it.path("name").asText("").takeIf { n -> n.isNotBlank() } }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        // Public for testing — classic protection lists a name in `contexts`
+        // (legacy) and/or `checks[].context`; both are honoured.
+        fun parseClassicRequiredChecks(json: String): Set<String> = try {
+            val node = MAPPER.readTree(json)
+            (node.path("contexts").map { it.asText("") } + node.path("checks").map { it.path("context").asText("") })
+                .filter { it.isNotBlank() }.toSet()
+        } catch (e: Exception) {
+            emptySet()
+        }
+
+        // Public for testing — the rules applying to a branch, from every
+        // ruleset; only `required_status_checks` rules name checks.
+        fun parseRulesetRequiredChecks(json: String): Set<String> = try {
+            val node = MAPPER.readTree(json)
+            if (!node.isArray) emptySet()
+            else node.filter { it.path("type").asText("") == "required_status_checks" }
+                .flatMap { rule -> rule.path("parameters").path("required_status_checks").map { it.path("context").asText("") } }
+                .filter { it.isNotBlank() }.toSet()
+        } catch (e: Exception) {
+            emptySet()
+        }
 
         // Public for testing — parses the `filename` of each element of
         // the pulls/{n}/files array.
@@ -574,6 +670,13 @@ data class HttpResponse(
         headers.entries.firstOrNull { name.equals(it.key, ignoreCase = true) }
             ?.value?.firstOrNull()
 }
+
+// The check names one branch requires, and whether each source could be read.
+data class RequiredChecks(
+    val names: Set<String>,
+    val classicReadable: Boolean,
+    val rulesReadable: Boolean,
+)
 
 data class CheckRunRequest(
     val name: String,

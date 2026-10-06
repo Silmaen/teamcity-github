@@ -10,33 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Warn when a required check can never arrive
-
-**Problem.** A branch protection rule requiring a check named
-`TeamCity / Sandbox / test_ci / PR / Test (Linux)` blocks every pull request
-for ever if the bridge posts `TeamCity / Sandbox / test_ci / PR / Test /
-Linux / Test (Linux, x64, Release)`. Nothing reports the mismatch: the PR
-just sits there, "Required statuses must pass", waiting for a row that will
-never exist. Rename a build configuration and you have created this without
-touching anything called "GitHub" — and since 1.10.0 a project can also
-rename every one of its checks at once by setting
-`teamcity.github.bridge.checkName.stripPrefix`, which makes the warning worth
-more than it was.
-
-**Feasible.** The Check Run name is computed in one place
-(`checkRunName` = `TeamCity / <buildType fullName>`), so the plugin knows
-every name it will ever post. The other half is
-`GET /repos/{o}/{r}/branches/{b}/protection/required_status_checks` (or the
-rulesets API), which the App can read given repository administration read.
-
-**Design.** A self-test row — the admin page already runs a battery of them
-— listing required check names that no opted-in build configuration will
-produce, and (informational) opted-in configurations that are not required.
-Skipped, not failed, when the App lacks the permission to read protection.
-
-**Effort.** Small, and it fits exactly where the plugin already differs from
-a relay: it tells you when it is misconfigured.
-
 ## Never replace a finished row with "Queued"
 
 **Problem.** GitHub keeps one Check Run row per `(name, head_sha)`, and the

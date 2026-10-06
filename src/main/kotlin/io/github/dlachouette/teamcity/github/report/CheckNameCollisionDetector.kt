@@ -26,12 +26,14 @@ object CheckNameCollisionDetector {
         .map { (_, group) -> Collision(group.first().repo, group.first().checkName, group.map { it.buildType }.sorted()) }
         .sortedWith(compareBy({ it.repo }, { it.checkName }))
 
-    // Only configurations that actually publish: one with `publishChecks=false`
-    // posts nothing, so it cannot collide.
-    fun scan(buildTypes: Collection<SBuildType>): List<Collision> = find(
+    fun scan(buildTypes: Collection<SBuildType>): List<Collision> = find(publishers(buildTypes))
+
+    // Every name the bridge will post, and where. Only configurations that
+    // actually publish: one with `publishChecks=false` posts nothing, so it can
+    // neither collide nor satisfy a required check.
+    fun publishers(buildTypes: Collection<SBuildType>): List<Publisher> =
         buildTypes.mapNotNull { bt ->
             val config = BridgeFeatureReader.read(bt)?.takeIf { it.publishChecks } ?: return@mapNotNull null
             Publisher(config.repo.slug, checkRunName(bt), bt.externalId)
-        },
-    )
+        }
 }
