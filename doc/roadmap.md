@@ -37,6 +37,94 @@ Skipped, not failed, when the App lacks the permission to read protection.
 **Effort.** Small, and it fits exactly where the plugin already differs from
 a relay: it tells you when it is misconfigured.
 
+## Never replace a finished row with "Queued"
+
+**Problem.** GitHub keeps one Check Run row per `(name, head_sha)`, and the
+publisher posts "Queued" the moment a promotion of an opted-in configuration
+enters the queue. When that promotion is a duplicate of a build that already
+finished on the same commit, the "Queued" post *replaces* the finished row.
+Seen on Owl: a draft PR ran its fast subset green; marked ready, the PR Ready
+composite re-queued those dependencies, their green rows turned "Queued", and
+TeamCity's queue optimization then satisfied the duplicates with the finished
+builds — nothing reran, but the PR showed pending checks. The unreleased fix
+(republish the equivalent build's outcome on `buildRemovedFromQueue`) repairs
+the row after the fact; the row still flickers to "Queued", and a missed
+removal event leaves it there.
+
+**Feasible.** Before posting "Queued", the publisher can ask TeamCity whether
+a finished build of the same configuration exists on the same revision — the
+condition under which the composite's chain will reuse it (`reuseBuilds =
+SUCCESSFUL`) — or look up the existing row on GitHub (`GET
+/repos/{o}/{r}/commits/{sha}/check-runs?check_name=…`).
+
+**Design.** Skip the "Queued" post when the row for that name and SHA is
+already `completed` and a reusable finished build backs it; let the
+promotion's own `buildStarted` take over if it does run. Keep the
+after-the-fact republish as the safety net.
+
+**Effort.** Small to medium: the TeamCity-side lookup avoids a GitHub call per
+queued build but must mirror the chain's reuse rule exactly.
+
+## Draft pull requests off by default
+
+**Problem.** `triggerOnPrDraft` defaults to `true`. A configuration that does
+not set it runs on every draft push — and when that configuration is a
+composite gate, it pulls its whole snapshot chain in with it, whatever each
+dependency's own draft setting says. Owl and EvenementLoto both shipped
+without the parameter and ran their full matrix on drafts; the "Skipped:
+draft PR" rows, which reviewers rely on to see what was held back, never
+appear for them either, since they are posted only when the flag is `false`.
+
+**Feasible.** The default is spread over three reads of the parameter —
+`BridgeFeatureConfig` (`!= "false"`), `GitHubBridgeBuildFeature`'s default
+parameters and its description — which is itself worth folding into one
+constant. Changing it needs an upgrade note, since configurations relying on
+the implicit value change behaviour.
+
+**Design.** Either flip the default to `false` (a draft is "not ready yet";
+fast feedback is opted into per configuration), or keep it and add a
+self-test row on the admin page warning about every **composite** that runs
+on drafts with dependencies that do not. The warning is the safer first step.
+
+**Effort.** Small.
+
+## A stable name for a required check
+
+**Problem.** A Check Run is named after the configuration's place in the
+project tree (`TeamCity / <buildType fullName>`, minus `checkName.stripPrefix`).
+Moving the required gate between sub-projects renames its check — on Owl,
+moving PR Ready to the root turned `Analysis / PR Ready` into `PR Ready` —
+and the branch protection then waits for a check that will never come again.
+The self-test in *Warn when a required check can never arrive* would detect
+this; a fixed name would prevent it.
+
+**Feasible.** `checkRunName` is computed in one place, and every published
+row goes through it.
+
+**Design.** An optional `checkName` parameter on the build feature. When set,
+it is the row's name verbatim (still unique per configuration, which the
+self-test can verify); when absent, today's derivation applies.
+
+**Effort.** Small.
+
+## A superseded build is skipped, not cancelled
+
+**Problem.** When a new commit is pushed, the builds of the previous head are
+stopped (`cancelObsolete.enabled`) and their rows conclude `cancelled`, which
+GitHub draws in red. On the old commit that is harmless, but in the PR's
+history and in a draft workflow ("push, look, push again") it reads like a
+failure the reviewer has to dismiss.
+
+**Feasible.** The cancellation is the plugin's own (`cancelObsolete`), so it
+knows why the build stopped, and GitHub accepts `skipped` and `neutral` on a
+completed run.
+
+**Design.** Conclude a build stopped as superseded with `skipped` and the
+summary "Superseded by <short sha>"; keep `cancelled` for a build a human
+stopped.
+
+**Effort.** Small.
+
 ## Say where the build is in the queue
 
 **Problem.** The `queued` Check Run says "Queued" and nothing else. A
@@ -169,6 +257,23 @@ Docker-in-Docker.
   agent requirement ("must have a value") on a configuration that does not
   carry the bridge feature, and the build then finds no compatible agent.
   Worth a section in [troubleshooting.md](troubleshooting.md).
+- **Document whose settings decide a trigger.** With versioned settings, the
+  bridge decides whether to trigger a pull-request build from the settings of
+  the **default branch**; `PREFER_VCS` only changes what a started build runs.
+  A gating parameter changed in a PR (`triggerOnPrDraft`, `pathFilter`, …)
+  therefore takes effect only once merged — on purpose, or a PR could grant
+  itself a build — but nothing says so, and Owl lost a few rounds wondering
+  why its draft fix was ignored. Worth a paragraph in
+  [configuration.md](configuration.md) and in
+  [troubleshooting.md](troubleshooting.md).
+- **Exercise the publisher's SDK paths with hand-written fakes.** The queue
+  and lifecycle decisions are tested as pure helpers (`decideQueuedAction`, and
+  `decideQueueRemoval` with the queue-removal fix), but the glue that reads `BuildPromotion`,
+  `SQueuedBuild` and `associatedBuild` and posts the request is not. Small
+  hand-written implementations of those interfaces — no mocking framework, no
+  `tests-support` server (see *Not doing*) — feeding a recording
+  `GitHubClient` would cover the full queue-removal path, which is where the
+  stuck-row bugs have come from.
 
 ## Not doing
 
