@@ -532,6 +532,28 @@ BuildType is still missing, the diagnostic scan (logged when no
 candidate is found) reports whether each BuildType carries the
 feature and whether its repo matches the event.
 
+## Symptom: a Check Run stays "In progress" (or "Queued") after the build finished
+
+### What you see
+
+The build is long finished in TeamCity, but its row on GitHub still says
+"Building" or "Queued" — typically after a server restart while builds were
+running, or after GitHub refused the concluding post.
+
+### Cause and fix
+
+The concluding event was missed or its post failed. The bridge tracks every row
+it left open and reconciles it: about three minutes after startup, then every
+ten minutes, a row older than five minutes whose build has finished gets that
+build's conclusion (`Concluded N Check Run(s) left open on GitHub` in the log).
+A row whose build vanished gets the newest finished build of the same
+configuration on that commit, or *"Build no longer in TeamCity"* when there is
+none. A row opened more than seven days ago is dropped, not resurrected.
+
+So wait one sweep. If it persists: dry-run is on (nothing is posted, so nothing
+is tracked), the configuration no longer publishes (`publishChecks` off), or the
+row predates the upgrade that introduced the tracking — re-run the check once.
+
 ## Symptom: a PR Check Run is stuck at "Queued" forever
 
 ### What you see

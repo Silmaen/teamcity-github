@@ -106,24 +106,6 @@ and the plugin's own `labeled` events must never re-run the labelling.
 `actions/labeler` covers the paths part already; the case for doing it here
 is the author/team rules and having one configuration place.
 
-## Resolve a Check Run left `in_progress`
-
-**Problem.** If the server stops between a build's start and its finish, or
-the finish event is missed, the pull request keeps an `in_progress` row that
-never resolves — and a required check that never resolves blocks the merge
-until somebody re-runs it by hand. This is the one failure mode of the
-whole design that a human has to clean up.
-
-**Feasible.** On `serverStartup` the plugin can walk its own recent history
-(the builds carrying the feature, finished within the last N hours) and
-reconcile: any build that is finished in TeamCity but whose last published
-Check Run was `queued` or `in_progress` gets its conclusion posted. The
-publisher is idempotent — GitHub dedups on `(name, head_sha)` — so
-re-posting a conclusion that already landed is harmless.
-
-**Effort.** Medium. The care is in bounding the sweep and in not
-resurrecting rows for commits that no longer belong to an open PR.
-
 ## Report code coverage and its trend
 
 **Problem.** Coverage is measured on the agent and stays in TeamCity;

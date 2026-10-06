@@ -12,8 +12,10 @@ version and it.
 ## The short version, every time
 
 1. Take a copy of `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`.
-   It is the only state the plugin owns, and it is the only thing a rollback
-   needs.
+   It is the only setting state the plugin owns, and it is the only thing a
+   rollback needs. (The plugin also keeps a cache of the Check Runs it left
+   open, under `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/`;
+   losing it only loses the repair described below.)
 2. Drop the new zip in, restart (or hot-upload).
 3. On `Administration -> Server Administration -> GitHub Bridge`: check the
    version, run **Verify App configuration**, then **Run self-tests**.
@@ -26,6 +28,21 @@ unchanged.
 ## To the next release (unreleased)
 
 One default changes; nothing else needs touching.
+
+### Rows left open are concluded on their own
+
+The bridge now remembers each Check Run it left `queued` or `in_progress`, in
+`<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/open-check-runs.tsv`,
+and a few minutes after startup — then every ten minutes — posts the conclusion
+TeamCity now knows for any row whose own event was missed (a server restart
+mid-build, a failed post). A row opened before this release is not in the file,
+so a row stuck from before the upgrade still needs one manual re-run.
+
+### Superseded builds are skipped, not cancelled
+
+A build the bridge stops because a newer commit was pushed now concludes
+`skipped` (*"Superseded by <short sha>"*) instead of `cancelled`. Nothing to
+change: the required checks of the pull request are on its new head.
 
 ### Draft pull requests are opt-in
 

@@ -392,4 +392,18 @@ class BuildStatusCheckRunPublisherTest {
             ),
         )
     }
+
+    // A row left open on GitHub is concluded from what TeamCity knows now.
+    @Test
+    fun `an open row waits while its build can still conclude it`() {
+        val old = BuildStatusCheckRunPublisher.RECONCILE_GRACE_MS + 1
+        fun decide(age: Long = old, queued: Boolean = false, present: Boolean = false, finished: Boolean = false) =
+            BuildStatusCheckRunPublisher.decideReconcile(age, queued, present, finished)
+        assertEquals(ReconcileAction.WAIT, decide(age = 1))
+        assertEquals(ReconcileAction.WAIT, decide(queued = true))
+        assertEquals(ReconcileAction.WAIT, decide(present = true, finished = false))
+        assertEquals(ReconcileAction.PUBLISH_BUILD, decide(present = true, finished = true))
+        assertEquals(ReconcileAction.PUBLISH_LATEST_ON_COMMIT, decide())
+        assertEquals(ReconcileAction.EXPIRE, decide(age = BuildStatusCheckRunPublisher.MAX_OPEN_AGE_MS + 1, queued = true))
+    }
 }
