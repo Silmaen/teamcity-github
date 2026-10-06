@@ -12,52 +12,26 @@ version and it.
 ## The short version, every time
 
 1. Take a copy of `<TC_DATA_DIR>/config/teamcity-github-bridge.properties`.
-   It is the only setting state the plugin owns, and it is the only thing a
-   rollback needs. (The plugin also keeps a cache of the Check Runs it left
-   open, under `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/`;
-   losing it only loses the repair described below.)
+   It is the only setting state the plugin owns, and the only thing a
+   rollback needs. (The caches under
+   `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/` need no backup —
+   see [To 1.11.0](#5-new-files-under-plugindata).)
 2. Drop the new zip in, restart (or hot-upload).
 3. On `Administration -> Server Administration -> GitHub Bridge`: check the
-   version, run **Verify App configuration**, then **Run self-tests**.
+   version, run **Verify App configuration** (tab **GitHub App**), then
+   **Run self-tests** (tab **Overview**).
 4. Open one pull request build and confirm its Check Run still looks right.
 
 Settings are read by key, so a key an older or newer version does not know is
 **ignored, not rejected** — the file survives an upgrade and a rollback
 unchanged.
 
-## To the next release (unreleased)
+## To 1.11.0
 
-One default changes; nothing else needs touching.
+**One default changes behaviour** (drafts); everything else is either
+automatic or opt-in. Read the first section before upgrading.
 
-### Rows left open are concluded on their own
-
-The bridge now remembers each Check Run it left `queued` or `in_progress`, in
-`<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/open-check-runs.tsv`,
-and a few minutes after startup — then every ten minutes — posts the conclusion
-TeamCity now knows for any row whose own event was missed (a server restart
-mid-build, a failed post). A row opened before this release is not in the file,
-so a row stuck from before the upgrade still needs one manual re-run.
-
-### Opt-in: assign a new pull request to its author
-
-The project setting **Assign to the author**
-(`teamcity.github.bridge.autoAssignAuthor`) is off by default. Turning it on
-needs the App's **Issues: write**: accept the permission on the App's
-installation page first, or each assignment logs a `403`.
-
-### Opt-in: label pull requests by rules
-
-The project setting **Label rules** (`teamcity.github.bridge.labelRules`) is
-empty by default. Like assignment it needs **Issues: write**, and `@org/team`
-conditions need the organisation's **Members: read**.
-
-### Superseded builds are skipped, not cancelled
-
-A build the bridge stops because a newer commit was pushed now concludes
-`skipped` (*"Superseded by <short sha>"*) instead of `cancelled`. Nothing to
-change: the required checks of the pull request are on its new head.
-
-### Draft pull requests are opt-in
+### 1. Draft pull requests are opt-in
 
 `triggerOnPrDraft` now defaults to **off**. A feature saved from the UI already
 stores its value and keeps behaving as before; one that never stored it —
@@ -67,23 +41,63 @@ typically a Kotlin DSL configuration — stops running on drafts and posts
 composite chains** lists the composites that would build a draft-skipping
 dependency anyway.
 
-### A required check can keep its name
+### 2. A required check can keep its name
 
-The feature's new **Check name** (`checkName`) fixes a configuration's Check Run
-name, so moving it in the project tree no longer renames the check a branch
-protection rule requires. Setting it on an existing check **is** a rename, with
-the same consequence as `checkName.stripPrefix` below: update the rule in the
-same change. The self-test **Unique check names** warns when two configurations
-post the same name to one repository.
+The build feature's new **Check name** (`checkName`, section *Publication*)
+fixes a configuration's Check Run name, so moving it in the project tree no
+longer renames the check a branch protection rule requires. Setting it on an
+existing check **is** a rename, with the same consequence as
+`checkName.stripPrefix` ([below](#the-one-knob-that-can-break-a-merge-queue)):
+update the rule in the same change.
 
-### A self-test reads branch protection
+Two new self-tests guard the names: **Unique check names** (two configurations
+posting the same name to one repository) and **Required checks / `<repo>`** (a
+check a protected branch requires that nothing posts). The latter reads
+rulesets with the App's existing permissions; for classic branch protection,
+grant the App **Administration: read**. It is read-only.
 
-**Required checks / `<repo>`** compares the checks your branches require with
-the names the bridge posts, and warns about a required name nothing posts. It
-reads rulesets with the App's existing permissions. To cover classic branch
-protection too, grant the App **administration: read** (repository
-permission); without it the row says classic protection was not read. Nothing
-else uses that permission, and nothing is ever written.
+### 3. What reviewers see change
+
+- A build the bridge stops because a newer commit was pushed concludes
+  `skipped` (*"Superseded by <short sha>"*), not a red `cancelled`.
+- The *Queued* row says where the build stands: *"26th in queue, ~4m to start —
+  <TeamCity's wait reason>"*.
+- A green row no longer flickers back to *Queued* when a composite re-queues a
+  dependency that already passed on that commit.
+- A row left `queued` or `in_progress` (server restart mid-build, missed event,
+  failed post) is concluded on its own, a few minutes after startup and then
+  every ten minutes. Rows opened **before** the upgrade are not tracked: one
+  stuck from before still needs a manual re-run.
+
+### 4. Opt-in: the bridge may write to pull requests
+
+Two project settings (tab **Pull requests**), both off by default, are the
+plugin's first writes to a pull request since 1.10.0:
+
+- **Assign to the author** (`teamcity.github.bridge.autoAssignAuthor`);
+- **Label rules** (`teamcity.github.bridge.labelRules`) — see
+  [configuration.md](configuration.md#label-rules).
+
+Both need the App's **Issues: write**; `@org/team` label conditions also need
+the organisation's **Members: read**. Accept the permissions on the App's
+installation page **before** turning them on, or each attempt logs a `403`.
+See [github-app-setup.md](github-app-setup.md) for the optional permissions.
+
+### 5. New files under `pluginData`
+
+`<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/` now holds
+`open-check-runs.tsv` (rows to reconcile) and `applied-labels.tsv` (labels the
+bridge added, so a label removed by hand is not put back). Both are caches:
+deleting them only loses that repair.
+
+### Verifying the upgrade landed
+
+| Check | Where | Expected |
+|---|---|---|
+| Version | `Administration -> Plugins List` | `1.11.0` |
+| Self-tests | admin page, tab **Overview** → **Run self-tests** | the new rows *Draft setting along composite chains*, *Unique check names*, *Required checks* appear |
+| A draft PR | open one on a configuration without `triggerOnPrDraft` | *"Skipped: draft PR"* |
+| A push mid-build | push to an open PR while it builds | the old head's row turns *"Superseded by …"* (grey) |
 
 ## To 1.10.0
 
@@ -216,6 +230,11 @@ Drop the previous zip back in and restart. The settings file needs no edit — t
 older version ignores the keys it does not know
 (`cancelObsolete.enabled`, `checkRun.infraNeutral`, `checkRun.testStats`,
 `checkRun.timings`, `prTag.display`, `mergeBase.enabled`, `prTab.changedFiles`).
+
+Rolling back from 1.11.0 to 1.10.0 also ignores the new project parameters
+(`autoAssignAuthor`, `labelRules`) and the feature's `checkName` — but a
+configuration relying on `checkName` then reverts to its derived name, which
+renames its check. The `pluginData` caches are simply not read.
 
 Two things do not roll back, and neither is harmful: Check Run rows already
 posted on GitHub stay as they are, and PR tags already written to builds stay on

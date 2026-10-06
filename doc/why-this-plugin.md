@@ -89,7 +89,7 @@ code is.
 | **Compiler errors pinned to the diff** | clang/gcc and MSVC diagnostics become GitHub annotations on file + line — read from the build problems, or from the build log when the runner produced none (a Command Line step reports only "exit code 1"). | The relay would have to pull each failed build's whole log over REST, and it does not know the agent's checkout directory — without which a diagnostic's absolute path cannot be made repo-relative, and GitHub rejects the annotation. |
 | **PR metadata inside the build** | 16 parameters always emitted, usable in DSL conditions — what the PR *is* (`…pullRequest.number`, `.title`, `.author`, `.url`, `.sourceBranch`, `.targetBranch`, `.headSha`, `.labels`, `.isDraft`, `.isPullRequest`) and what it *changes* (`.mergeBase`, `.baseSha`, `.changedFiles`, `.additions`, `.deletions`, `.commits`) — including for builds *not* triggered by a webhook (VCS trigger, schedule, manual Run). `mergeBase` is the one a diff-scoped step needs: `mergeBase..headSha` is the pull request's own change, while diffing against the target branch also shows everything that landed on it since. | External glue can only inject parameters on the builds it triggers itself. A manually-started build gets nothing — which is exactly the case where somebody is looking. |
 | **Visible in TeamCity's own UI** | `draft`/`ready` pills in build lists, a **Branches & PRs** project tab searchable by branch *or* PR number, an admin page with recent events and self-tests. | Not reachable from outside the process. You get a separate dashboard, if you build one. |
-| **It tells you when it's misconfigured** | In-product self-tests: webhook secret, HMAC round-trip, real self-delivery to `/webhook`, GitHub reachability, token issuance and API auth *per opted-in project*, plus a warning if a build configuration has two competing status publishers. | Every one of these is a thing you'd have to write, host and remember to run. |
+| **It tells you when it's misconfigured** | In-product self-tests: webhook secret, HMAC round-trip, real self-delivery to `/webhook`, GitHub reachability, token issuance and API auth *per opted-in project*, plus configuration checks: a required check that nothing posts, two configurations posting the same check name, two competing status publishers, a composite building draft-skipping dependencies on drafts. | Every one of these is a thing you'd have to write, host and remember to run. |
 
 ![Eleven checks in the merge box, each carrying the build's own verdict](assets/screenshots/pr-checks-merge-box.png)
 
@@ -357,7 +357,7 @@ What maps onto what:
 | "Retrigger on ready" cron or handler | `pull_request.ready_for_review` handling |
 | Relay posting commit statuses | `BuildStatusCheckRunPublisher` — a Check Run per lifecycle step |
 | Relay's branch/path/label rules | Per-build-configuration fields: PR branch filter, `pathFilter`, `labelFilter`, title/body phrases |
-| Relay logs on the relay host | `<TC_DATA_DIR>/logs/teamcity-github-bridge.log` + admin page recent events |
+| Relay logs on the relay host | `<TC_DATA_DIR>/logs/teamcity-github-bridge.log` + the admin page's **Activity** tab |
 | Relay's dashboard, if any | Admin page, **Branches & PRs** tab, `/health`, `/metrics` |
 
 ![The GitHub Bridge integration build feature](assets/screenshots/build-feature-dialog.png)

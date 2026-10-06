@@ -7,8 +7,8 @@ second, fix third.
 
 Three quick triage stops, in order, before you dig into logs:
 
-1. **Admin page "Recent events" table.** `Administration -> Server
-   Administration -> GitHub Bridge` shows the last N webhook events
+1. **Admin page, tab Activity.** `Administration -> Server
+   Administration -> GitHub Bridge` → **Activity** shows the last N webhook events
    the plugin actually processed (in-memory; full history in the
    dedicated log). Empty when GitHub never reached the plugin.
 2. **`GET /app/teamcity-github-bridge/health`** — liveness JSON for
@@ -23,8 +23,8 @@ Three quick triage stops, in order, before you dig into logs:
 
 ```mermaid
 flowchart TB
-    S1["<b>1. Self-test button — start here</b><br/>Admin → Server Admin → GitHub Bridge → Run self-tests<br/>the PASS/WARN/FAIL/SKIP table localises the broken step"]
-    S2["<b>2. Recent events table, /health, /metrics</b><br/>Admin → Server Admin → GitHub Bridge"]
+    S1["<b>1. Self-test button — start here</b><br/>Admin → Server Admin → GitHub Bridge → Overview → Run self-tests<br/>the PASS/WARN/FAIL/SKIP table localises the broken step"]
+    S2["<b>2. Recent events, /health, /metrics</b><br/>Admin → Server Admin → GitHub Bridge → Activity"]
     S3["<b>3. /info endpoint</b> — one-shot config snapshot<br/>secretConfigured, logConfigured, payloadUrl, logFile"]
     S4["<b>4. Dedicated plugin log</b><br/>&lt;TC_DATA_DIR&gt;/logs/teamcity-github-bridge.log"]
     S5["<b>5. Server log fallback</b>, if the dedicated log was overridden<br/>&lt;TC_DATA_DIR&gt;/logs/teamcity-server.log<br/>grep io.github.dlachouette or teamcity-github-bridge"]
@@ -550,9 +550,15 @@ A row whose build vanished gets the newest finished build of the same
 configuration on that commit, or *"Build no longer in TeamCity"* when there is
 none. A row opened more than seven days ago is dropped, not resurrected.
 
-So wait one sweep. If it persists: dry-run is on (nothing is posted, so nothing
-is tracked), the configuration no longer publishes (`publishChecks` off), or the
-row predates the upgrade that introduced the tracking — re-run the check once.
+So wait one sweep (1.11.0+). If it persists:
+
+| Cause | Fix |
+|---|---|
+| The row predates 1.11.0, which introduced the tracking | Re-run the check once. |
+| Dry-run is on | Nothing is posted, so nothing is tracked. Turn it off on the **Server settings** tab. |
+| The configuration no longer publishes (`publishChecks` off) | Expected: the bridge stopped speaking for it. Re-run once with publication on, or ignore the row. |
+| The build's `head_sha` changed mid-build (force-push) | GitHub keys a row on `(name, head_sha)`, so the old row belongs to a commit the build no longer reports on. Rare; re-run on the new head. |
+| GitHub keeps refusing the post | The dedicated log shows `Check Run POST (...) failed`; usually the App's permissions changed. Run **Verify App configuration** (tab **GitHub App**). |
 
 ## Symptom: a PR Check Run is stuck at "Queued" forever
 
@@ -596,7 +602,7 @@ composite gate) show "Queued" again once it is marked ready, although nothing
 reruns. The composite re-queues them, the publisher posts "Queued" for the new
 promotions — which replaces the green rows, GitHub keeping one row per name and
 SHA — and queue optimization then satisfies them with the finished builds.
-**Fixed after 1.10.0**, twice over: a re-queued chain member whose commit
+**Fixed in 1.11.0**, twice over: a re-queued chain member whose commit
 already passed in its configuration gets **no** "Queued" post at all, so the
 green row never flickers (`Not posting Queued for ... the chain should reuse #N`
 in the log); and should the row change anyway, the equivalent build's outcome is
@@ -882,8 +888,8 @@ decision.
 
 ### What you see
 
-`Administration -> Server Administration -> GitHub Bridge` reports
-`No webhook deliveries yet.` even though you have configured GitHub.
+`Administration -> Server Administration -> GitHub Bridge`, tab **Activity**,
+reports `No webhook deliveries yet.` even though you have configured GitHub.
 
 ### Likely causes
 
@@ -892,24 +898,6 @@ decision.
 | The webhook URL or secret was wrong; GitHub never delivered | Check `Recent Deliveries` on the App's webhook page. If everything there shows 4xx, fix on the GitHub side and re-deliver. |
 | TC was restarted recently | The in-memory log is cleared on restart. Trigger a `ping` redeliver from GitHub. |
 | The dedicated log file shows entries but the admin page does not | The in-memory log is independent of the file log; only records calls that pass through `PluginWebhookController.doHandle`. If GitHub reaches a reverse proxy and the proxy returns 502 before TC, the plugin never sees the request. Check the proxy access log. |
-
-## Symptom: Check Run on GitHub stays at "Queued" or "In progress"
-
-### What you see
-
-A PR build's Check Run row on GitHub never transitions to a
-terminal state — it sits at `Queued` (clock icon) or `In progress`
-even after the build was stopped, removed from the queue, or
-finished in TC.
-
-### Likely causes
-
-| Cause | Fix |
-|---|---|
-| Stale plugin version (pre-1.3.0) | Upgrade to 1.3.0+; the lifecycle coverage of `BuildStatusCheckRunPublisher` was extended to `buildInterrupted` and `buildRemovedFromQueue` so a stopped or queue-removed build always transitions to `completed/cancelled`. |
-| The build's `head_sha` differs between the in-progress and completed posts | GitHub dedups by `(name, head_sha)`. If a VCS root force-pushed mid-build, the SHAs no longer match; both rows appear. Open the Checks tab and confirm; this is rare. |
-| Token expired mid-build | The completed post's `tokenResolver.resolveAccessToken` may return null; check the dedicated log for `Failed publishing completed Check Run`. Self-mint always returns a fresh token, so this usually means the App's permissions changed. |
-| Bundled `commitStatusPublisher` overrode our row | Unlikely — Check Runs and Commit Statuses are separate surfaces — but verify by inspecting `Conclusion / Conclusion source` in GitHub's UI. |
 
 ## Symptom: draft / ready tags are visible but not styled as pills
 

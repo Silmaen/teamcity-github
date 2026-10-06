@@ -50,7 +50,7 @@ recommended path — for the fastest end-to-end walkthrough see the
 ### A.1 Start the creation flow
 
 1. Go to `Administration -> Server Administration -> GitHub Bridge`.
-2. Find the **GitHub App** card. When no managed App exists yet it shows
+2. Open the **GitHub App** tab. When no managed App exists yet it shows
    a **Create GitHub App** button and an optional **GitHub
    organisation** field.
 3. Leave the org field blank for a personal App, or type an org slug
@@ -62,7 +62,7 @@ Under the hood the plugin builds an App manifest pre-filled with:
 - `name` — the App name.
 - `url` / `redirect_url` — the plugin callback on this server.
 - `hook_attributes.url` — **this server's webhook URL** (the same value
-  shown under *Plugin status -> Webhook URL*), `active: true`.
+  shown on the **Webhook** tab), `active: true`.
 - `public: false` — a private App.
 - `default_permissions`:
 
@@ -73,10 +73,11 @@ Under the hood the plugin builds an App manifest pre-filled with:
   | `pull_requests` | `read` |
   | `contents` | `read` |
 
-  > `pull_requests` is **read** as of v1.10.0. The plugin's only write is
-  > the Check Run lifecycle, which is the `checks` permission; write on
-  > pull requests was needed by the sticky summary comment, and that was
-  > removed. An installation that granted write can revoke it.
+  > `pull_requests` is **read** as of v1.10.0: by default the plugin's only
+  > write is the Check Run lifecycle (`checks`). The two opt-in features
+  > that write to a pull request — assignment and label rules (1.11.0+) —
+  > need **Issues: write**, which the manifest does not request; see
+  > [optional permissions](#optional-permissions) below.
 
 - `default_events`: `pull_request`, `pull_request_review`,
   `pull_request_review_comment`, `check_run`, `check_suite`.
@@ -84,7 +85,7 @@ Under the hood the plugin builds an App manifest pre-filled with:
   > Conversation-comment triggers (the `issue_comment` event) are
   > **opt-in**: GitHub only delivers `issue_comment` when the App holds
   > the **Issues** permission, which the manifest deliberately does not
-  > request. Comment triggers fire on inline PR review comments
+  > request (granting it for assignment or label rules makes it available). Comment triggers fire on inline PR review comments
   > (`pull_request_review_comment`) out of the box; to also trigger from
   > general PR conversation comments, add the Issues permission and
   > subscribe to `issue_comment` manually.
@@ -116,13 +117,13 @@ settings file, automatically:
 - the **App slug** (`app.slug`),
 - the **webhook secret** GitHub generated (`webhook.secret`).
 
-You never handle the `.pem` by hand. On success the admin page shows a
-green *managed App configured* banner with the App slug.
+You never handle the `.pem` by hand. On success the **GitHub App** tab
+shows a green *managed App configured* banner with the App slug.
 
 ### A.3 Install the App
 
 Creating an App does **not** install it on any repository. From the
-GitHub App card click **Install / manage installations** (deep-links to
+**GitHub App** tab click **Install / manage installations** (deep-links to
 `https://github.com/apps/<slug>/installations/new`):
 
 1. Choose the account/org that owns your repos.
@@ -131,8 +132,9 @@ GitHub App card click **Install / manage installations** (deep-links to
 
 ### A.4 Point build configurations at the managed App
 
-Instead of a TeamCity connection ID, set the sentinel value on each
-opted-in build type's `connectionId` (or on a parent project / template):
+Instead of a TeamCity connection ID, set the sentinel value as the
+project's **GitHub App connection ID** (project page, tab **Repository** —
+on the project or a parent project):
 
 ```
 teamcity.github.bridge.connectionId = managed
@@ -145,11 +147,11 @@ GitHub Enterprise you must set `api.base` to `<host>/api/v3`.
 
 ### A.5 Verify
 
-On the GitHub App card click **Verify App configuration**. The plugin
+On the **GitHub App** tab click **Verify App configuration**. The plugin
 authenticates as the App (App JWT), calls `GET /app`, and diffs the
 App's *live* permissions and subscribed events against what the plugin
 requires (the table in [A.1](#a1-start-the-creation-flow)). It reports
-any missing permissions/events. The card also deep-links to:
+any missing permissions/events. The tab also deep-links to:
 
 - `https://github.com/settings/apps/<slug>` — *Open App settings on
   GitHub* (to add a missing permission/event), and
@@ -204,7 +206,11 @@ the Option A manifest requests):
 | **Pull requests** | Read | `GET /repos/{owner}/{repo}/pulls/{N}` for the draft status, and the commit-to-PR lookup. **Read is enough**: the plugin's only write is the Check Run lifecycle, which is the *Checks* permission. |
 | **Contents** | Read | Required transitively for repository visibility |
 
-Two permissions are **optional**, each needed by one opt-in feature only:
+### Optional permissions
+
+Three permissions are **optional**, each needed only by an opt-in feature;
+grant them on the App (and accept them on its installation) before turning
+the feature on:
 
 | Resource | Access | Only for |
 |---|---|---|
@@ -349,7 +355,8 @@ itself, not per-user OAuth, so the permission is irrelevant.
 Same logic as the previous one: only used to **restrict TC SSO**
 to members of specific organisations.
 
-**Action**: skip unless you also want TC SSO via GitHub.
+**Action**: skip unless you also want TC SSO via GitHub — or you use
+`@org/team` conditions in label rules (1.11.0+), which do need it.
 
 ### `Webhook is not configured to trigger all supported events: [push, pull_request, check_suite, check_run]`
 

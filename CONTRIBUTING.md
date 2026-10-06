@@ -97,7 +97,8 @@ The release flow is currently manual.
    so the version TeamCity displays cannot drift from the POM. Then
    update the places that quote it in prose:
    - `README.md` — the version badge and the **Status** section;
-   - `doc/installation.md` — the sample Plugins-List row.
+   - `doc/installation.md` — the sample Plugins-List row;
+   - `doc/api-reference.md` — the `pluginVersion` in the JSON examples.
 3. Close the `CHANGELOG.md` entry: replace `unreleased` with the date,
    and check that every feature merged since the last tag has a line
    (`git log --oneline <lastTag>..HEAD`). A commit that shipped a

@@ -4,19 +4,23 @@ Every knob the plugin exposes, in one page.
 
 ## Configuration surfaces
 
-As of v1.7.0 the plugin ships **two in-product configuration pages**, so
-the bulk of the configuration is no longer hand-edited parameters:
+The plugin is configured from **three in-product screens**, each with a
+(?) icon per section pointing back to this page:
 
 - **Server-wide page** — `Administration -> Server Administration ->
-  GitHub Bridge`. Edits the server-wide settings + feature flags and
-  holds the **webhook secret** and **API token** forms. Writes to
-  the plugin-owned settings file; applied immediately (no restart).
-- **Project page** — `Administration -> <project> -> GitHub Bridge`
-  (under the *Integrations* group). Edits the project-level parameters that
-  opt a project into the bridge, and the PR-ref mode.
-- **Per-BuildType build feature** — `Edit Configuration -> Build
-  Features -> Add -> GitHub Bridge integration`. The presence of the
-  feature is the per-task opt-in; its fields tune the trigger paths.
+  GitHub Bridge`. Tabs: **Overview** (getting started, plugin status,
+  self-tests), **GitHub App** (managed App, *Verify App configuration*),
+  **Webhook** (secret, URL quick-config), **Server settings** (section 2
+  below), **External API** (API token), **Activity** (recent events),
+  **Help**. Writes the plugin-owned settings file; applied immediately (no
+  restart).
+- **Project page** — `Administration -> <project> -> GitHub Bridge` (under the
+  *Integrations* group). Tabs: **Repository**, **Triggers**, **Reporting**,
+  **Pull requests** (section 3).
+- **Per-BuildType build feature** — `Edit Configuration -> Build Features ->
+  Add -> GitHub Bridge integration`. Its presence is the per-task opt-in; its
+  sections **Triggers**, **Filters**, **On demand**, **Publication** tune it
+  (section 4).
 
 The four layers, narrowest last — a value set at a lower layer wins over
 the one above it:
@@ -54,8 +58,9 @@ this compiled default (see the resolution order in section 2).
 
 ## 2. Server-wide settings, flags and secrets
 
-Edited from `Administration -> Server Administration -> GitHub Bridge`.
-The page writes them to the plugin-owned settings file
+Edited from `Administration -> Server Administration -> GitHub Bridge`, tab
+**Server settings** (the two secrets have their own forms on the **Webhook**
+and **External API** tabs). The page writes them to the plugin-owned settings file
 `<TC_DATA_DIR>/config/teamcity-github-bridge.properties` and applies them
 **immediately, without a restart** — `BridgeServerSettings.applyTo`
 re-pushes the per-operation values (API version, cache TTL/grace, retry
@@ -93,7 +98,7 @@ the `internal.properties` key that still works as a fallback (step 2).
 
 ### Feature flags
 
-Boolean checkboxes on the admin page. Stored under the same keys.
+Checkboxes on the **Server settings** tab. Stored under the same keys.
 
 | Key | Default | Admin-page label | Purpose |
 |---|---|---|---|
@@ -119,7 +124,7 @@ Boolean checkboxes on the admin page. Stored under the same keys.
 ### Managed GitHub App (v1.7.0+)
 
 The plugin can register and own its own GitHub App via the manifest flow
-on the admin page (GitHub App card; see
+on the admin page (tab **GitHub App**; see
 [github-app-setup.md → Option A](github-app-setup.md#option-a-let-the-plugin-create-the-app-for-you-recommended)).
 This is an **alternative to a TeamCity OAuth connection**: when a build
 type sets `connectionId` to the sentinel value `managed`, `TokenResolver`
@@ -150,19 +155,18 @@ echoed back; rotate by submitting a new one.
 
 | Key | Default | Required | Admin-page form | Purpose |
 |---|---|---|---|---|
-| `webhook.secret` | _unset_ | **yes** | HMAC secret form | HMAC-SHA256 secret used to verify webhook signatures. Without it every request is rejected with 401. Wins over the legacy `teamcity.github.bridge.webhook.secret` in `internal.properties` if both are set. Generate with `openssl rand -hex 48`. |
-| `api.token` | _unset_ (= API disabled) | no | External API form | Bearer token that enables the authenticated API under `/app/teamcity-github-bridge/api/` (status, events, metrics, build trigger). No token = API disabled. Pass as `Authorization: Bearer <token>`. Generate with `openssl rand -hex 32`. |
+| `webhook.secret` | _unset_ | **yes** | **Webhook** → HMAC secret | HMAC-SHA256 secret used to verify webhook signatures. Without it every request is rejected with 401. Wins over the legacy `teamcity.github.bridge.webhook.secret` in `internal.properties` if both are set. Generate with `openssl rand -hex 48`. |
+| `api.token` | _unset_ (= API disabled) | no | **External API** → API token | Bearer token that enables the authenticated API under `/app/teamcity-github-bridge/api/` (status, events, metrics, build trigger). No token = API disabled. Pass as `Authorization: Bearer <token>`. Generate with `openssl rand -hex 32`. |
 
 ### Published build parameters (v0.10.0+)
 
-For every build that opts into the plugin (i.e. has both
-`teamcity.github.bridge.repo` and `teamcity.github.bridge.connectionId` set), the plugin
-publishes a complete set of 16 PR-related parameters that build
-steps can read. They mirror what the bundled `pullRequests`
-build feature would have provided, plus extras (`isPullRequest`,
-`isDraft`, `headSha`) that TC never published. Consumers who
-configure the three opt-in parameters can disable the bundled
-`pullRequests` feature entirely.
+For every opted-in build (the build feature, plus `repo` and `connectionId`
+on the project chain), the plugin publishes 16 PR-related parameters that
+build steps can read. They mirror what the bundled `pullRequests` build
+feature would have provided, plus extras TeamCity never published
+(`isPullRequest`, `isDraft`, `headSha`, the merge base, the change size…), so
+an opted-in configuration can drop the bundled `pullRequests` feature
+entirely.
 
 | Parameter | Value when **not** a PR | Value on a PR (resolved) | Source |
 |---|---|---|---|
@@ -262,16 +266,17 @@ them for these:
 ### Plugin-owned settings file (v0.6.0+)
 
 `<TC_DATA_DIR>/config/teamcity-github-bridge.properties` holds every
-value the admin page writes — all the tuning keys, feature flags and
-both secrets listed in the tables above (`api.base`, `api.version`,
-`prinfo.cache.ttl.seconds`, `prinfo.cache.staleGrace.seconds`,
-`http.retry.maxAttempts`, `http.retry.baseDelayMs`, `repo.allowlist`,
-`comment.allowedAssociations`, `webhook.replay.enabled`, `dryRun`,
-`metrics.enabled`, `legacyAliases.enabled`,
-`branchPrLookup.enabled`, `webhook.secret`, `api.token`) plus, when a
-managed App has been created
-(v1.7.0+), the managed-App credentials `app.id`, `app.privateKey` (PEM)
-and `app.slug`. The plugin never has to mutate `internal.properties`.
+value the admin page writes — every tuning key, feature flag and secret in
+the tables above, plus, once a managed App exists (v1.7.0+), `app.id`,
+`app.privateKey` (PEM) and `app.slug`. The plugin never has to mutate
+`internal.properties`.
+
+Two **caches** live apart from it, under
+`<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/` (1.11.0+):
+`open-check-runs.tsv` (rows left `queued` / `in_progress`, reconciled after
+startup and every ten minutes) and `applied-labels.tsv` (labels the bridge
+added, so one removed by hand is not put back). Neither needs a backup;
+deleting one only loses that repair.
 
 You can edit this file by hand if you prefer, but the admin page is
 the supported path.
@@ -301,25 +306,27 @@ teamcity.github.bridge.webhook.secret=0a4f0c9b5e8e3c1d2a4b6c8d9e0f1a2b3c4d5e6f7a
 The mandatory configuration lives at the **project** level: it is shared
 by every opted-in BuildType in the project (and inherited by
 sub-projects unless they set their own). Edit it from
-`Administration -> <project> -> GitHub Bridge` (Integrations group); the
-page writes the project's own configuration parameters. Two independent
+`Administration -> <project> -> GitHub Bridge` (Integrations group), whose
+four tabs — **Repository**, **Triggers**, **Reporting**, **Pull requests** —
+group the fields below; the page writes the project's own configuration
+parameters. Two independent
 "trigger paths" can be enabled per project — `branchTrigger` (non-PR
 branches like `main`, `Release/*`) and `prTrigger` (PR branches,
 `pull/N`) — each with its own enable toggle and branch list.
 
-| Parameter | Default | Project-page field | Purpose |
+| Parameter | Default | Tab → field | Purpose |
 |---|---|---|---|
-| `teamcity.github.bridge.repo` | _empty_ | GitHub repository | **Mandatory.** The `owner/name` slug as GitHub reports it in `repository.full_name`, e.g. `acme/widget`. |
-| `teamcity.github.bridge.connectionId` | _empty_ | GitHub App connection ID | **Mandatory.** Either (a) the TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager` (Administration → `<project>` → Connections; visible in that page's URL) — the connection must carry the App ID and private key, which the plugin reads directly to self-mint installation tokens (no need to click "Test connection" first since v1.2.0); or (b) the sentinel value `managed` (v1.7.0+) to mint from the plugin-managed App created via the manifest flow instead of a TeamCity connection (see [Managed GitHub App](#managed-github-app-v170) and [github-app-setup.md → Option A](github-app-setup.md#option-a-let-the-plugin-create-the-app-for-you-recommended)). |
-| `teamcity.github.bridge.branchTrigger.enabled` | `true` (anything but `false`) | Trigger on non-PR branches | Project-level kill switch for the non-PR branch path. Off = the bridge never triggers builds on non-PR branches for this project. |
-| `teamcity.github.bridge.branchTrigger.branches` | _empty_ (= all) | Non-PR branch filter | VCS branch-filter syntax (`+:pattern` / `-:pattern` per line, `/regex/` for Java regex). Empty = match every branch. |
-| `teamcity.github.bridge.prTrigger.enabled` | `true` (anything but `false`) | Trigger on pull requests | Project-level kill switch for the PR path. Off = the bridge never triggers PR builds for this project. |
-| `teamcity.github.bridge.prTrigger.branches` | _empty_ (= all) | PR source-branch filter | Matched against the PR's **source** branch name (e.g. `Feature/foo`), not the `pull/N` literal. Empty = match every PR. |
-| `teamcity.github.bridge.annotations.enabled` | `true` (anything but `false`) | Annotate the diff | May the bridge pin compiler diagnostics to the pull request's diff for this project's builds? **Read own-per-project over the whole chain, not resolved** — unlike every other key in this table: a `false` on an ancestor project holds for its entire subtree and a sub-project setting `true` does **not** take it back. The verdict is the AND of the server flag, every project in the chain, and the build configuration's `annotateDiff` — one `false` anywhere wins. Nothing else the bridge reports is affected. See [Who may annotate a diff](#who-may-annotate-a-diff). |
-| `teamcity.github.bridge.prBuildRef` | `pull` | Build PRs on their own branch | Which ref a PR build runs on. `pull` (default) = the synthetic `pull/N` ref, mapped by the VCS root's branch spec — the only option that works for PRs from forks. `branch` = the PR's **own head branch** (e.g. `Feature/foo`): readable in every TeamCity screen, and a push builds **once** instead of twice once a PR exists, because there is no second ref for the same commit. See [Branch-source PR builds](#branch-source-pr-builds-v190) below. |
-| `teamcity.github.bridge.autoAssignAuthor` | _off_ | Assign to the author | `true`: a pull request **opened** with nobody assigned is assigned to its author — once, never replacing an assignee, never putting back one a human removed, never for a bot author. Needs the App's **Issues: write** (a `403` is logged naming the missing permission). Inherited by sub-projects. |
-| `teamcity.github.bridge.labelRules` | _empty_ | Label rules | Rules that **add** labels to a pull request, one per line: `<label> <= <condition> ; <condition>` (all conditions must hold). Conditions: `paths` (VCS-filter entries, comma-separated, like `pathFilter`), `author` (logins and `@org/team`, comma-separated), `base` / `head` (branch-filter entries), `title` (regex, case-insensitive). Applied on opened, reopened, ready-for-review, each push and each edit. A label removed by hand is never put back. A line that does not parse is kept but ignored, and listed on the tab. Needs **Issues: write**; `@org/team` also needs the organisation's **Members: read**. A rule adding a label a `labelFilter` gates on starts those builds. See [Label rules](#label-rules). |
-| `teamcity.github.bridge.checkName.stripPrefix` (v1.10.0+) | _empty_ | Strip this prefix from Check Run names | A prefix cut off the front of every Check Run name this project posts. The name is `TeamCity / <full build configuration name>`, which on a deep tree is mostly ancestry a reviewer does not need — while GitHub's merge box truncates the **end**, the part that identifies the build. Setting `TeamCity / Sandbox / test_ci / PR /` turns `TeamCity / Sandbox / test_ci / PR / Build / Linux / Build (Linux, x64, Release)` into `Build / Linux / Build (Linux, x64, Release)`. Matched literally, and ignored when it does not match. **This renames the checks:** GitHub identifies a row by `(name, head_sha)`, so a new row starts, the old ones stay where they are, and any **branch protection rule requiring the old name will wait for a check that never arrives again** — update the rule in the same change. A configuration with its own `checkName` is not affected. |
+| `teamcity.github.bridge.repo` | _empty_ | **Repository** → GitHub repository | **Mandatory.** The `owner/name` slug as GitHub reports it in `repository.full_name`, e.g. `acme/widget`. |
+| `teamcity.github.bridge.connectionId` | _empty_ | **Repository** → GitHub App connection ID | **Mandatory.** Either (a) the TeamCity GitHub App connection ID resolved by `OAuthConnectionsManager` (Administration → `<project>` → Connections; visible in that page's URL) — the connection must carry the App ID and private key, which the plugin reads directly to self-mint installation tokens (no need to click "Test connection" first since v1.2.0); or (b) the sentinel value `managed` (v1.7.0+) to mint from the plugin-managed App created via the manifest flow instead of a TeamCity connection (see [Managed GitHub App](#managed-github-app-v170) and [github-app-setup.md → Option A](github-app-setup.md#option-a-let-the-plugin-create-the-app-for-you-recommended)). |
+| `teamcity.github.bridge.prBuildRef` | `pull` | **Repository** → Build PRs on their own branch | Which ref a PR build runs on. `pull` (default) = the synthetic `pull/N` ref, mapped by the VCS root's branch spec — the only option that works for PRs from forks. `branch` = the PR's **own head branch** (e.g. `Feature/foo`): readable in every TeamCity screen, and a push builds **once** instead of twice once a PR exists, because there is no second ref for the same commit. See [Branch-source PR builds](#branch-source-pr-builds-v190) below. |
+| `teamcity.github.bridge.branchTrigger.enabled` | `true` (anything but `false`) | **Triggers** → Other branches | Project-level kill switch for the non-PR branch path. Off = the bridge never triggers builds on non-PR branches for this project. |
+| `teamcity.github.bridge.branchTrigger.branches` | _empty_ (= all) | **Triggers** → Non-PR branches | VCS branch-filter syntax (`+:pattern` / `-:pattern` per line, `/regex/` for Java regex). Empty = match every branch. |
+| `teamcity.github.bridge.prTrigger.enabled` | `true` (anything but `false`) | **Triggers** → Pull requests | Project-level kill switch for the PR path. Off = the bridge never triggers PR builds for this project. |
+| `teamcity.github.bridge.prTrigger.branches` | _empty_ (= all) | **Triggers** → PR source branches | Matched against the PR's **source** branch name (e.g. `Feature/foo`), not the `pull/N` literal. Empty = match every PR. |
+| `teamcity.github.bridge.checkName.stripPrefix` (v1.10.0+) | _empty_ | **Reporting** → Strip this prefix from Check Run names | A prefix cut off the front of every Check Run name this project posts. The name is `TeamCity / <full build configuration name>`, which on a deep tree is mostly ancestry a reviewer does not need — while GitHub's merge box truncates the **end**, the part that identifies the build. Setting `TeamCity / Sandbox / test_ci / PR /` turns `TeamCity / Sandbox / test_ci / PR / Build / Linux / Build (Linux, x64, Release)` into `Build / Linux / Build (Linux, x64, Release)`. Matched literally, and ignored when it does not match. **This renames the checks:** GitHub identifies a row by `(name, head_sha)`, so a new row starts, the old ones stay where they are, and any **branch protection rule requiring the old name will wait for a check that never arrives again** — update the rule in the same change. A configuration with its own `checkName` is not affected. |
+| `teamcity.github.bridge.annotations.enabled` | `true` (anything but `false`) | **Reporting** → Annotate the diff | May the bridge pin compiler diagnostics to the pull request's diff for this project's builds? **Read own-per-project over the whole chain, not resolved** — unlike every other key in this table: a `false` on an ancestor project holds for its entire subtree and a sub-project setting `true` does **not** take it back. The verdict is the AND of the server flag, every project in the chain, and the build configuration's `annotateDiff` — one `false` anywhere wins. Nothing else the bridge reports is affected. See [Who may annotate a diff](#who-may-annotate-a-diff). |
+| `teamcity.github.bridge.autoAssignAuthor` | _off_ | **Pull requests** → Assign to the author | `true`: a pull request **opened** with nobody assigned is assigned to its author — once, never replacing an assignee, never putting back one a human removed, never for a bot author. Needs the App's **Issues: write** (a `403` is logged naming the missing permission). Inherited by sub-projects. (1.11.0+) |
+| `teamcity.github.bridge.labelRules` | _empty_ | **Pull requests** → Label rules | Rules that **add** labels to a pull request, one per line — format and behaviour in [Label rules](#label-rules). Needs **Issues: write** (and the organisation's **Members: read** for `@org/team`). (1.11.0+) |
 
 A BuildType participates only when (a) the surrounding project chain
 provides both `repo` and `connectionId`, **and** (b) the BuildType
@@ -352,6 +359,42 @@ object MyProject : Project({
 })
 ```
 
+### Label rules
+
+```text
+# <label>       <= <condition> ; <condition>
+network         <= paths +:src/net/**, -:src/net/test/**
+team: core      <= author @acme/core, alice
+docs            <= paths +:docs/** ; title ^docs
+release         <= base +:Release/*
+```
+
+Set on the project page, tab **Pull requests** (1.11.0+). One rule per line,
+`<label> <= <condition> ; <condition>`; `#` starts a comment. Conditions:
+
+| Condition | Value | Holds when |
+|---|---|---|
+| `paths` | VCS-filter entries, comma-separated (as `pathFilter`) | a changed file matches |
+| `author` | logins and `@org/team`, comma-separated | the author is one of them (teams need the organisation's **Members: read**) |
+| `base` / `head` | branch-filter entries, comma-separated | the base / head branch matches |
+| `title` | a regular expression | it is found in the title (case-insensitive) |
+
+- A label is everything left of the first ` <= `, so `team: core` is fine; a
+  condition value cannot contain `;`.
+- Applied when the pull request is opened, reopened, marked ready, pushed to
+  or edited — never on `labeled` / `unlabeled`, so the bridge's own labels do
+  not feed back. They do reach the ordinary label handling: a rule adding a
+  label a `labelFilter` gates on **starts those builds**.
+- A line that does not parse is saved anyway (nothing typed is lost), ignored
+  at runtime, and listed on the tab with its line number.
+- Every condition of a line must hold; a label is added when any of its lines
+  holds. Labels are **only added** — removing a rule never removes a label.
+- A label the bridge added and later finds missing was removed by somebody: it
+  is not added again on the next push (remembered in
+  `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/applied-labels.tsv`,
+  forgotten when the pull request closes).
+- Rules from every project using the repository apply.
+
 ## 4. Per-BuildType build feature: "GitHub Bridge integration"
 
 The per-task opt-in is the **build feature**, added under
@@ -362,7 +405,9 @@ Run lifecycle. The feature is read through the BuildType's
 `resolvedSettings`, so a feature inherited from a **BuildType template**
 counts even without re-attaching it locally.
 
-The feature exposes per-task fields along **two independent axes**:
+The feature dialog groups its fields in four sections — **Triggers**,
+**Filters**, **On demand**, **Publication** — with the rarely used ones behind
+TeamCity's *Show advanced options*. They act along **two independent axes**:
 
 - **Publication** — `publishChecks` alone decides whether this build
   configuration reports to GitHub. It does **not** depend on what started the
@@ -404,23 +449,23 @@ a scope filter excluded it (draft PR, branch list, path filter, PR metadata), or
 > `publishChecks=false` silences GitHub reporting, it does not exempt the
 > configuration's automatic builds from its own trigger filters.
 
-| Feature param | Kind | Default | Feature-form field | Purpose |
+| Feature param | Kind | Default | Section → field | Purpose |
 |---|---|---|---|---|
-| `publishChecks` | publication | `true` | Publish to GitHub | Does this build configuration report to GitHub at all? Unchecked = invisible on GitHub whatever happens (no Check Run, no skip row, no PR comment) while still receiving the PR parameters and tags. This is the **only** input to publication — see the two axes above. |
-| `checkName` | publication | _empty_ | Check name | The Check Run name, used verbatim — no `TeamCity / `, no `checkName.stripPrefix`. Empty = derived from the project tree, so moving the configuration renames its check. Set it on a check a branch protection rule requires; setting or changing it **is** a rename (update the rule in the same change). Must be unique per repository: the self-test **Unique check names** warns otherwise, and **Required checks** warns about a required name nothing posts. |
-| `annotateDiff` | publication | `true` | Annotate the diff | May this build configuration pin its compiler diagnostics to the pull request's diff? Unticking it silences the annotations of one configuration — a nightly warning sweep, a legacy target — while keeping everything else it reports. A tick does **not** overrule a project or a server that turned annotations off: one `false` anywhere wins. See [Who may annotate a diff](#who-may-annotate-a-diff). |
-| `triggerOnBranch` | trigger | `true` | Run on non-PR branches | Does the bridge trigger this build configuration on non-PR branches? Unchecked = no automatic branch build **and nothing removed either**: a Run, a schedule or a VCS trigger still works, and still reports. |
-| `triggerOnPrReady` | trigger | `true` | Run on PR (ready) | Is this build configuration part of the PR check set (ready PRs and draft→ready transitions)? Unchecked = the bridge never enqueues it from a PR event and posts no `Skipped` row for it; an explicit Run or command still works and reports. |
-| `triggerOnPrDraft` | trigger | `false` | Run on PR (draft) | Also trigger on draft PR events (opt-in; it defaulted to `true` up to 1.10.0). On a **composite**, it builds the whole snapshot chain on drafts whatever each dependency says; the admin self-test **Draft setting along composite chains** flags it. **Requires `triggerOnPrReady=true`** (validated at save; a stored `ready=off, draft=on` is clamped to off). Unchecked: an **automatic** draft build is dropped with a `Skipped: draft PR` Check Run, while an explicit Run or GitHub command on a draft still runs. |
-| `skipIfCommitPassed` | trigger | `false` | Reuse a passed commit | When an **automatic** build is queued for a commit that already passed in this build configuration, drop it and republish that success (`Build passed (reused #87)`, linking to the build that ran). Matched on the commit alone, any ref — GitHub keys a Check Run on `(name, commit)`, so two refs of one commit are one row. A manual Run, a GitHub command and the Re-run buttons always re-run. **Leave off for scheduled suites**: a nightly is expected to re-run on an unchanged commit. |
-| `branchTriggerBranchesOverride` | SOFT | _empty_ (inherit) | Branches list override (non-PR) | When set, **REPLACES** the project's `branchTrigger.branches` for this BuildType. Same VCS branch-filter syntax. Empty = inherit project's list. |
-| `prTriggerBranchesOverride` | SOFT | _empty_ (inherit) | Branches list override (PR source) | When set, **REPLACES** the project's `prTrigger.branches` for this BuildType. Matched against the PR source branch. Empty = inherit. Auto enqueues for excluded PRs post a `Skipped: branch out of scope` Check Run. |
-| `pathFilter` | SOFT | _empty_ (= all paths) | Changed-path filter (monorepo) | **New.** When set, the listener only enqueues this BuildType for a PR if at least one of the PR's changed files matches. VCS-filter syntax (`+:src/api/**` / `-:docs/*` per line; `*` spans `/`). Enforced **only for PR webhook triggers** (it needs the PR file list from GitHub). A non-matching PR gets a `Skipped: paths out of scope` Check Run. |
-| `runOnApproval` | — | `false` | Run on PR approval | **New.** When checked, the BuildType is enqueued on PR approval (`pull_request_review` submitted = approved) — for expensive suites you only want to run after review. Independent of the ready/synchronize triggers. Requires the App to send `pull_request_review` events. |
-| `commentTrigger` | — | _empty_ (disabled) | PR comment trigger phrase | **New.** Optional trigger phrase (e.g. `/rebuild`). When a PR comment contains it (case-insensitive substring) **and** the commenter is trusted (server-side `comment.allowedAssociations`, collaborators-only by default), this BuildType is enqueued. Fires on inline PR review comments (`pull_request_review_comment`), which the App subscribes to by default. General PR *conversation* comments (`issue_comment`) also work but are **opt-in**: GitHub only delivers them when the App has the **Issues** permission, which the plugin does not request by default. Empty = disabled. |
-| `requirePhrase` | SOFT | _empty_ (no requirement) | PR metadata: require phrase | **New (v1.8.0).** Run only if the PR's **title OR body** contains this text (case-insensitive substring). Empty = no requirement. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
-| `skipPhrase` | SOFT | _empty_ (no skip) | PR metadata: skip phrase | **New (v1.8.0).** Skip the build if the PR's **title OR body** contains this text (case-insensitive substring), e.g. `[skip ci]`. Empty = never skipped on this basis. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
-| `labelFilter` | SOFT | _empty_ (run regardless of labels) | PR metadata: label filter | **New (v1.8.0).** VCS-filter syntax over the PR's **label names** (`+:ci` = run only if labelled `ci`, `-:no-ci` = skip if labelled `no-ci`; one rule per line). Empty = run regardless of labels. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `triggerOnBranch` | trigger | `true` | **Triggers** → Run on branches | Does the bridge trigger this build configuration on non-PR branches? Unchecked = no automatic branch build **and nothing removed either**: a Run, a schedule or a VCS trigger still works, and still reports. |
+| `triggerOnPrReady` | trigger | `true` | **Triggers** → Run on PR (ready) | Is this build configuration part of the PR check set (ready PRs and draft→ready transitions)? Unchecked = the bridge never enqueues it from a PR event and posts no `Skipped` row for it; an explicit Run or command still works and reports. |
+| `triggerOnPrDraft` | trigger | `false` | **Triggers** → Run on PR (draft) | Also trigger on draft PR events. **Opt-in since 1.11.0** (it defaulted to `true` before). On a **composite**, it builds the whole snapshot chain on drafts whatever each dependency says; the admin self-test **Draft setting along composite chains** flags it. **Requires `triggerOnPrReady=true`** (validated at save; a stored `ready=off, draft=on` is clamped to off). Unchecked: an **automatic** draft build is dropped with a `Skipped: draft PR` Check Run, while an explicit Run or GitHub command on a draft still runs. |
+| `skipIfCommitPassed` | trigger | `false` | **Triggers** → Reuse a passed commit *(advanced)* | When an **automatic** build is queued for a commit that already passed in this build configuration, drop it and republish that success (`Build passed (reused #87)`, linking to the build that ran). Matched on the commit alone, any ref — GitHub keys a Check Run on `(name, commit)`, so two refs of one commit are one row. A manual Run, a GitHub command and the Re-run buttons always re-run. **Leave off for scheduled suites**: a nightly is expected to re-run on an unchanged commit. |
+| `branchTriggerBranchesOverride` | SOFT | _empty_ (inherit) | **Filters** → Non-PR branches *(advanced)* | When set, **REPLACES** the project's `branchTrigger.branches` for this BuildType. Same VCS branch-filter syntax. Empty = inherit project's list. |
+| `prTriggerBranchesOverride` | SOFT | _empty_ (inherit) | **Filters** → PR branches *(advanced)* | When set, **REPLACES** the project's `prTrigger.branches` for this BuildType. Matched against the PR source branch. Empty = inherit. Auto enqueues for excluded PRs post a `Skipped: branch out of scope` Check Run. |
+| `pathFilter` | SOFT | _empty_ (= all paths) | **Filters** → Changed paths | When set, the listener only enqueues this BuildType for a PR if at least one of the PR's changed files matches. VCS-filter syntax (`+:src/api/**` / `-:docs/*` per line; `*` spans `/`). Enforced **only for PR webhook triggers** (it needs the PR file list from GitHub). A non-matching PR gets a `Skipped: paths out of scope` Check Run. |
+| `labelFilter` | SOFT | _empty_ (run regardless of labels) | **Filters** → Labels | (v1.8.0+) VCS-filter syntax over the PR's **label names** (`+:ci` = run only if labelled `ci`, `-:no-ci` = skip if labelled `no-ci`; one rule per line). Empty = run regardless of labels. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `requirePhrase` | SOFT | _empty_ (no requirement) | **Filters** → Require phrase *(advanced)* | (v1.8.0+) Run only if the PR's **title OR body** contains this text (case-insensitive substring). Empty = no requirement. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `skipPhrase` | SOFT | _empty_ (no skip) | **Filters** → Skip phrase *(advanced)* | (v1.8.0+) Skip the build if the PR's **title OR body** contains this text (case-insensitive substring), e.g. `[skip ci]`. Empty = never skipped on this basis. PR builds only. Excluded auto triggers post a `Skipped: PR metadata out of scope` Check Run; a manual "Run" bypasses it. |
+| `runOnApproval` | — | `false` | **On demand** → Run on approval | When checked, the BuildType is enqueued on PR approval (`pull_request_review` submitted = approved) — for expensive suites you only want to run after review. Independent of the ready/synchronize triggers. Requires the App to send `pull_request_review` events. |
+| `commentTrigger` | — | _empty_ (disabled) | **On demand** → Comment trigger | Optional trigger phrase (e.g. `/rebuild`). When a PR comment contains it (case-insensitive substring) **and** the commenter is trusted (server-side `comment.allowedAssociations`, collaborators-only by default), this BuildType is enqueued. Fires on inline PR review comments (`pull_request_review_comment`), which the App subscribes to by default. General PR *conversation* comments (`issue_comment`) also work but are **opt-in**: GitHub only delivers them when the App has the **Issues** permission, which the plugin does not request by default. Empty = disabled. |
+| `publishChecks` | publication | `true` | **Publication** → Publish to GitHub | Does this build configuration report to GitHub at all? Unchecked = invisible on GitHub whatever happens (no Check Run, no skip row) while still receiving the PR parameters and tags. This is the **only** input to publication — see the two axes above. |
+| `checkName` | publication | _empty_ | **Publication** → Check name | The Check Run name, used verbatim — no `TeamCity / `, no `checkName.stripPrefix`. Empty = derived from the project tree, so moving the configuration renames its check. Set it on a check a branch protection rule requires; setting or changing it **is** a rename (update the rule in the same change). Must be unique per repository: the self-test **Unique check names** warns otherwise, and **Required checks** warns about a required name nothing posts. (1.11.0+) |
+| `annotateDiff` | publication | `true` | **Publication** → Annotate the diff *(advanced)* | May this build configuration pin its compiler diagnostics to the pull request's diff? Unticking it silences the annotations of one configuration — a nightly warning sweep, a legacy target — while keeping everything else it reports. A tick does **not** overrule a project or a server that turned annotations off: one `false` anywhere wins. See [Who may annotate a diff](#who-may-annotate-a-diff). |
 
 The three PR-metadata filters (`requirePhrase`, `skipPhrase`,
 `labelFilter`) are evaluated together by `BridgeGate.metadataAllows`:
@@ -512,7 +557,7 @@ suppression flow.
    `Administration -> <project> -> GitHub Bridge` page.
 2. Add the *GitHub Bridge integration* build feature to the BuildType
    (or a shared BuildType template). Tune its fields (section 4) — e.g.
-   uncheck *Run on PR (draft)* for a ready-only suite.
+   check *Run on PR (draft)* for a fast suite that should run on drafts too.
 3. Make sure the BuildType's VCS root branchSpec covers the refs you
    want (`+:refs/pull/*/head` for PRs, plus your non-PR branches).
 4. Save. The next queued build hits the plugin's gate; a draft PR build
@@ -537,26 +582,6 @@ override, `checkName` — has no effect on that pull request's own triggering; i
 takes effect once merged. This is on purpose: otherwise a pull request could
 grant itself a build (or hide from one) just by editing its gates. Until it is merged,
 a build that the old gates hold back can still be started by hand.
-
-### Label rules
-
-```text
-# <label>       <= <condition> ; <condition>
-network         <= paths +:src/net/**, -:src/net/test/**
-team: core      <= author @acme/core, alice
-docs            <= paths +:docs/** ; title ^docs
-release         <= base +:Release/*
-```
-
-- A label is everything left of the first ` <= `, so `team: core` is fine; a
-  condition value cannot contain `;`.
-- Every condition of a line must hold; a label is added when any of its lines
-  holds. Labels are **only added** — removing a rule never removes a label.
-- A label the bridge added and later finds missing was removed by somebody: it
-  is not added again on the next push (remembered in
-  `<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/applied-labels.tsv`,
-  forgotten when the pull request closes).
-- Rules from every project using the repository apply.
 
 ## Configuration precedence
 
@@ -802,6 +827,15 @@ through every state.
 | Build finishes (failure / error) | `completed` | `failure` | `Build failed` |
 | Build finishes (cancelled) | `completed` | `cancelled` | `Build cancelled` |
 | Build status `UNKNOWN` | `completed` | `neutral` | `Build status: ...` |
+| Queued duplicate satisfied by a passed build (`skipIfCommitPassed`) | `completed` | `success` | `Build passed (reused #N)` |
+| Automatic build dropped by a filter | `completed` | `skipped` | `Skipped: branch out of scope` / `paths out of scope` / `PR metadata out of scope` |
+| Open row whose build vanished (reconciliation, 1.11.0+) | `completed` | `cancelled` | `Build no longer in TeamCity` |
+
+Two rules keep a row from going backwards (1.11.0+): no `Queued` is posted
+for a chain member whose commit already passed in its configuration (the
+chain reuses that build, so the green row stays), and a row left `queued` or
+`in_progress` by a missed event is concluded by the periodic reconciliation —
+see [troubleshooting.md](troubleshooting.md#symptom-a-check-run-stays-in-progress-or-queued-after-the-build-finished).
 
 `output.summary` carries the build's `statusDescriptor.text` (i.e.
 whatever the agent set via

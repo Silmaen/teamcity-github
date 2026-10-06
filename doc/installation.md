@@ -23,6 +23,10 @@ GitHub App, continue with [github-app-setup.md](github-app-setup.md).
     │                                            (legacy fallback only)
     └── teamcity-server-log4j.xml                optional log tuning
 
+<TC_DATA_DIR>/system/pluginData/teamcity-github-bridge/
+├── open-check-runs.tsv                          rows to reconcile (cache, 1.11.0+)
+└── applied-labels.tsv                           labels the bridge added (cache, 1.11.0+)
+
 <TC_DATA_DIR>/logs/
 └── teamcity-github-bridge.log                   the plugin's dedicated log
 ```
@@ -121,7 +125,7 @@ Go to `Administration -> Plugins List`. You should see:
 
 | Plugin | Vendor | Version | Min API | State |
 |---|---|---|---|---|
-| TeamCity GitHub Bridge | Damien Lachouette | 1.10.0 | 222521 | enabled |
+| TeamCity GitHub Bridge | Damien Lachouette | 1.11.0 | 222521 | enabled |
 
 If the plugin is greyed out or the version is missing, refer to
 [troubleshooting.md](troubleshooting.md#symptom-plugin-does-not-load).
@@ -133,9 +137,11 @@ rm <TC_DATA_DIR>/plugins/teamcity-github-bridge-*.zip
 ```
 
 Then restart TeamCity (or remove via the UI's `Plugins List ->
-Disable / Delete`). No external state is created; per-buildType
-parameters remain on the build configurations and can be cleaned up
-separately if desired.
+Disable / Delete`). The plugin creates no state outside the TeamCity data
+directory: delete `config/teamcity-github-bridge.properties` and
+`system/pluginData/teamcity-github-bridge/` if you want it all gone. The
+project parameters and build features stay on the configurations and can be
+cleaned up separately.
 
 ## Next steps
 
@@ -143,7 +149,7 @@ separately if desired.
   mechanic, but a release can change what the operator has to do on the
   GitHub side — see [upgrading.md](upgrading.md).
 - **Fastest path (recommended)**: open `Administration -> GitHub
-  Bridge` and click **Create GitHub App** — the managed-App flow wires
+  Bridge`, tab **GitHub App**, and click **Create GitHub App** — the managed-App flow wires
   up the App, connection, and webhook (URL + secret) for you. See
   [quickstart.md](quickstart.md).
 - **First-time setup (manual)**: continue with [GitHub App setup](github-app-setup.md).

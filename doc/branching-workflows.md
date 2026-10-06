@@ -201,7 +201,7 @@ build feature, with its own gates. Check Run names appear on GitHub as
 | Archetype | Runs on | Cost | Gate (plugin config) | Required in branch protection? |
 |---|---|---|---|---|
 | **A1 — PR fast checks** (compile + lint + unit) | PR ref (`pull/N`, or the head branch in branch-source mode), drafts included | low | `triggerOnPrReady=on`, `triggerOnPrDraft=on` | yes |
-| **A2 — PR full suite** (integration, multi-platform) | PR ref, ready only | high | `triggerOnPrDraft=off` | yes |
+| **A2 — PR full suite** (integration, multi-platform) | PR ref, ready only | high | `triggerOnPrDraft=off` (the default since 1.11.0) | yes |
 | **A3 — PR heavy/opt-in suite** (perf, long soak, big matrix) | PR ref, on demand | very high | `labelFilter=+:ci-full` and/or `runOnApproval=true` and/or `commentTrigger=/full` | no (informational) |
 | **A4 — Post-merge CI on default branch** (on push) | `<default branch>` (`master` here) | medium | TC **VCS trigger** + `triggerOnBranch=on`, `branchTrigger.branches=+:<default branch>` | n/a (no PR) |
 | **A5 — Post-merge CI on release branches** (on push) | `Release/*` | medium | TC **VCS trigger** + `branchTrigger.branches=+:Release/*` | n/a |
@@ -327,7 +327,7 @@ from `Experiment/raytracing` or from `pull/N`.
 **TeamCity:** A1 (fast checks) is enqueued; A2/A3 are suppressed.
 **GitHub:** A1 transitions Queued → In progress → success/failure. A2
 shows **"Skipped: draft PR"** (`conclusion=skipped`).
-**Config:** A1 `triggerOnPrDraft=on`; A2 `triggerOnPrDraft=off`.
+**Config:** A1 `triggerOnPrDraft=on` (opt-in); A2 left at the default, off.
 **Note:** GitHub treats a `skipped` conclusion as satisfying a required
 check, so a draft PR whose A2 is skipped is not blocked *by the check*
 — it's blocked by being a draft. Worth verifying on your GitHub
