@@ -1,6 +1,8 @@
 package io.github.dlachouette.teamcity.github.queue
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -122,5 +124,20 @@ class ObsoleteBuildPolicyTest {
         assertFalse(superseded(build(branchName = null)))
         assertFalse(closed(build(branchName = "Feature/other")))
         assertFalse(closed(build(branchName = null)))
+    }
+
+    // The stop comment carries the superseding commit to the publisher.
+
+    @Test
+    fun `a superseded comment reads back its superseding commit`() {
+        val comment = ObsoleteBuildPolicy.supersededComment("abcdef0123456789", 42, "1234567890")
+        assertEquals("teamcity-github-bridge: superseded by abcdef0 on PR #42 (was building 1234567)", comment)
+        assertEquals("abcdef0", ObsoleteBuildPolicy.supersededBy(comment))
+    }
+
+    @Test
+    fun `any other comment is not a supersession`() {
+        listOf(null, "", "teamcity-github-bridge: PR #42 closed", "stopped by alice", "superseded by abcdef0")
+            .forEach { assertNull(ObsoleteBuildPolicy.supersededBy(it), "comment=$it") }
     }
 }

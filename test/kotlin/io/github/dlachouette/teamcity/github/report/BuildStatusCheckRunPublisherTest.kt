@@ -371,4 +371,25 @@ class BuildStatusCheckRunPublisherTest {
             ),
         )
     }
+
+    // A build superseded by a push is skipped, not a red "cancelled".
+    @Test
+    fun `a build the bridge stopped as superseded concludes skipped`() {
+        val m = BuildStatusCheckRunPublisher.supersededOutcome(
+            interrupted = true, cancelComment = "teamcity-github-bridge: superseded by abcdef0 on PR #42",
+        )
+        assertEquals(CheckRunConclusion.SKIPPED, m?.conclusion)
+        assertEquals("Superseded by abcdef0", m?.title)
+    }
+
+    @Test
+    fun `a build stopped by a human or not stopped at all is left to the usual mapping`() {
+        assertNull(BuildStatusCheckRunPublisher.supersededOutcome(interrupted = true, cancelComment = "stopped by alice"))
+        assertNull(BuildStatusCheckRunPublisher.supersededOutcome(interrupted = true, cancelComment = null))
+        assertNull(
+            BuildStatusCheckRunPublisher.supersededOutcome(
+                interrupted = false, cancelComment = "teamcity-github-bridge: superseded by abcdef0 on PR #42",
+            ),
+        )
+    }
 }

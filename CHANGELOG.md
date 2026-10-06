@@ -15,6 +15,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **Draft pull requests are now opt-in**: `triggerOnPrDraft` defaults to off, so a configuration (above all a composite gate pulling its snapshot chain) no longer runs on every draft push and posts "Skipped: draft PR" instead. **Upgrade:** only a feature that never stored the parameter (typically Kotlin DSL) changes behaviour — set `triggerOnPrDraft=true` there to keep building drafts; one saved from the UI already holds its value.
+- A build the bridge stops because a newer commit was pushed now concludes `skipped` ("Superseded by <short sha>") instead of a red `cancelled`; a build a human stops keeps `cancelled`.
 
 ### Fixed
 
