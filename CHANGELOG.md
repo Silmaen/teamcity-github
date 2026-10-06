@@ -6,6 +6,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-06
+
+Rows that stay honest — never stuck open, never flipped back to "Queued", never
+red for a superseded build — required checks the plugin can vouch for, and the
+pull request itself kept tidy: assigned and labelled by rule.
+
 ### Added
 
 - **Label rules** (`teamcity.github.bridge.labelRules`, per project) add labels to a pull request by changed paths, author or team, branches and title; labels are only added, and one removed by hand is not put back.
