@@ -35,9 +35,15 @@ GitHub App → configure a project → see a Check Run.
   project's **GitHub Bridge** tab (`connectionId=managed` uses the
   server-managed App; or point it at a TeamCity connection).
 - The plugin then posts a GitHub **Check Run** through every build
-  lifecycle event, skips automatic draft-PR builds, retriggers on
-  ready-for-review, and reacts to PR comments, approvals, labels and the
-  re-run buttons.
+  lifecycle event, skips automatic draft-PR builds (drafts are opt-in),
+  retriggers on ready-for-review, and reacts to PR comments, approvals,
+  labels and the re-run buttons. Optionally it assigns new PRs to their
+  author and labels them by rules.
+- The three screens: the server admin page (tabs **Overview**, **GitHub
+  App**, **Webhook**, **Server settings**, **External API**, **Activity**,
+  **Help**), the project's **GitHub Bridge** tab (**Repository**,
+  **Triggers**, **Reporting**, **Pull requests**) and the build feature
+  dialog (**Triggers**, **Filters**, **On demand**, **Publication**).
 - Two things are worth internalising: **publication depends on one
   per-configuration switch and not on what triggered the build**, and the
   bridge **never removes a build it did not enqueue itself** (except the

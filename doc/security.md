@@ -250,6 +250,7 @@ See the commented contract at the top of `api/TokenResolver.kt`.
 | Plugin memory (`AppTokenCache`) | Installation access tokens, keyed by installation ID | 50 minutes (GitHub-side lifetime is 60 min; we keep a 10 min safety margin) |
 | Plugin memory (`PrInfoCache`) | PR JSON snippets (number, title, author, draft, ...) | 60 seconds |
 | Plugin memory (during request) | Access token in `String` | discarded at end of call |
+| Plugin data dir (`system/pluginData/teamcity-github-bridge/`, 1.11.0+) | Open Check Run rows (promotion id, build configuration, commit) and labels the bridge added per PR — **no credential** | until the row concludes / the PR closes |
 
 The plugin never writes tokens to disk, never logs them at any
 level, and never includes them in error messages.
@@ -290,7 +291,7 @@ check on every call:
 ## Managed GitHub App creation (manifest flow)
 
 Since v1.7.0 an admin can have the plugin create a GitHub App via
-GitHub's App-manifest flow (admin page → GitHub App card →
+GitHub's App-manifest flow (admin page → tab **GitHub App** →
 *Create GitHub App*). The browser POSTs a manifest to GitHub, GitHub
 shows a confirmation screen, and on create it redirects back to the
 plugin callback `GET /app-callback?code=...&state=...`
@@ -408,29 +409,25 @@ The plugin requests the minimum access for what it does:
 | Pull requests | **Read** | `GET /repos/.../pulls/N` for the draft status, and the commit-to-PR lookup |
 | Contents | Read | Required transitively |
 
-The plugin does **not** require **Commit statuses**, **Webhooks**, or
-**Issues** permissions. (TeamCity's bundled features may request the
-first two; that is for coexistence only, not for this plugin.) The
-**Issues** permission is intentionally omitted to keep the App scoped
-to pull requests, not issues — which is why GitHub does not deliver the
-`issue_comment` event by default. Comment triggers work via
-`pull_request_review_comment` without it; granting the **Issues**
-permission (and subscribing to `issue_comment`) is an **opt-in** for
-operators who also want to trigger from PR conversation comments.
+Three more are **optional**, each for one opt-in feature, and never
+requested by the manifest:
 
-**By default, the plugin never writes to a pull request.** Its only write is the
-Check Run lifecycle, which is the **Checks** permission. The exceptions are
-opt-in: `teamcity.github.bridge.autoAssignAuthor` assigns a newly opened, unassigned
-pull request to its author, and `teamcity.github.bridge.labelRules` adds labels
-(never removes them); both need **Issues: write** — grant it only if you use
-them. Team conditions in label rules also need the organisation's **Members:
-read**. Likewise **Administration: read**, optional, only lets the
-*Required checks* self-test read classic branch protection; it is never used to
-write. Pull-requests **write** was
-required for one feature — the sticky summary comment — and that feature was
-removed in 1.10.0, so the scope came back down to read. An installation that
-still grants write is not exercising it; revoke it if you want the App's
-permissions to match what it does.
+| Permission | Access | Only for |
+|---|---|---|
+| Issues | Write | assigning a new PR to its author (`autoAssignAuthor`) and label rules (`labelRules`) — both off by default, and labels are only ever added |
+| Members (organisation) | Read | `@org/team` conditions in label rules |
+| Administration | Read | the *Required checks* self-test reading classic branch protection; never used to write |
+
+**By default the plugin writes nothing to a pull request**: its only write is
+the Check Run lifecycle (**Checks**). Pull-requests **write** was needed only by
+the sticky summary comment, removed in 1.10.0; an installation that still
+grants it can revoke it.
+
+The plugin never needs **Commit statuses** or **Webhooks** (TeamCity's bundled
+features may request them, for coexistence only). Without **Issues**, GitHub
+does not deliver `issue_comment`: comment triggers work through
+`pull_request_review_comment`; triggering from PR *conversation* comments is
+an opt-in (grant Issues and subscribe to `issue_comment`).
 
 ## Fail-open vs fail-closed: where each applies
 
@@ -448,6 +445,7 @@ consequences differ.
 | GitHub API returns 4xx/5xx | **Open** (allow build) | Same reasoning. |
 | PR info cache stale | Use stale value | Better than reaching out to GitHub during a queue-blocking call. |
 | Webhook payload malformed | **Open** (return 200, no action) | Logging the issue is enough; refusing to ACK risks GitHub disabling the webhook after retries. |
+| Assignment or labelling fails (e.g. 403, no Issues: write) | **Open** (log, build triggering continues) | An opt-in courtesy must never stop CI. |
 
 This is a deliberate split: the **trust boundary** is hard
 (fail-closed), the **best-effort enrichment** is soft (fail-open).
@@ -495,8 +493,8 @@ visible to operators) and only enable `DEBUG` when investigating.
 - [ ] TeamCity is fronted by TLS (the plugin assumes HTTPS in the
       `payloadUrl` returned by `/info`).
 - [ ] GitHub App private key rotated at least annually.
-- [ ] GitHub App permissions limited to the table above; remove any
-      grant that isn't on the list.
+- [ ] GitHub App permissions limited to the tables above; remove any
+      grant that isn't on them.
 - [ ] GitHub App installed on only the repositories that need it,
       not on `All repositories`.
 - [ ] TeamCity server log retention long enough to investigate
@@ -512,7 +510,11 @@ visible to operators) and only enable `DEBUG` when investigating.
 - [ ] Comment-trigger allowlist (`comment.allowedAssociations`) kept
       at write-access associations; not emptied on a public repo.
 - [ ] Pull requests granted **read**, not write: nothing in the plugin
-      writes to a pull request.
+      needs pull-requests write.
+- [ ] **Issues: write**, organisation **Members: read** and
+      **Administration: read** granted only if you use the feature that
+      needs each (assignment / label rules, team conditions, the
+      *Required checks* self-test).
 - [ ] If using a **managed App** (`connectionId=managed`), the plugin
       settings file is protected by filesystem permissions (it holds the
       App private key in plain text); the App is installed on only the

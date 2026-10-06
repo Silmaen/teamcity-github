@@ -32,7 +32,8 @@ teamcity-github/
 │   ├── quickstart.md          installation.md  github-app-setup.md  webhook-setup.md
 │   ├── configuration.md       usage-scenarios.md  branching-workflows.md
 │   ├── architecture.md        development.md  api-reference.md  security.md
-│   ├── troubleshooting.md     roadmap.md  README.md (documentation map)
+│   ├── troubleshooting.md     upgrading.md  why-this-plugin.md  roadmap.md
+│   ├── README.md              documentation map
 │   └── assets/                images used by the pages above
 └── src/
     ├── main/
@@ -42,6 +43,7 @@ teamcity-github/
     │   │   ├── META-INF/build-server-plugin-teamcity-github-bridge.xml   Spring DI
     │   │   ├── teamcity-github-bridge-log4j-snippet.xml                  log4j fragment for ops
     │   │   └── buildServerResources/
+    │   │       ├── common/bridgeUi.jspf               shared styles, tabs and (?) doc links of the config screens
     │   │       ├── admin/bridgeAdmin.jsp              admin + help page
     │   │       ├── display/bridgeBranchEnrichment.jsp draft/ready pill CSS + JS
     │   │       ├── feature/bridgeFeatureEdit.jsp      build-feature form
@@ -59,13 +61,16 @@ teamcity-github/
     │       ├── enrich/    PrBuildEnricher, PrPromotionTagger, PrParameterProvider
     │       ├── feature/   GitHubBridgeBuildFeature, BridgeFeatureConfig + BridgeGate,
     │       │              GateContextResolver, BridgeTrigger, BridgeRefs,
-    │       │              BranchSpecMatcher, BundledPublisherDetector
+    │       │              BranchSpecMatcher, AnnotationGate, BundledPublisherDetector,
+    │       │              DraftChainDetector
+    │       ├── labels/    LabelRules, PrLabeler, AppliedLabelsStore
     │       ├── queue/     DraftBuildQueueCleaner + QueueCleanupPolicy, DraftAwareBuildFilter,
-    │       │              ObsoleteBuildPolicy
+    │       │              ObsoleteBuildPolicy, PassedBuildLookup
     │       ├── report/    BuildStatusCheckRunPublisher, DraftCheckRunReporter, BuildTimeline,
     │       │              TestReport, FailureClassifier, BuildProblemAnnotations,
-    │       │              ReportHelpers
-    │       └── web/       the inbound and UI layer (~23 files): PullRequestEventListener,
+    │       │              OpenCheckRunRegistry, QueueEstimate, CheckNameCollisionDetector,
+    │       │              RequiredCheckAudit, ReportHelpers
+    │       └── web/       the inbound and UI layer (~25 files): PullRequestEventListener, AutoAssign,
     │                      webhook, info, health, metrics, external API, admin console,
     │                      project settings, Branches & PRs project tab, Pull request
     │                      build tab (BridgePrTab + PrTabModel), SignatureVerifier,
@@ -79,7 +84,7 @@ in a top-level `test/kotlin/io/github/dlachouette/teamcity/github/`
 (`<testSourceDirectory>` in the POM) mirroring the packages above, plus
 `testsupport/LoggerBootstrap.kt`.
 
-Seven packages, deliberately: a package earns its folder by holding a
+Eight packages, deliberately: a package earns its folder by holding a
 boundary, not a file. `cache`, `filter`, `parameters`, `selftest` and
 `retrigger` each held exactly one class and were folded into the package
 that already owned their subject.

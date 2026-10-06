@@ -50,7 +50,7 @@ sequenceDiagram
     participant TC as TeamCity
     participant GH as GitHub App settings
 
-    Admin->>TC: 1. set HMAC secret via<br/>Administration -> GitHub Bridge
+    Admin->>TC: 1. set HMAC secret via<br/>Administration -> GitHub Bridge -> Webhook
     Admin->>TC: 2. GET /app/teamcity-github-bridge/info
     TC-->>Admin: payloadUrl, recommendedEvents,<br/>contentType, secretConfigured: true
     Admin->>GH: 3. paste payloadUrl + secret<br/>+ tick events
@@ -69,8 +69,8 @@ openssl rand -hex 48
 
 **Via the plugin's admin page (recommended)**
 
-Open `Administration -> Server Administration -> GitHub Bridge`.
-Under `HMAC secret` paste the random string into the form and
+Open `Administration -> Server Administration -> GitHub Bridge`, tab
+**Webhook**. Paste the random string into the **HMAC secret** form and
 click **Save**. The plugin writes the value to its own file,
 `<TC_DATA_DIR>/config/teamcity-github-bridge.properties` (key
 `webhook.secret`), and the next webhook delivery uses the new secret
@@ -107,7 +107,7 @@ teamcity.github.bridge.webhook.secret=<paste the string here>
 
 or edit `<TC_DATA_DIR>/config/internal.properties` directly with the
 same key. If both sources are populated, the plugin's own file takes
-precedence (visible in the admin page as "via this page" vs "via
+precedence (the **Webhook** tab shows "via this page" vs "via
 internal.properties - legacy").
 
 > **Important**: do **not** confuse this secret with the "Webhook
@@ -121,6 +121,9 @@ internal.properties - legacy").
 > delivery - that's intentional, fail-closed.
 
 ### Step 2: fetch the live config from the plugin
+
+The **Webhook** tab of the admin page shows the same values (payload URL,
+content type, events) ready to copy. From a shell:
 
 ```bash
 curl -s https://<TC_HOST>/app/teamcity-github-bridge/info | jq
@@ -251,7 +254,7 @@ overlapping secrets, so coordinate the rotation:
 
 1. Generate a new secret.
 2. Paste it into the admin form (`Administration -> Server
-   Administration -> GitHub Bridge -> HMAC secret`) and **Save**. The
+   Administration -> GitHub Bridge`, tab **Webhook**, **HMAC secret**) and **Save**. The
    new secret is live on the next delivery. (Legacy fallback: update
    `teamcity.github.bridge.webhook.secret` in TeamCity's
    `internal.properties`, which TeamCity hot-reloads within a second.)

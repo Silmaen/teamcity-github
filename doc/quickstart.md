@@ -21,14 +21,14 @@ left menu.
 
 ## 2. Create & install the GitHub App
 
-1. Open **Administration → GitHub Bridge**.
-2. In the **GitHub App** card, optionally type your GitHub organisation
+1. Open **Administration → GitHub Bridge**, tab **GitHub App**.
+2. Optionally type your GitHub organisation
    (leave blank for a personal App), then click **Create GitHub App**.
 3. GitHub shows a confirmation screen pre-filled with the right webhook
    URL, permissions and events. Click **Create**.
 4. You land back on the admin page: the App's credentials **and webhook
    secret** are now stored automatically.
-5. Click **Install / manage installations** (link in the card) and
+5. Click **Install / manage installations** (same tab) and
    install the App on the repositories you want TeamCity to report on.
 
 That's the entire GitHub side — no `.pem`, no manual webhook.
@@ -36,10 +36,10 @@ That's the entire GitHub side — no `.pem`, no manual webhook.
 ## 3. Point a project at the App
 
 1. Open **Administration → \<your project\> → GitHub Bridge**.
-2. Set:
+2. On the **Repository** tab, set:
    - **GitHub repository**: `owner/name` (e.g. `acme/widgets`)
-   - **Connection ID**: `managed`
-3. Leave the trigger toggles at their defaults and **Save**.
+   - **GitHub App connection ID**: `managed`
+3. Leave the **Triggers** tab at its defaults and **Save**.
 
 ## 4. Opt a build configuration in
 
@@ -48,7 +48,8 @@ In the build configuration you want to report to GitHub:
 1. **Build Features → Add build feature → GitHub Bridge integration**.
 2. **Remove (or disable) the bundled `commitStatusPublisher` build feature
    on the same build configuration**, if it has one.
-3. Save. (The defaults run on branches, ready PRs and draft PRs.)
+3. Save. (The defaults run on branches and ready PRs; tick **Run on PR
+   (draft)** in the **Triggers** section to build drafts too.)
 
 > ⚠️ **Step 2 is not optional in practice.** The bridge and TeamCity's
 > bundled *Commit status publisher* both report to GitHub, so leaving both
@@ -61,9 +62,10 @@ In the build configuration you want to report to GitHub:
 
 ## 5. Verify
 
-- On the admin page, click **Verify App configuration** — it should
-  report *configuration OK*.
-- Click **Run self-tests** — all checks should pass.
+- On the admin page, tab **GitHub App**, click **Verify App configuration** —
+  it should report *configuration OK*.
+- Tab **Overview**, click **Run self-tests** — all checks should pass (a
+  `WARN` on a configuration check names what to look at).
 - Open (or reopen) a pull request on the repo. Within a few seconds a
   **`TeamCity / <build configuration>`** Check Run appears on the PR and
   transitions queued → in progress → success/failure.
@@ -82,5 +84,5 @@ Done. 🎉
 | Diagnose a problem | [troubleshooting.md](troubleshooting.md) |
 | Review the security model | [security.md](security.md) |
 
-If something went wrong, the **Recent events** table on the admin page
-and the dedicated log are the first places to look.
+If something went wrong, the admin page's **Activity** tab and the dedicated
+log are the first places to look.

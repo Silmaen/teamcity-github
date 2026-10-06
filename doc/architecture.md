@@ -115,7 +115,8 @@ io.github.dlachouette.teamcity.github
 ├── TeamCityGitHubBridgePlugin       main lifecycle bean
 ├── api/
 │   ├── GitHubClient                 open class, HTTP + Jackson: getPr, prsForCommit, listPrFiles,
-│   │                                postCheckRun, issue comments, installations, tokens
+│   │                                compare, postCheckRun, addAssignee, addLabels, isTeamMember,
+│   │                                branch protection / rulesets, installations, tokens
 │   ├── PrInfoCache                  TTL-based, ConcurrentHashMap over the calls above
 │   ├── PrInfo, RepoCoords           PR snapshot (draft, head sha/ref, head repo, title, body,
 │   │                                labels) and the owner/repo parser
@@ -125,7 +126,7 @@ io.github.dlachouette.teamcity.github
 │   ├── AppManager                   managed-App credentials, GET /app verification (AppVerification)
 │   ├── RsaKeyParser                 PEM PKCS#1/PKCS#8 private-key parsing, pure + own tests
 │   └── CheckRunRequest / Status / Conclusion / Annotation / AnnotationLevel, InstallationInfo,
-│                                    CreatedToken, IssueComment, AppInfo, ManifestConversion, HttpResponse
+│                                    CreatedToken, AppInfo, ManifestConversion, RequiredChecks, HttpResponse
 ├── config/
 │   ├── WebhookConfig                webhook secret: plugin file → internal.properties fallback
 │   ├── PluginSettingsStorage        reads/writes the plugin-owned settings file
@@ -147,15 +148,27 @@ io.github.dlachouette.teamcity.github
 │   ├── BridgeTrigger                AUTO | COMMAND | MANUAL + BridgeTriggerMarker (promotion stamp)
 │   ├── BridgeRefs                   pull/N ref building and parsing
 │   ├── BranchSpecMatcher            +:/-: branch-list matching
-│   └── BundledPublisherDetector     spots a bundled commitStatusPublisher on the same BuildType
+│   ├── AnnotationGate               server / project chain / feature veto on diff annotations
+│   ├── BundledPublisherDetector     spots a bundled commitStatusPublisher on the same BuildType
+│   └── DraftChainDetector           composites running on drafts over draft-skipping dependencies
+├── labels/
+│   ├── LabelRules                   parse + evaluate `labelRules` (pure)
+│   ├── PrLabeler                    applies them on PR events (opt-in, Issues: write)
+│   └── AppliedLabelsStore           pluginData file: labels added per PR, so a removal sticks
 ├── queue/
 │   ├── DraftBuildQueueCleaner       removes out-of-scope automatic builds, reuses a passed commit;
 │   │                                QueueCleanupPolicy is the pure removal rule
 │   ├── DraftAwareBuildFilter        StartBuildPrecondition, last line of defence
-│   └── ObsoleteBuildPolicy          pure rule: may the bridge stop this running build?
+│   ├── ObsoleteBuildPolicy          pure rule: may the bridge stop this running build? (+ the
+│   │                                superseded stop comment the publisher reads back)
+│   └── PassedBuildLookup            "did this commit already pass here?", shared by cleaner + publisher
 ├── report/
 │   ├── BuildStatusCheckRunPublisher Check Run lifecycle (queued/started/interrupted/finished/removed),
-│   │                                artifact links, annotationsnt
+│   │                                artifact links, annotations, open-row reconciliation
+│   ├── OpenCheckRunRegistry         pluginData file: rows left queued / in_progress
+│   ├── QueueEstimate                the queued row's "26th in queue, ~4m to start" summary
+│   ├── CheckNameCollisionDetector   two configurations posting one name to one repository
+│   ├── RequiredCheckAudit           required check names nothing posts
 │   ├── DraftCheckRunReporter        skip and reused-success rows (SkipReason)
 │   ├── BuildProblemAnnotations      compiler diagnostics → output.annotations, max 50
 │   ├── FailureClassifier            problem types → code / infrastructure / dependency failure
@@ -164,7 +177,8 @@ io.github.dlachouette.teamcity.github
 │   └── ReportHelpers                shared formatting used by the reporters
 └── web/
     ├── PullRequestEventListener     PR/review/comment/re-run events → addToQueue; fork guard,
-    │                                path filtering, retro-association, closed-PR cancellation
+    │                                path filtering, retro-association, closed-PR cancellation,
+    │                                superseded stops, auto-assign (AutoAssign is the pure rule)
     ├── PluginWebhookController      POST /webhook: HMAC, replay guard, RecentEventsLog, fan-out
     ├── WebhookPayloadParser         Jackson over pull_request, pull_request_review,
     │                                pull_request_review_comment, issue_comment, check_run, check_suite
@@ -207,17 +221,21 @@ Declared in
     <bean class="...api.AppTokenCache"/>
     <bean class="...api.AppTokenMinter"/>
     <bean class="...api.TokenResolver"/>
-    <bean class="...cache.PrInfoCache"/>
+    <bean class="...api.AppManager"/>
+    <bean class="...api.PrInfoCache"/>
 
     <bean class="...feature.GitHubBridgeBuildFeature"/>
-    <bean class="...retrigger.PullRequestEventListener"/>
-    <bean class="...filter.DraftAwareBuildFilter"/>
-    <bean class="...parameters.PrParameterProvider"/>
+    <bean class="...feature.GateContextResolver"/>
+    <bean class="...web.PullRequestEventListener"/>
+    <bean class="...queue.DraftAwareBuildFilter"/>
+    <bean class="...enrich.PrParameterProvider"/>
     <bean class="...enrich.PrBuildEnricher"/>
     <bean class="...enrich.PrPromotionTagger"/>
     <bean class="...report.DraftCheckRunReporter"/>
     <bean class="...report.BuildStatusCheckRunPublisher"/>
+    <bean class="...labels.PrLabeler"/>
     <bean class="...queue.DraftBuildQueueCleaner"/>
+    <bean class="...config.PublisherConflictReporter"/>
 
     <bean class="...web.RecentEventsLog"/>
     <bean class="...web.DeliveryReplayGuard"/>
@@ -231,11 +249,14 @@ Declared in
     <bean class="...web.AdminConsolePage"/>
     <bean class="...web.AdminSettingsController"/>
     <bean class="...web.AdminTestController"/>
+    <bean class="...web.BridgeBuildsTab"/>
+    <bean class="...web.BridgePrTab"/>
     <bean class="...web.BridgeProjectSettingsTab"/>
     <bean class="...web.BridgeProjectSettingsController"/>
+    <bean class="...web.AppManifestController"/>
     <bean class="...web.BranchEnrichmentPageExtension"/>
 
-    <bean class="...selftest.PluginSelfTester"/>
+    <bean class="...config.PluginSelfTester"/>
 </beans>
 ```
 
@@ -254,9 +275,9 @@ then dispatches by `X-GitHub-Event` to `PullRequestEventListener`:
 
 | Event | Action(s) | Handler | Effect |
 |---|---|---|---|
-| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize` | `handle` | Gate + path-filter, then enqueue matching BuildTypes. On `synchronize`, then stop the builds still running on the previous head (`ObsoleteBuildPolicy`). |
+| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize` | `handle` | Opt-in assignment (`opened`) and label rules (`PrLabeler`, also on `edited`), then gate + path-filter and enqueue matching BuildTypes. On `synchronize`, then stop the builds still running on the previous head (`ObsoleteBuildPolicy`), with the stop comment the publisher turns into *"Superseded by …"*. |
 | `pull_request` | `labeled`, `unlabeled`, `edited` | `handle` | Re-evaluate the same commit and enqueue what became eligible. Never posts a `Skipped` row: the commit has not changed, so it would overwrite a result already published for it (`PrAction.reportsSkips`). |
-| `pull_request` | `closed` (incl. merged) | `handle` -> `cancelBuildsForClosedPr` | Remove the builds still queued for the PR head, and stop the ones still running (`ObsoleteBuildPolicy`). |
+| `pull_request` | `closed` (incl. merged) | `handle` -> `cancelBuildsForClosedPr` | Forget the labels the bridge added, remove the builds still queued for the PR head, and stop the ones still running (`ObsoleteBuildPolicy`). |
 | `pull_request_review` | `submitted` / `state=approved` | `handleReviewApproved` | Enqueue run-on-approval BuildTypes. |
 | `pull_request_review_comment` | `created` | `handleCommentCommand` | Default comment-trigger event (inline PR diff comment): enqueue BuildTypes whose comment trigger phrase matches, if the author association is allowed. |
 | `issue_comment` | `created` | `handleCommentCommand` | Same, for PR *conversation* comments. **Opt-in**: only delivered when the App has the **Issues** permission, which the plugin does not request by default. |
@@ -302,10 +323,10 @@ sequenceDiagram
         PWC-->>GH: 401 Invalid signature
     else true and event=pull_request
         PWC->>WPP: parsePullRequestEvent(payload)
-        WPP-->>PWC: PrEventPayload | null<br/>(opened, ready_for_review, synchronize)
+        WPP-->>PWC: PrEventPayload | null
         alt payload != null
             PWC->>RFR: handle(payload)
-            Note over RFR: skip if draft<br/>(opened/synchronize only)
+            Note over RFR: gate per BuildType<br/>(draft, branches, paths, metadata)
             RFR->>PM: activeBuildTypes
             PM-->>RFR: List<SBuildType>
             loop matching build types
@@ -372,6 +393,11 @@ sequenceDiagram
 - `PluginWebhookController.doHandle` is invoked on Jetty's
   request-handling thread. Verification and enqueuing complete in
   the same call.
+- `BuildStatusCheckRunPublisher` schedules on TeamCity's
+  `normalExecutorService`: the deferred `queued` post (revision not resolved
+  yet), the one-time queue-estimate refresh, the 30 s flush of
+  `OpenCheckRunRegistry` and the 10 min open-row reconciliation (first run
+  ~3 min after the bean is created, so agents can reconnect after a restart).
 - `PrInfoCache` uses `ConcurrentHashMap` for thread safety. The
   cache currently has no eviction policy beyond TTL on read; on a
   busy server with many PRs it stays bounded by the number of

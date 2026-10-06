@@ -86,11 +86,12 @@ body is buffered.
 
 | Event | Acted on | Effect |
 |---|---|---|
-| `pull_request` | `ready_for_review`, plus `closed`/`merged` and other parsed actions | Enqueue or cancel builds per the listener logic. Actions that do not parse return `200 OK` without enqueuing. |
+| `pull_request` | `opened`, `reopened`, `ready_for_review`, `synchronize`, `labeled`, `unlabeled`, `edited`, `closed` | Enqueue, re-evaluate or cancel builds per the listener logic; on `opened` / push / edit also the opt-in assignment and label rules (1.11.0+). Other actions return `200 OK` without enqueuing. |
 | `pull_request_review` | `approved` | An approval is handled; non-approval reviews are skipped. |
 | `pull_request_review_comment` | `created` | An inline PR review comment command is handled. This is the default comment-trigger event (subscribed by the managed App). |
-| `issue_comment` | `created` on a PR | A PR conversation comment command is handled; non-PR comments are skipped. **Opt-in**: GitHub only delivers this when the App has the Issues permission, which the plugin does not request by default. |
-| `check_run` | `rerequested` | A check-run re-run request triggers a re-run; other actions are skipped. |
+| `issue_comment` | `created` on a PR | A PR conversation comment command is handled; non-PR comments are skipped. **Opt-in**: GitHub only delivers this when the App has the Issues permission and subscribes to the event, which the manifest does not do by default. |
+| `check_run` | `rerequested` | The per-check **Re-run** button re-runs that build configuration; other actions are skipped. |
+| `check_suite` | `rerequested` | **Re-run all checks** re-runs every opted-in configuration at that commit (only the failed ones with `rerunAll.onlyFailed`). |
 | `ping` | always | Replies `pong`. |
 
 Recognised-but-skipped events still return `200 OK`; unsupported
@@ -193,7 +194,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/info
   "secretConfigured": true,
   "logFile": "/data/teamcity_server/datadir/logs/teamcity-github-bridge.log",
   "logConfigured": true,
-  "pluginVersion": "1.10.0",
+  "pluginVersion": "1.11.0",
   "teamcityVersion": "TeamCity 2026.1 (build 222521)"
 }
 ```
@@ -277,7 +278,7 @@ curl https://<TC_HOST>/app/teamcity-github-bridge/health
 ```json
 {
   "status": "ok",
-  "pluginVersion": "1.10.0",
+  "pluginVersion": "1.11.0",
   "secretConfigured": true,
   "logConfigured": true,
   "dryRun": false,
@@ -403,7 +404,7 @@ curl -H "Authorization: Bearer $BRIDGE_API_TOKEN" \
 
 ```json
 {
-  "pluginVersion": "1.10.0",
+  "pluginVersion": "1.11.0",
   "secretConfigured": true,
   "dryRun": false,
   "replayProtection": true,
@@ -570,21 +571,19 @@ Navigate to it via `Administration -> Server Administration ->
 GitHub Bridge` in the sidebar (the page is grouped under
 `SERVER_RELATED_GROUP`).
 
-The page shows:
+The page is split into tabs (1.11.0+):
 
-- Plugin and TC versions.
-- Webhook URL, with the secret and dedicated-log configuration
-  status (red / yellow / green chips).
-- Last 100 webhook deliveries in memory (event, action, repository,
-  HTTP status, outcome, detail). Cleared on server restart; the
-  dedicated log is the long-term record.
-- A copy-paste card with the GitHub App webhook quick-config.
-- A **GitHub App** card to create a managed App via the manifest flow
-  (or, once created, verify its live permissions/events and deep-link to
-  its GitHub settings/installation pages). See
-  [GET /app-callback](#get-app-callback).
-- A Help section linking to every page under `doc/` on GitHub plus
-  a "Common 401 / 404 troubleshooting" fold.
+| Tab | Shows |
+|---|---|
+| **Overview** | Getting started, plugin and TeamCity versions, webhook / secret / dedicated-log status chips, the **Run self-tests** button and its results ([Self-tests](#self-tests)). |
+| **GitHub App** | Create a managed App via the manifest flow, or — once created — **Verify App configuration** and deep-links to its GitHub settings and installations. See [GET /app-callback](#get-app-callback). |
+| **Webhook** | The HMAC secret form and the copy-paste webhook quick-config (payload URL, content type, events). |
+| **Server settings** | The tuning settings and feature flags form ([configuration.md §2](configuration.md#2-server-wide-settings-flags-and-secrets)). |
+| **External API** | The bearer-token form enabling `/api/*`. |
+| **Activity** | The last 100 webhook deliveries in memory (event, action, repository, HTTP status, outcome, detail); cleared on restart, the dedicated log is the long-term record. |
+| **Help** | Links to every page under `doc/` and short troubleshooting tips. |
+
+Each section carries a (?) icon linking to its documentation.
 
 Access is gated by TeamCity's standard admin auth - the JSP is
 served from inside `AdminPage`, which inherits TC's admin
@@ -656,20 +655,23 @@ render then cleared from the session.
 
 ### Self-tests
 
-The button runs the full self-test battery (`PluginSelfTester`)
-against the live plugin. The fixed checks are:
+The button (admin page, tab **Overview**) runs the full self-test battery
+(`PluginSelfTester`) against the live plugin, in this order:
 
-1. **Webhook secret configured** - is `teamcity.github.bridge.webhook.secret` set anywhere.
+1. **Webhook secret** - is `teamcity.github.bridge.webhook.secret` set anywhere.
 2. **Dedicated log file** - has `PluginLogConfigurator` attached the appender, or has an operator wired one manually.
-3. **GitHub API reachable** - `GET https://api.github.com/zen` without auth.
+3. **GitHub API reachable** - `GET <apiBase>/zen` without auth; any response under 500 means the host is reachable.
 4. **HMAC roundtrip** - sign a known payload with the configured secret, verify with `SignatureVerifier`.
 5. **Webhook self-delivery** - HMAC-signed POST to our own webhook URL; expects `200 pong`.
-6. **Token resolution / `<project>` / `<repo>`** - one row per opted-in buildType project; uses `TokenResolver.resolveAccessToken`.
+6. **Token resolution / `<project>` / `<repo>`** - one row per opted-in project; uses `TokenResolver.resolveAccessToken`.
 7. **GitHub API auth / `<project>` / `<repo>`** - one row per project that produced a token; `GET /rate_limit` with the token.
-8. **Single status publisher** - lists the opted-in build configurations that also carry TeamCity's bundled *Commit status publisher*, since two producers mean two competing rows per build on GitHub. `WARN`, never `FAIL`: the plugin works, the reporting is ambiguous, and correcting it belongs to the operator.
-9. **Draft setting along composite chains** - lists the composites that run on drafts (`triggerOnPrDraft` on) while an opted-in configuration in their snapshot chain, walked transitively, skips them: the composite builds that dependency on every draft push anyway, and its `Skipped: draft PR` row never appears. `WARN`, never `FAIL`: it may be deliberate.
-10. **Required checks / `<repo>`** - one row per repository with a token: the check names required on the default branch and on every protected branch (rulesets, and classic protection when the App has `administration: read`), compared with the names the bridge posts there. `WARN` lists the required names nothing posts — a pull request waits on them for ever unless another system posts them; the detail also names the posted checks no branch requires. `SKIP` when the App can read neither source.
-11. **Unique check names** - lists the Check Run names that several publishing build configurations post to the same repository (a copied `checkName`, or a `checkName.stripPrefix` that leaves two names equal): they overwrite each other's row on every shared commit. `WARN`.
+8. **Required checks / `<repo>`** (1.11.0+) - one row per repository with a token: the check names required on the default branch and on every protected branch (first 20) — rulesets, and classic protection when the App has **Administration: read** — compared with the names the bridge posts there. `WARN` lists the required names nothing posts (a pull request waits on them for ever, unless another system posts them); the detail also names posted checks no branch requires. `SKIP` when the App can read neither source.
+9. **Single status publisher** - opted-in build configurations that also carry TeamCity's bundled *Commit status publisher* (two competing rows per build on GitHub).
+10. **Draft setting along composite chains** (1.11.0+) - composites that run on drafts while an opted-in configuration in their snapshot chain, walked transitively, skips them: the composite builds that dependency on every draft push anyway, and its `Skipped: draft PR` row never appears.
+11. **Unique check names** (1.11.0+) - Check Run names that several publishing configurations post to the same repository (a copied `checkName`, or a `checkName.stripPrefix` leaving two names equal): they overwrite each other's row on every shared commit.
+
+Configuration checks (8–11) report `WARN`, never `FAIL`: the plugin works,
+and what to change is the operator's call.
 
 Each test reports `PASS` / `WARN` / `FAIL` / `SKIP` with a free-form
 detail string.
@@ -688,8 +690,8 @@ the old one.
 
 ## Discoverability
 
-The webhook configuration is surfaced on the admin "GitHub Bridge"
-tab, which also manages the HMAC secret, plugin settings, and the
+The webhook configuration is surfaced on the admin page's **Webhook** tab;
+the same page manages the HMAC secret, the server settings and the
 external-API token. The `/health`, `/metrics`, and `/api/*`
 endpoints are documented here.
 

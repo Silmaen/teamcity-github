@@ -13,7 +13,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TeamCity](https://img.shields.io/badge/TeamCity-2026.1%2B-success.svg)](https://www.jetbrains.com/teamcity/)
 [![Build](https://img.shields.io/badge/build-Docker--only-blue.svg)](doc/development.md)
-[![Version](https://img.shields.io/badge/version-1.10.0-blue.svg)](#status)
+[![Version](https://img.shields.io/badge/version-1.11.0-blue.svg)](#status)
 [![Status](https://img.shields.io/badge/status-stable-success.svg)](#status)
 
 ---
@@ -68,168 +68,68 @@ flowchart LR
 
 Concretely:
 
-- **Suppresses automatic builds for draft PRs** (per-buildType opt-in -
-  paused configs are untouched): the queued build is removed and a
-  "Skipped: draft PR" Check Run explains why. An explicit request - a Run
-  from the TC UI, a comment command, a Re-run button - always goes through,
-  and the bridge never removes a build it did not enqueue itself.
-- **Tags every opted-in PR build with `draft` / `ready`** the moment
-  it hits the queue (`PrPromotionTagger`) so the queue UI shows at a
-  glance which builds are deliberately held versus agent-starved.
-- **Publishes a GitHub Check Run at every lifecycle transition** —
-  `queued` when the build enters the TC queue, `in_progress` on
-  start, `cancelled` on `buildInterrupted` /
-  `buildRemovedFromQueue`, `success`/`failure`/`cancelled` on
-  `buildFinished`, and `skipped` for draft-held builds. Each Check
-  Run carries a `details_url` that jumps directly to the build page
-  in TC. Propagates the build's `statusDescriptor.text` into
-  GitHub's PR UI instead of the hard-coded
-  `"TeamCity build finished"` from the bundled publisher, and reports
-  where the build's time went and what its tests did.
-- **Personal builds publish nothing** - they verify a patch that is not
-  in the repository, so no Check Run may describe the commit. They still
-  get the PR parameters and tags.
-- **Listens for `pull_request.ready_for_review`** and enqueues every
-  matching build configuration. No more "merged with stale green
-  checks".
-- **One webhook URL for the whole GitHub App** instead of one per
-  repository. HMAC-SHA256 verification is mandatory and fail-closed.
-- **`/info` endpoint** that returns the live webhook configuration
-  (URL, recommended events, secret status, log path) as JSON or
-  Markdown. Paste-ready into GitHub's App settings.
-- **Native admin page** at `Administration -> Server Administration
-  -> GitHub Bridge` showing plugin status, recent events, and help
-  links.
-- **Dedicated log file** at `<TC_DATA_DIR>/logs/teamcity-github-bridge.log`
-  via a shipped log4j snippet.
-- **Visual pill rendering** of the `draft` / `ready` tags in TC
-  build lists (client-side CSS via a `SimplePageExtension`).
-- **Forward-compatible with the new stateless `ghs_*` token format**
-  - tokens are treated as opaque end-to-end.
-- **Self-mints its own installation tokens** from the App's private
-  key (signed JWT + `POST /app/installations/{id}/access_tokens`),
-  so the plugin works on a vanilla TeamCity 2026.1 sandbox without
-  any prior interaction with TC's connection cache.
+**Triggering — what should run**
 
-### Newest first (1.10.0)
+- Enqueues the matching build configurations on `ready_for_review`, every
+  push, reopen, label or edit, an approval (`runOnApproval`), a PR comment
+  phrase (`commentTrigger`, trusted commenters only) and GitHub's **Re-run** /
+  **Re-run all checks** buttons.
+- Per-build-configuration gates: branches, ready and draft PRs (drafts are
+  opt-in), branch lists, changed paths (monorepo), PR title/body phrases and
+  labels.
+- Builds a PR on its own head branch instead of `pull/N` if you want readable
+  branch names and one build per push.
 
-- **The Check Run says where the build's time went** - total, working time, and
-  the wait split between its dependencies and a free agent.
-- **And what the tests did** - the counts in the title GitHub shows in the merge
-  box, the failing tests in the body, new failures first, muted ones apart.
-- **A "Pull request" tab on the build page** - what this build is judging
-  (number, title, author, draft/ready, labels, both branches, head commit, size
-  of the change), a link to it on GitHub, and the files it changes.
-- **Eight more published parameters** - the PR's `url`, `baseSha`, `mergeBase`,
-  `changedFiles`, `additions`, `deletions`, `commits` and `labels`, so a
-  diff-scoped build step can compute the pull request's own change
-  (`mergeBase..headSha`) instead of guessing the range.
-- **Personal builds report nothing**, and stay out of the queue dedup, while
-  still getting their PR parameters and tags.
-- **A running build whose result has nowhere to go is stopped** - a new push
-  cancels the builds still running on the PR's previous head, and closing or
-  merging a PR cancels the ones still running for it. An agent stops producing a
-  verdict nobody will read. Never a personal build, never one started by hand,
-  and on a push never the last one in flight for that branch.
-- **An infrastructure failure is named** - a lost checkout, an unresolvable
-  artifact dependency or a runner that could not start says so in the Check Run
-  title ("Infrastructure failure: Unable to collect changes") instead of looking
-  like a failing test. A failed snapshot dependency is named too. It still
-  concludes `failure` and still blocks the merge: telling "our CI broke" from
-  "your code is broken" is a subtle call, and unblocking a merge on a wrong guess
-  would let an unverified commit through. Turn on `checkRun.infraNeutral` to
-  conclude `neutral` instead, once you trust the classification on your builds.
-- **Diff annotations have a veto at every level** - the server, any project in
-  the chain, and each build configuration can switch them off, and one "no"
-  anywhere wins. They are the only thing the bridge writes on a reviewer's diff.
+**Suppression — what should not**
 
-### Previous release (1.9.0)
+- Drops automatic builds that a gate excludes and says so with a
+  *"Skipped: …"* Check Run; an explicit Run, comment or Re-run always goes
+  through, and the bridge never removes a build it did not enqueue.
+- Reuses a commit that already passed (`skipIfCommitPassed`).
+- Stops running builds whose verdict has nowhere to go — the previous head
+  after a push (reported *"Superseded by …"*, `skipped`), a closed or merged
+  PR — never a personal build or one started by hand.
 
-- **Build pull requests on their own branch** - a per-project switch makes PR
-  builds run on the PR's head branch (`Feature/toto`) instead of the synthetic
-  `pull/N` ref: readable branch names everywhere in TeamCity, and a push
-  builds *once* instead of twice once a PR exists.
-- **A "Branches & PRs" project tab** - one list of the bridge's builds, each
-  row carrying both keys (branch **and** PR number), searchable by either
-  (`Feature/`, `189`, `#189`) and sortable by time, branch or PR.
-- **Compiler diagnostics annotated on the diff** - errors and warnings from
-  the build problems TeamCity reports are pinned to their file and line in the
-  pull request (clang/gcc and MSVC shapes).
-- **Artifact links from the pull request** - the completed Check Run lists the
-  build's artifacts, so a reviewer or a tester reaches the installer without
-  opening TeamCity.
-- **The re-run buttons work** - the per-check **Re-run**
-  (`check_run.rerequested`) and, where GitHub offers it, the suite-level
-  **Re-run all checks** (`check_suite.rerequested`) - including re-running a
-  *skipped* row, with an
-  option to restrict it to the checks that failed.
-- **Publication is one switch, independent of what triggered the build** - a
-  build configuration reports to GitHub, or it does not; a PR event, a VCS
-  trigger, a schedule, a manual Run and a comment command are all treated the
-  same.
-- **Reuse a commit that already passed** - an automatic build queued for a
-  commit that already went green is dropped and the earlier success is
-  republished, instead of spending an agent to reproduce a known result.
-- **Pull requests from forks are ignored** - the bridge is attached to one
-  repository, never to its forks.
-- **Warns when two status publishers report the same build** - carrying both
-  this feature and TeamCity's bundled *Commit status publisher* means two
-  competing rows per build; the plugin says so at startup and in its
-  self-tests, and never disables anything behind your back.
+**Reporting — back to GitHub**
 
-### Earlier releases (1.7.0 / 1.8.0)
+- One Check Run per build configuration, through every lifecycle step: queued
+  (with position and estimated start), in progress, and a conclusion carrying
+  the build's real status text, its timings, its test outcome (new failures
+  first), artifact links and compiler diagnostics annotated on the diff.
+- Names infrastructure failures as such, and optionally lets them not block
+  the merge (`checkRun.infraNeutral`).
+- Keeps rows honest: a green row never flips back to *Queued* for a chain
+  duplicate, and a row left open by a restart or a missed event is concluded
+  on its own.
+- A stable check name per build configuration (`checkName`), and self-tests
+  that warn when a required check can never arrive or two configurations
+  post the same name.
+- Personal builds publish nothing.
 
-- **Builds launched on a branch report into its PR** - run a
-  configuration on `Feature/x` itself instead of the `pull/N` ref and it
-  still lands in the pull request: the Check Run is posted on the built
-  commit (same name as the PR build, so it satisfies the same required
-  check), and the PR parameters, the `draft`/`ready` tag and the summary
-  comment come from the open PR whose head is that commit.
-- **Trigger or skip builds from PR metadata** - per-build-configuration
-  filters on the pull request's **title**, **description** and **labels**:
-  a require-phrase, a skip-phrase (e.g. `[skip ci]`), and a label filter
-  (`+:ci` / `-:no-ci`). Manual runs bypass them; excluded auto triggers get
-  a "Skipped: PR metadata out of scope" Check Run.
-- **One-click managed GitHub App** - create a pre-configured GitHub App
-  straight from the admin page (GitHub's manifest flow): the webhook URL,
-  permissions and events are filled in for you and the credentials are
-  stored automatically. A **Verify** button checks the live App against
-  what the plugin needs. Point a project at it with `connectionId=managed`
-  — no TeamCity OAuth connection or `.pem` handling required.
-- **In-product configuration pages** - no more editing files by
-  hand. A per-project **GitHub Bridge** settings tab lets project
-  admins tune behaviour for their project, and the server admin page
-  edits the server-level settings and feature flags live, with every
-  change applied immediately (no restart).
-- **HTTP retry + GitHub rate-limit handling** - transient failures
-  are retried, and the client honours GitHub's `Retry-After` /
-  rate-limit headers so it backs off instead of hammering the API.
-- **Webhook replay protection** - duplicate deliveries are detected
-  and dropped by deduplicating on the `X-GitHub-Delivery` id.
-- **`/health` and `/metrics` endpoints** - a JSON `/health` probe
-  for liveness checks and a Prometheus-format `/metrics` endpoint
-  for scraping.
-- **Cancels still-queued builds on `pull_request.closed`/merged** -
-  when a PR is closed or merged, any of its builds still sitting in
-  the queue are removed instead of wasting agent time.
-- **Monorepo path filtering** - a per-buildType `pathFilter` so a
-  build only fires when the PR touches paths it cares about.
-- **Run-on-approval and re-run from the GitHub Checks UI** -
-  `pull_request_review` can gate builds on approval, and the
-  **Re-run** button on a GitHub Check Run (`check_run` `rerequested`)
-  re-enqueues the build.
-- **Trigger builds from PR comments** - posting a configurable
-  phrase as a `pull_request_review_comment` (inline diff comment)
-  enqueues builds, restricted to trusted commenters (repo
-  collaborators by default).- **Repo allowlist and dry-run mode** - scope the plugin to an
-  explicit set of repositories, and a dry-run mode that logs what
-  it *would* do without enqueuing or posting anything.
-- **Authenticated external HTTP API** - a bearer-token API under
-  `/app/teamcity-github-bridge/api/` exposing status, events and
-  metrics, and able to trigger builds programmatically.
-- **Legacy `teamcity.pullRequest.*` parameter aliases** (opt-in) -
-  exposes the PR metadata under the bundled parameter names for DSL
-  that already relies on them.
+**Pull requests — opt-in writes**
+
+- Assigns a new, unassigned pull request to its author.
+- Labels pull requests by rules: changed paths, author or team, branches,
+  title. Labels are only added, and one removed by hand stays removed.
+
+**Inside TeamCity**
+
+- `draft` / `ready` pills and `pr-N` tags on builds, a **Branches & PRs**
+  project tab, a **Pull request** tab on every PR build, and 16
+  `teamcity.github.bridge.*` build parameters (number, title, author,
+  branches, merge base, changed files, …).
+
+**Operations**
+
+- One App-level webhook with mandatory, fail-closed HMAC-SHA256 verification
+  and replay protection; self-minted installation tokens; a one-click
+  **managed GitHub App**.
+- In-product configuration (server, project, build feature), a self-test
+  battery, `/info`, `/health`, `/metrics`, an authenticated external API, a
+  dedicated log, dry-run and a repository allowlist.
+
+What changed in each release is in [CHANGELOG.md](CHANGELOG.md); what is
+planned, in [doc/roadmap.md](doc/roadmap.md).
 
 ## Quick start
 
@@ -250,8 +150,8 @@ cp target/teamcity-github-bridge-*.zip <TC_DATA_DIR>/plugins/
 
 Then, in the product:
 
-1. **Administration → GitHub Bridge → Create GitHub App**, and install it.
-2. **Administration → \<project\> → GitHub Bridge**: set the repository and `connectionId=managed`.
+1. **Administration → GitHub Bridge**, tab **GitHub App** → **Create GitHub App**, and install it.
+2. **Administration → \<project\> → GitHub Bridge**, tab **Repository**: set the repository and `connectionId=managed`.
 3. Add the **GitHub Bridge integration** build feature to a build configuration.
 
 Prefer to wire an existing App by hand? See
@@ -357,16 +257,13 @@ The [doc/ index](doc/README.md) maps every page to a task.
 
 ## Status
 
-**Stable**. Current version is **1.10.0**.
-434 unit tests pass.
+**Stable**. Current version is **1.11.0**.
 The plugin has been installed end-to-end against both vanilla
-github.com and a live GitHub Enterprise (`github.example.com`)
-TeamCity 2026.1 server. The in-product self-test battery
-validates webhook delivery, HMAC verification, token issuance
-(via the plugin's own self-mint path) and the GitHub REST
-round-trip - the whole battery passes on a correctly-configured
-installation. (Its size depends on how many projects are opted in,
-since token resolution and API auth are checked per project.)
+github.com and a live GitHub Enterprise TeamCity 2026.1 server. The
+in-product self-test battery validates webhook delivery, HMAC
+verification, token issuance (via the plugin's own self-mint path), the
+GitHub REST round-trip and the configuration itself — the whole battery
+passes on a correctly-configured installation.
 
 The public API surface (the `teamcity.github.bridge.*` namespace,
 the `/app/teamcity-github-bridge/*` endpoints, the
@@ -374,9 +271,8 @@ the `/app/teamcity-github-bridge/*` endpoints, the
 may add fields and endpoints; they will not rename or remove what
 already exists.
 
-See [CHANGELOG.md](CHANGELOG.md) for the per-version change log.
-See [doc/roadmap.md](doc/roadmap.md) for what is planned next, and the
-[CHANGELOG](CHANGELOG.md) for what already shipped.
+See [CHANGELOG.md](CHANGELOG.md) for what shipped and
+[doc/roadmap.md](doc/roadmap.md) for what is planned.
 
 ## License
 

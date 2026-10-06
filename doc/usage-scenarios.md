@@ -390,7 +390,7 @@ What appears on the PR:
 
 | State | GitHub UI shows |
 |---|---|
-| Queued | `TeamCity / <buildType full name>` with status "Expected" + clock icon, title "Queued". `details_url` points at the TC queue. |
+| Queued | `TeamCity / <buildType full name>` with status "Expected" + clock icon, title "Queued", summary where the build stands ("26th in queue, ~4m to start — <wait reason>", when TeamCity has an estimate; refreshed once, 1.11.0+). `details_url` points at the TC queue. |
 | In progress | Same row transitions to "In progress", title "Building". `details_url` points at the TC build page. |
 | Interrupted (user stops it) | Check Run "Build cancelled", conclusion `cancelled`. Posted early so the row never gets stuck at "In progress" if `buildFinished` doesn't enchain. |
 | Cancelled in queue (user removes it) | Check Run "Cancelled before start", conclusion `cancelled`. Only fires for user-initiated removals (the draft-suppression cleaner is silent so its `Skipped` row stays). |
@@ -399,6 +399,7 @@ What appears on the PR:
 | Failure, but CI's fault | Check Run "Infrastructure failure: `<cause>`" — the cause is named in the title; the conclusion stays `failure` unless `checkRun.infraNeutral` is on (v1.10.0+) — see below |
 | Failure of a snapshot dependency | Check Run "Build failed: Snapshot dependency failure", conclusion `failure` — named, but still red |
 | Cancelled (finished) | Check Run "Build cancelled" (any underlying status, when `isInterrupted` is true) |
+| Stopped by the bridge after a push (1.11.0+) | Check Run "Superseded by `<short sha>`", conclusion `skipped` — grey, not a red cancellation |
 
 Every Check Run carries a `details_url` so the "Details" link from
 the GitHub Checks tab jumps directly to the relevant TC page
@@ -468,58 +469,32 @@ that tells them at a glance whether the plugin is healthy.
 Navigation: `Administration -> Server Administration -> GitHub
 Bridge`.
 
-The page is one column of cards, in this order:
+The page is split into tabs, each section with a (?) icon pointing to its
+documentation (1.11.0+):
 
-1. **Getting started** — the four steps: create and install the GitHub App
-   (card below), point a project at it (`repo` + `connectionId=managed`), add
-   the *GitHub Bridge integration* build feature, then verify the App
-   configuration, run the self-tests and open a PR.
-2. **Plugin status** — plugin version, TeamCity version, the webhook URL to
-   paste into GitHub, whether the HMAC secret is configured (with
-   *Set/Replace* and *Clear*), whether the dedicated log is configured, and
-   the config snapshot links (JSON / Markdown).
-3. **GitHub App** — *Create GitHub App* (the manifest comes pre-filled with
-   the webhook URL, the permissions and the events). Once configured: the
-   managed App slug, *Open settings*, *Install / manage installations*, the
-   reminder that `connectionId=managed`, and *Verify App configuration*
-   (`GET /app`, diffs the live permissions and subscribed events against
-   what the plugin needs).
-4. **Server settings** — applied immediately, no restart:
-   - API base override, API version, PR-info cache TTL, stale grace,
-     HTTP retry attempts and base delay.
-   - Feature flags: webhook replay protection, dry-run, metrics endpoint,
-     legacy `teamcity.pullRequest.*` aliases,
-     attach branch builds to their PR, "Re-run all checks" re-runs only the
-     failed ones, list artifacts in the Check Run, annotate
-     the diff with compiler diagnostics, **queue cleanup** (the server-wide
-     off switch), and tag PR builds with their PR number.
-   - Repository allowlist and comment-trigger authors.
-5. **External API** — enabled/disabled, plus the API token form
-   (*Set* / *Disable*).
-6. **Self-tests** — the *Run self-tests* button (scenario 11.b).
-7. **Recent events** — the last N deliveries held in memory, e.g.
+1. **Overview** — *Getting started* (create and install the GitHub App, point a
+   project at it with `repo` + `connectionId=managed`, add the *GitHub Bridge
+   integration* build feature, verify), *Plugin status* (plugin and TeamCity
+   versions, webhook / secret / dedicated-log chips, the config snapshot
+   links), and the **Run self-tests** button with its results (scenario 11.b).
+2. **GitHub App** — *Create GitHub App* (manifest pre-filled with the webhook
+   URL, permissions and events); once configured, the App slug, *Open
+   settings*, *Install / manage installations* and **Verify App
+   configuration** (`GET /app`, diffing the live permissions and events
+   against what the plugin needs).
+3. **Webhook** — the HMAC secret form (*Set / Replace*, *Clear*) and the
+   paste-ready quick-config for the App's webhook page.
+4. **Server settings** — tuning values and feature flags, applied immediately
+   ([configuration.md §2](configuration.md#2-server-wide-settings-flags-and-secrets)).
+5. **External API** — enabled/disabled and the API token form.
+6. **Activity** — the last N deliveries held in memory, e.g.
    `2026-05-25 14:02:30  pull_request  ready_for_review  acme/widget  200
-   accepted`. The full history is in the dedicated log.
-8. **GitHub App webhook quick-config** — a paste-ready table for the App's
-   webhook page.
-9. **Help & documentation** — what the plugin does, links to the README and
-   every page of `doc/`, and a fold with the common 401 / 404 causes.
+   accepted`.
+7. **Help** — links to every page of `doc/` and the common 401 / 404 causes.
 
-The page is organised top-to-bottom as: a **Getting started** card
-(the four-step opt-in), **Plugin status**, a **GitHub App** card
-(one-click create from a pre-filled manifest, deep links to the App's
-settings / installations on GitHub, and a **Verify App configuration**
-button that calls `GET /app` and diffs the App's live permissions and
-subscribed events against what the plugin needs), an editable **Server
-settings** form (tuning + feature-flag checkboxes, saved to the
-plugin properties file and applied without a restart), the **External
-API** token form, the **Run self-tests** button, and the **Recent
-events** table.
-
-The "Recent events" table is in-memory only (ring buffer cleared on
-TC restart). The dedicated log file is the long-term audit. If you do
-not see any events after a webhook delivery, recheck signature and URL
-with the troubleshooting fold on the same page.
+The **Activity** table is in-memory only (ring buffer cleared on TC
+restart); the dedicated log file is the long-term audit. If no event shows
+after a webhook delivery, recheck signature and URL with the **Help** tab.
 
 The **HMAC secret form** sets or rotates the webhook secret (CSRF
 protected, writes to
@@ -556,16 +531,19 @@ sequenceDiagram
     par for each opted-in (project, repo)
         T->>TR: resolveAccessToken(project, conn)
         T->>GH: GET /rate_limit (Bearer)
+        T->>GH: branch protection + rulesets
     end
+    T->>T: configuration checks (publishers, draft chains, check names)
     T-->>Ctl: List<TestResult>
     Ctl->>Ctl: session.setAttribute(results)
     Ctl-->>UI: 302 redirect ?bridgeResult=tested
     UI->>Admin: render PASS/WARN/FAIL/SKIP table
 ```
 
-The test categories (config checks, GitHub reachability, HMAC
-roundtrip, webhook self-delivery, and per-project token resolution)
-are described in [api-reference.md](api-reference.md#self-tests).
+Every test — reachability, HMAC, self-delivery, per-project token and API
+auth, and the configuration checks (required checks, status publishers, draft
+chains, check-name collisions) — is described in
+[api-reference.md](api-reference.md#self-tests).
 
 Typical reading:
 - All PASS: the plugin is healthy. Webhooks will land, tokens will
@@ -1180,7 +1158,7 @@ the head commit in the *Commits* section is the answer.
 | User clicks "Run" on a draft PR (or comments the trigger phrase) | An explicit request bypasses the draft rule and the soft filters, and is never removed from the queue (1.9.0+) | Build actually runs, and reports |
 | Reverted to draft | None | In-flight builds continue, new ones held |
 | API error during draft check | Logged warning | Build allowed (fail-open) |
-| Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible in admin page recent events |
+| Missing webhook secret | Webhook rejected 401 | No retrigger; warning logged; visible on the admin page's **Activity** tab |
 | Build type not opted in | None | No change |
 | Build configuration with `publishChecks` off | Nothing published, whatever the trigger | Invisible on GitHub; PR parameters and tags still applied |
 | Personal build triggered on a PR ref (1.10.0+) | Every publisher hook returns immediately (`promotion.isPersonal`); dedup and cleanup skip it | Nothing published at any stage — the patch is not in the repository, so no row may describe the commit. Outside the queue dedup both ways: it never blocks the real build, is never reused as a passed commit, is never removed from the queue. It **does** get the PR parameters and the `pr-N` / `draft`/`ready` tags |
@@ -1191,7 +1169,11 @@ the head commit in the *Commits* section is the answer.
 | PR touches only out-of-scope paths | `applyPathFilter` drops the BT, posts Skipped | GitHub PR shows "Skipped: paths out of scope" |
 | PR title/body/labels out of scope (`requirePhrase`/`skipPhrase`/`labelFilter`) | `BridgeGate` returns `SUPPRESS_METADATA`, posts Skipped (auto only) | GitHub PR shows "Skipped: PR metadata out of scope"; manual Run bypasses |
 | PR closed / merged | `cancelBuildsForClosedPr` removes queued builds and stops running ones | Queue drained, running builds cancelled; nothing keeps reporting into a dead PR |
-| New commit pushed to a PR | The builds running on the previous head are stopped once their replacement is in flight | One build per branch, on the commit that matters |
+| New commit pushed to a PR | The builds running on the previous head are stopped once their replacement is in flight | One build per branch, on the commit that matters; the old head's row reads "Superseded by …" (`skipped`, 1.11.0+) |
+| Composite re-queues a dependency that already passed on that commit (1.11.0+) | No "Queued" posted for that chain member; the chain reuses the finished build | The green row stays green |
+| Server restarted mid-build, or a conclusion event missed (1.11.0+) | Open rows reconciled ~3 min after startup, then every 10 min | The row gets the conclusion TeamCity now knows |
+| PR opened with nobody assigned, `autoAssignAuthor` on (1.11.0+) | `POST /issues/{n}/assignees` with the author | Assigned to its author (never a bot, never over an existing assignee) |
+| PR opened / pushed / edited, `labelRules` set (1.11.0+) | Matching labels added | Labels appear; one removed by hand is not put back |
 | PR from a fork | Event dropped (logged, `fork_events_ignored`) | Nothing runs — the bridge serves one repository, never its forks |
 | Trigger phrase / approval / re-run on a build the filters excluded | Enqueued as an explicit **command**: the scope filters are bypassed and nothing removes it afterwards | The build actually runs (no "Skipped" row comes back to undo it) |
 | "Re-run all checks" clicked | `handleRerunAll` enqueues every opted-in BT for that head (optionally only the failed ones) | Whole check set re-runs |
@@ -1201,7 +1183,7 @@ the head commit in the *Commits* section is the answer.
 | PR reopened | Treated like `opened` | Full check set runs again |
 | Opted-in BT also carrying the bundled publisher | `WARN` at startup + a **Single status publisher** self-test row | The operator is told; nothing is disabled for them |
 | External API trigger | `triggerBuild` via `/api/trigger` | Build enqueued (or dry-run no-op) |
-| Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds/Check Runs/comments; log shows intent |
+| Dry-run enabled | Every mutation logged `[dry-run]`, none performed | No builds, Check Runs, assignments or labels; log shows intent |
 
 ## See also
 
