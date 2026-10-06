@@ -20,7 +20,7 @@ configuration is **opted in**, which today means two things (see
 Draft handling is **per build feature**, not a project parameter. The
 old `teamcity.github.bridge.ignoreDrafts` opt-in parameter no longer
 exists. Instead the feature exposes a `triggerOnPrDraft` checkbox
-(default **on** = build drafts too). When it is **off**, draft PR
+(default **off**; check it to build drafts too). When it is **off**, draft PR
 builds are suppressed; see Scenario 1.
 
 > The scenarios below split the PR lifecycle into draft-opened,
@@ -49,8 +49,8 @@ a build configuration whose GitHub Bridge feature has
 **Expected outcome**: any build TC's VCS trigger enqueues for the
 draft is **removed from the queue** by `DraftBuildQueueCleaner`, and a
 **"Skipped: draft PR"** Check Run is posted on the PR. No compute is
-consumed and the queue stays clean. (If `triggerOnPrDraft` were left
-at its default **on**, the draft would build normally.)
+consumed and the queue stays clean. (If `triggerOnPrDraft` were
+checked, the draft would build normally.)
 
 ```mermaid
 sequenceDiagram

@@ -27,10 +27,10 @@ class BridgeFeatureConfigTest {
         // Branch lists default to empty = match all
         assertTrue(c.branchTriggerBranches.isEmpty())
         assertTrue(c.prTriggerBranches.isEmpty())
-        // BT-level HARD flags default to true
+        // BT-level HARD flags default to true, except drafts (opt-in)
         assertTrue(c.triggerOnBranch)
         assertTrue(c.triggerOnPrReady)
-        assertTrue(c.triggerOnPrDraft)
+        assertFalse(c.triggerOnPrDraft)
     }
 
     @Test
@@ -146,6 +146,25 @@ class BridgeFeatureConfigTest {
         assertFalse(c!!.triggerOnBranch)
         assertFalse(c.triggerOnPrReady)
         assertFalse(c.triggerOnPrDraft)
+    }
+
+    @Test
+    fun `drafts run only when the feature opts in`() {
+        val c = BridgeFeatureReader.fromInputs(
+            mandatoryProjectParams,
+            mapOf(GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_DRAFT to "true"),
+        )
+        assertNotNull(c)
+        assertTrue(c!!.triggerOnPrDraft)
+    }
+
+    @Test
+    fun `triggerOnPrDraft reads absent or garbled values as the default`() {
+        val read = { p: Map<String, String> -> GitHubBridgeBuildFeature.triggerOnPrDraft(p) }
+        assertFalse(read(emptyMap()))
+        assertFalse(read(mapOf(GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_DRAFT to "")))
+        assertFalse(read(mapOf(GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_DRAFT to "yes")))
+        assertTrue(read(mapOf(GitHubBridgeBuildFeature.PARAM_TRIGGER_ON_PR_DRAFT to "true")))
     }
 
     @Test

@@ -6,6 +6,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Draft pull requests are now opt-in**: `triggerOnPrDraft` defaults to off, so a configuration (above all a composite gate pulling its snapshot chain) no longer runs on every draft push and posts "Skipped: draft PR" instead. **Upgrade:** only a feature that never stored the parameter (typically Kotlin DSL) changes behaviour — set `triggerOnPrDraft=true` there to keep building drafts; one saved from the UI already holds its value.
+
 ### Fixed
 
 - A Check Run no longer stays "Queued" when queue optimization satisfies its build with one that already finished (a draft PR turned ready re-queues the composite's green dependencies): the finished build's outcome is posted again.

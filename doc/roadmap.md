@@ -65,29 +65,6 @@ after-the-fact republish as the safety net.
 **Effort.** Small to medium: the TeamCity-side lookup avoids a GitHub call per
 queued build but must mirror the chain's reuse rule exactly.
 
-## Draft pull requests off by default
-
-**Problem.** `triggerOnPrDraft` defaults to `true`. A configuration that does
-not set it runs on every draft push — and when that configuration is a
-composite gate, it pulls its whole snapshot chain in with it, whatever each
-dependency's own draft setting says. Owl and EvenementLoto both shipped
-without the parameter and ran their full matrix on drafts; the "Skipped:
-draft PR" rows, which reviewers rely on to see what was held back, never
-appear for them either, since they are posted only when the flag is `false`.
-
-**Feasible.** The default is spread over three reads of the parameter —
-`BridgeFeatureConfig` (`!= "false"`), `GitHubBridgeBuildFeature`'s default
-parameters and its description — which is itself worth folding into one
-constant. Changing it needs an upgrade note, since configurations relying on
-the implicit value change behaviour.
-
-**Design.** Either flip the default to `false` (a draft is "not ready yet";
-fast feedback is opted into per configuration), or keep it and add a
-self-test row on the admin page warning about every **composite** that runs
-on drafts with dependencies that do not. The warning is the safer first step.
-
-**Effort.** Small.
-
 ## A stable name for a required check
 
 **Problem.** A Check Run is named after the configuration's place in the
