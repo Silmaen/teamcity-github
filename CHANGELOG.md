@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The "Queued" row now says where the build stands — "26th in queue, ~4m to start — <TeamCity's wait reason>" — posted at enqueue and refreshed once if TeamCity had no estimate yet.
 - A **Required checks** self-test row per repository warns about every check a protected branch requires that no build configuration posts, which would leave pull requests waiting for ever.
 - A **Check name** (`checkName`) on the feature fixes a configuration's Check Run name, so moving it in the project tree no longer renames a required check; a **Unique check names** self-test warns when two configurations post the same name to one repository.
 - A **Draft setting along composite chains** self-test row warns about every composite that runs on drafts while a dependency in its chain skips them, since the composite builds that dependency anyway.

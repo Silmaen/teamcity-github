@@ -10,28 +10,6 @@ Items are ordered by value, best first. Each one states the problem, what
 is known to be feasible, and the effort. Pick one and ship it on its own
 branch.
 
-## Say where the build is in the queue
-
-**Problem.** The `queued` Check Run says "Queued" and nothing else. A
-reviewer watching a pull request cannot tell "the agents are busy, this is
-26th in line, four minutes out" from "this is stuck". TeamCity knows —
-its queue page says exactly that — and the pull request is where people
-are looking.
-
-**Feasible.** `SQueuedBuild#getBuildEstimates` carries the position and the
-estimated start; the queue page renders *"4m 12s to start: There are no idle
-compatible agents which can run this build"* and *"26th position in queue"*
-from it. The publisher already posts a `queued` Check Run, so this is a
-richer summary on a request that is already being made.
-
-**Design.** Summary line on the `queued` row: "26th in queue, ~4m to start
-— no idle compatible agent". Re-posted when the estimate changes materially
-would be noise; once, at enqueue, is enough.
-
-**Effort.** Small. Watch out for estimates being absent (a build with
-unresolved dependencies has none) and for the same "no compatible agent"
-wording problem `agentWaitHint` already fights.
-
 ## Target one build configuration from a PR comment
 
 **Problem.** The comment trigger is all-or-nothing: the phrase re-runs

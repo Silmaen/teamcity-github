@@ -33,6 +33,7 @@ import jetbrains.buildServer.serverSide.ServerPaths
 import jetbrains.buildServer.serverSide.SQueuedBuild
 import jetbrains.buildServer.serverSide.SRunningBuild
 import jetbrains.buildServer.serverSide.STestRun
+import jetbrains.buildServer.serverSide.TimePoint
 import jetbrains.buildServer.serverSide.artifacts.BuildArtifactsViewMode
 import jetbrains.buildServer.serverSide.WebLinks
 import jetbrains.buildServer.serverSide.executors.ExecutorServices
@@ -258,16 +259,59 @@ class BuildStatusCheckRunPublisher(
                 "#${passed?.buildNumber}, whose row stays as it is")
             return
         }
-        val request = CheckRunRequest(
-            name = checkRunName(ctx.buildType),
-            headSha = ctx.headSha,
-            status = CheckRunStatus.QUEUED,
-            conclusion = null,
-            outputTitle = "Queued",
-            outputSummary = "TeamCity has queued this build; waiting for a compatible agent.",
-            detailsUrl = safeUrl { webLinks.getQueuedBuildUrl(queuedBuild) },
-        )
-        if (post(ctx, request, "queued")) openRows.open(promotion.id, ctx.buildType.externalId, ctx.headSha)
+        val estimate = estimateOf(queuedBuild)
+        if (!post(ctx, queuedRequest(ctx, queuedBuild, estimate), "queued")) return
+        openRows.open(promotion.id, ctx.buildType.externalId, ctx.headSha)
+        // TeamCity computes estimates in the background, so at enqueue there is
+        // often none yet. One follow-up says where the build stands; more
+        // would be noise.
+        if (!QueueEstimate.hasEstimate(estimate.startInSeconds, estimate.waitReason)) {
+            executorServices.normalExecutorService.schedule(
+                Runnable {
+                    try {
+                        refreshQueuedEstimate(queuedBuild, ctx)
+                    } catch (e: Exception) {
+                        LOG.debug("Queued estimate refresh failed for ${ctx.buildType.externalId}: ${e.message}")
+                    }
+                },
+                QUEUED_ESTIMATE_DELAY_MS, TimeUnit.MILLISECONDS,
+            )
+        }
+    }
+
+    private data class Estimate(val position: Int?, val startInSeconds: Long?, val waitReason: String?)
+
+    // Each part read on its own: an estimate is best effort, never a reason
+    // not to post the row.
+    private fun estimateOf(queuedBuild: SQueuedBuild): Estimate {
+        val estimates = runCatching { queuedBuild.buildEstimates }.getOrNull()
+        val start = runCatching {
+            estimates?.timeInterval?.startPoint?.takeIf { it != TimePoint.NEVER }?.relativeSeconds
+        }.getOrNull()
+        val reason = runCatching { estimates?.waitReason?.description }.getOrNull()
+        return Estimate(runCatching { queuedBuild.orderNumber }.getOrNull(), start, reason)
+    }
+
+    private fun queuedRequest(ctx: PrBuildContext, queuedBuild: SQueuedBuild, estimate: Estimate) = CheckRunRequest(
+        name = checkRunName(ctx.buildType),
+        headSha = ctx.headSha,
+        status = CheckRunStatus.QUEUED,
+        conclusion = null,
+        outputTitle = "Queued",
+        outputSummary = QueueEstimate.summary(estimate.position, estimate.startInSeconds, estimate.waitReason),
+        detailsUrl = safeUrl { webLinks.getQueuedBuildUrl(queuedBuild) },
+    )
+
+    // The follow-up: only while the build is still waiting, and only when there
+    // is now something to say. Same guards as the first post — a late "Queued"
+    // must never overwrite the row a started build owns.
+    private fun refreshQueuedEstimate(queuedBuild: SQueuedBuild, ctx: PrBuildContext) {
+        val promotion = queuedBuild.buildPromotion
+        if (promotion.associatedBuild != null || promotion.queuedBuild == null) return
+        if (promotion.id in queuedRowWithheld) return
+        val estimate = estimateOf(queuedBuild)
+        if (!QueueEstimate.hasEstimate(estimate.startInSeconds, estimate.waitReason)) return
+        post(ctx, queuedRequest(ctx, queuedBuild, estimate), "queued/estimate")
     }
 
     // True iff `DraftBuildQueueCleaner` is about to remove this queued build,
@@ -951,6 +995,7 @@ class BuildStatusCheckRunPublisher(
         // still posts "in_progress" regardless.
         const val MAX_QUEUED_ATTEMPTS: Int = 8
         const val QUEUED_RETRY_DELAY_MS: Long = 750L
+        const val QUEUED_ESTIMATE_DELAY_MS: Long = 20_000L
 
         // The publication rule for personal builds, as a pure predicate:
         // they never report. Deliberately independent of `publishChecks`,

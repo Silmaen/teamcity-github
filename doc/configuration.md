@@ -770,7 +770,7 @@ through every state.
 
 | Event | Check Run `status` | Check Run `conclusion` | `output.title` |
 |---|---|---|---|
-| Build added to queue | `queued` | (none) | `Queued` |
+| Build added to queue | `queued` | (none) | `Queued` — summary: position, estimated start and TeamCity's wait reason, when known |
 | Held in draft queue | `completed` | `skipped` | `Skipped: draft PR` |
 | Build starts | `in_progress` | (none) | `Building` |
 | Build interrupted (early stop signal) | `completed` | `cancelled` | `Build cancelled` |
