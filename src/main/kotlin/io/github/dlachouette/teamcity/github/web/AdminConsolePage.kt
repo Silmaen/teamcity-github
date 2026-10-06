@@ -125,7 +125,9 @@ class AdminConsolePage(
         model["set_repoAllowlist"] = serverSettings.repoAllowlist().joinToString("\n")
         model["csrfToken"] = CSRFFilter.setSessionAttribute(request.getSession(true))
         model["csrfTokenName"] = CSRFFilter.ATTRIBUTE
-        resultBannerFor(request.getParameter("bridgeResult"))?.let { model["resultBanner"] = it }
+        val result = request.getParameter("bridgeResult")
+        resultBannerFor(result)?.let { model["resultBanner"] = it }
+        model["bridgeOpenTab"] = tabFor(result)
 
         // Pick up self-test results stashed by AdminTestController (PRG).
         val session = request.getSession(false)
@@ -146,19 +148,31 @@ class AdminConsolePage(
         }
     }
 
+    // The in-page tab an action redirects back to, so the result shows where
+    // the action was taken (`bridgeAdmin.jsp` opens it unless the URL names one).
+    private fun tabFor(code: String?): String = when (code) {
+        "saved", "cleared", "blank" -> "webhook"
+        "settingsSaved" -> "settings"
+        "apiTokenSaved", "apiTokenCleared" -> "api"
+        "tokensCleared", "appCreated", "appVerified", "appError" -> "app"
+        else -> "overview"
+    }
+
     private fun resultBannerFor(code: String?): Map<String, String>? = when (code) {
         "saved" -> mapOf("level" to "ok", "text" to "Webhook secret saved.")
         "cleared" -> mapOf("level" to "ok", "text" to "Webhook secret cleared. Until a new secret is set, every webhook delivery will be rejected with 401.")
         "blank" -> mapOf("level" to "warn", "text" to "Submitted secret was blank; nothing changed.")
         "tested" -> mapOf("level" to "ok", "text" to "Self-tests finished; results below.")
         "settingsSaved" -> mapOf("level" to "ok", "text" to "Server settings saved and applied (no restart needed).")
+        "apiTokenSaved" -> mapOf("level" to "ok", "text" to "API token saved: the external API is enabled.")
+        "apiTokenCleared" -> mapOf("level" to "ok", "text" to "API token cleared: the external API is disabled.")
         "tokensCleared" -> mapOf(
             "level" to "ok",
             "text" to "Cached installation tokens dropped. The next GitHub call mints a fresh one, " +
                 "with the App's current permissions. Re-run a build on a pull request to see the effect.",
         )
         "appCreated" -> mapOf("level" to "ok", "text" to "GitHub App created and its credentials stored. Install it on your org/repos, then set connectionId=managed on your build configurations.")
-        "appVerified" -> mapOf("level" to "ok", "text" to "GitHub App verification finished; see the GitHub App card below.")
+        "appVerified" -> mapOf("level" to "ok", "text" to "GitHub App verification finished; results below.")
         "appError" -> mapOf("level" to "bad", "text" to "GitHub App operation failed. Check the dedicated log for details.")
         "error" -> mapOf("level" to "bad", "text" to "Could not complete the operation. Check the dedicated log for details.")
         else -> null

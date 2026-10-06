@@ -119,7 +119,7 @@ class AdminSettingsController(
         return try {
             settingsStorage.set(BridgeServerSettings.KEY_API_TOKEN, raw)
             LOG.info("External API token updated by ${user.username}")
-            "settingsSaved"
+            "apiTokenSaved"
         } catch (e: Exception) {
             LOG.warn("Failed to save API token: ${e.message}", e)
             "error"
@@ -130,7 +130,7 @@ class AdminSettingsController(
         return try {
             settingsStorage.set(BridgeServerSettings.KEY_API_TOKEN, "")
             LOG.info("External API token cleared by ${user.username}")
-            "cleared"
+            "apiTokenCleared"
         } catch (e: Exception) {
             LOG.warn("Failed to clear API token: ${e.message}", e)
             "error"
