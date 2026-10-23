@@ -6,6 +6,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- An automatic build held in the queue by a scope filter (a nightly on a draft pull request) is now removed and reported "Skipped" instead of waiting for ever: the cleanup runs again once TeamCity has bound the build's revision.
+
 ## [1.11.0] - 2026-10-06
 
 Rows that stay honest — never stuck open, never flipped back to "Queued", never
