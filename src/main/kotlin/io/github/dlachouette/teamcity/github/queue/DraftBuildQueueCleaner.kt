@@ -14,6 +14,8 @@ import io.github.dlachouette.teamcity.github.report.SkipReason
 import jetbrains.buildServer.serverSide.BuildServerAdapter
 import jetbrains.buildServer.serverSide.SBuildServer
 import jetbrains.buildServer.serverSide.SQueuedBuild
+import jetbrains.buildServer.serverSide.executors.ExecutorServices
+import java.util.concurrent.ConcurrentHashMap
 
 // Removes queued builds the bridge is responsible for suppressing, and posts
 // the terminal Check Run that replaces them (a "Skipped: …" row, or the
@@ -21,15 +23,27 @@ import jetbrains.buildServer.serverSide.SQueuedBuild
 //
 // What may be removed is deliberately narrow — see `QueueCleanupPolicy`:
 // only an AUTOMATIC build excluded by one of the scope filters, or an
-// automatic re-build of a commit that already passed. Anything a human, a
-// schedule or a GitHub command started is left alone: "the bridge never
-// removes a build it did not enqueue itself".
+// automatic re-build of a commit that already passed. Anything a human or a
+// GitHub command started is left alone. A schedule or a VCS trigger is
+// automatic, and goes through the same scope filters as a PR event.
+//
+// Two passes. The first, on `buildTypeAddedToQueue`, often runs before
+// TeamCity has bound a revision to the build: in branch-source mode the
+// pull request is found from that commit, so without it a draft PR's
+// nightly looks like a plain branch build and stays. `DraftAwareBuildFilter`
+// sees the pull request later, holds the build, and asks for the second
+// pass (`requestRecheck`) — without it the hold never ends.
 class DraftBuildQueueCleaner(
     buildServer: SBuildServer,
     private val gateContextResolver: GateContextResolver,
     private val checkRunReporter: DraftCheckRunReporter,
     private val serverSettings: BridgeServerSettings,
+    private val executorServices: ExecutorServices,
 ) : BuildServerAdapter() {
+
+    // Promotions with a re-check already scheduled: the distributor asks
+    // `canStart` on every pass, and one re-check at a time is enough.
+    private val pendingRechecks: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
     init {
         buildServer.addListener(this)
@@ -40,6 +54,31 @@ class DraftBuildQueueCleaner(
             maybeRemove(queuedBuild)
         } catch (e: Exception) {
             LOG.warn("Queue cleanup failed for ${queuedBuild.buildType.externalId}: ${e.message}", e)
+        }
+    }
+
+    // Runs the cleanup again for a build the start precondition is holding,
+    // off the distributor's thread: removing a build from inside `canStart`
+    // would mutate the queue the distributor is iterating.
+    fun requestRecheck(queuedBuild: SQueuedBuild) {
+        val promotionId = queuedBuild.buildPromotion.id
+        if (!pendingRechecks.add(promotionId)) return
+        try {
+            executorServices.normalExecutorService.execute {
+                try {
+                    val promotion = queuedBuild.buildPromotion
+                    if (stillQueued(promotion.queuedBuild != null, promotion.associatedBuild != null)) {
+                        maybeRemove(queuedBuild)
+                    }
+                } catch (e: Exception) {
+                    LOG.warn("Queue re-check failed for ${queuedBuild.buildType.externalId}: ${e.message}", e)
+                } finally {
+                    pendingRechecks.remove(promotionId)
+                }
+            }
+        } catch (e: Exception) {
+            pendingRechecks.remove(promotionId)
+            LOG.warn("Cannot schedule a queue re-check for ${queuedBuild.buildType.externalId}: ${e.message}", e)
         }
     }
 
@@ -146,6 +185,11 @@ class DraftBuildQueueCleaner(
 
     companion object {
         private val LOG = Logger.getInstance(DraftBuildQueueCleaner::class.java.name)
+
+        // A deferred re-check only acts on a build that is still waiting: one
+        // that started or left the queue in the meantime is no longer ours to
+        // remove.
+        fun stillQueued(inQueue: Boolean, started: Boolean): Boolean = inQueue && !started
     }
 }
 

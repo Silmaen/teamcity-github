@@ -15,7 +15,9 @@ import jetbrains.buildServer.serverSide.buildDistribution.WaitReason
 
 // Safety net: if `DraftBuildQueueCleaner` failed to remove a build
 // that the gate says should be suppressed, this filter holds it with
-// a visible wait reason at agent-assignment time.
+// a visible wait reason at agent-assignment time — and asks the cleaner
+// to try again, now that the build has a revision. A hold on its own never
+// ends: nothing would ever start or remove the build.
 //
 // Decision is delegated to `BridgeGate`, through the same
 // `GateContextResolver` the cleaner uses, so the listener, the cleaner and
@@ -23,6 +25,7 @@ import jetbrains.buildServer.serverSide.buildDistribution.WaitReason
 class DraftAwareBuildFilter(
     private val gateContextResolver: GateContextResolver,
     private val serverSettings: io.github.dlachouette.teamcity.github.config.BridgeServerSettings,
+    private val cleaner: DraftBuildQueueCleaner,
 ) : StartBuildPrecondition {
 
     override fun canStart(
@@ -48,6 +51,9 @@ class DraftAwareBuildFilter(
         // configuration is not part of that path" is not a reason to hold
         // anything either.
         if (!QueueCleanupPolicy.removes(decision, ctx.trigger, serverSettings.queueCleanupEnabled())) return null
+
+        // Emulation is TeamCity estimating the queue, not deciding: no side effect.
+        if (!emulationMode) promotion.queuedBuild?.let { cleaner.requestRecheck(it) }
 
         return when (decision) {
             GateDecision.SUPPRESS_DRAFT -> {
